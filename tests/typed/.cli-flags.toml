@@ -1,0 +1,15 @@
+[parse]
+errors_env = "F2E_PARSE_ERRORS"
+
+[flags.must_be_int]
+env = "MUST_BE_INT"
+aliases = ["must-be-int"]
+short = "i"
+type = "int"
+default = "5"
+
+[flags.is_json]
+env = "IS_JSON"
+aliases = ["is-json"]
+short = "j"
+type = "json"

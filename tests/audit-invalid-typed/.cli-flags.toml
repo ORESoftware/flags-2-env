@@ -1,0 +1,11 @@
+[flags.must_be_int]
+env = "MUST_BE_INT"
+aliases = ["must-be-int"]
+type = "int"
+default = "x"
+
+[flags.is_json]
+env = "IS_JSON"
+aliases = ["is-json"]
+type = "json"
+default = "{bad"

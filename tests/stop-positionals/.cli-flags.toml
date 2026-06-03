@@ -1,0 +1,9 @@
+[parse]
+stop_at_first_positional = true
+positionals_env = "F2E_POSITIONALS"
+
+[flags.debug]
+env = "DEBUG"
+aliases = ["debug"]
+type = "bool"
+default = "false"

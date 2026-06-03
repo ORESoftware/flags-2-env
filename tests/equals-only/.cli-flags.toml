@@ -1,0 +1,20 @@
+[parse]
+require_equals = true
+positionals_env = "F2E_POSITIONALS"
+unknown_options_env = "F2E_UNKNOWN_OPTIONS"
+
+[flags.port]
+env = "PORT"
+aliases = ["port"]
+short = "p"
+type = "string"
+default = "3000"
+
+[flags.debug]
+env = "DEBUG"
+aliases = ["debug"]
+short = "d"
+type = "bool"
+default = "false"
+true_aliases = ["t", "1"]
+false_aliases = ["f", "0"]

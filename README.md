@@ -30,7 +30,30 @@ env = "NODE_ENV"
 aliases = ["mode", "env"]
 short = "m"
 type = "string"
+
+[flags.payload]
+env = "PAYLOAD_JSON"
+aliases = ["payload"]
+type = "json"
+
+[flags.retries]
+env = "RETRIES"
+aliases = ["retries"]
+type = "int"
 ```
+
+For CLIs with subcommands, add a `[parse]` table to make parsing stricter or to surface ignored tokens:
+
+```toml
+[parse]
+require_equals = true
+stop_at_first_positional = true
+positionals_env = "FLAGS2ENV_POSITIONALS"
+unknown_options_env = "FLAGS2ENV_UNKNOWN_OPTIONS"
+errors_env = "FLAGS2ENV_PARSE_ERRORS"
+```
+
+`require_equals = true` means string values must be inline (`--port=8080`, `-p8080`, or `-p=8080`) instead of separated (`--port 8080`). `stop_at_first_positional = true` stops scanning once a non-flag token such as `exec` or `run` is found. `positionals_env`, `unknown_options_env`, and `errors_env` store JSON-array strings in the returned map; omit them if you want those tokens ignored.
 
 This repository's own root `.cli-flags.toml` is intentionally library-shaped for CLI smoke tests and maps to `FLAGS2ENV_*` variables. App-shaped examples like `PORT` and `NODE_ENV` live under `tests/fixtures/`.
 
@@ -53,7 +76,11 @@ Supported CLI forms:
 -dv
 ```
 
-Every parsed value is returned as a string. Boolean flags return `"true"` or `"false"`. Canonical `true` and `false` are always accepted as boolean values. Shorthand values like `t`, `f`, `1`, and `0` only work when the flag declares them in `true_aliases` or `false_aliases`.
+Every parsed value is returned as a string. `type = "int"` and `type = "json"` validate the CLI value, but they still return the accepted value as a string so each runtime can decide whether to parse it into a number, map, object, struct, or keep it as an env string. If a typed value is invalid, it is not applied; declare `errors_env = "FLAGS2ENV_PARSE_ERRORS"` in `[parse]` to receive a JSON-array string of validation errors.
+
+Separated values do not consume the next token when it looks like another option. For example, `--port --unknown` leaves `PORT` unchanged and lets `--unknown` be ignored or reported through `unknown_options_env`. Use equals for string values that begin with `-`, such as `--host=-internal`; typed negative numbers like `--retries -1` are accepted in separated form.
+
+Boolean flags return `"true"` or `"false"`. A bare boolean flag like `--debug` or `-d` means `"true"`. Canonical `true` and `false` are always accepted as boolean values. Shorthand values like `t`, `f`, `1`, and `0` only work when the flag declares them in `true_aliases` or `false_aliases`. Separated boolean values like `--debug false` are accepted only when separated values are enabled, which is the default; inline forms like `--debug=false` work in both modes.
 
 ## Build
 
@@ -487,4 +514,4 @@ let combined = try getEnvMap()
 
 The C parser owns config discovery. By default, it walks upward from the current working directory to find the nearest `.cli-flags.toml`, but refuses to use `$HOME/.cli-flags.toml` because that is likely accidental. Runtime clients should not reimplement this lookup; they should pass an explicit `configPath` only when the user asks for one.
 
-Unknown flags are ignored. Defaults from `.cli-flags.toml` are included in the parsed map, so they also override environment values when merged.
+Unknown flags and positional tokens are ignored unless `[parse]` declares `unknown_options_env` or `positionals_env`. Defaults from `.cli-flags.toml` are included in the parsed map, so they also override environment values when merged.

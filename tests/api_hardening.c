@@ -5,6 +5,11 @@
 #include <string.h>
 
 #define FIXTURE_CONFIG "tests/fixtures/.cli-flags.toml"
+#define EQUALS_ONLY_CONFIG "tests/equals-only/.cli-flags.toml"
+#define STOP_POSITIONALS_CONFIG "tests/stop-positionals/.cli-flags.toml"
+#define INVALID_PARSE_CONFIG "tests/audit-invalid-parse/.cli-flags.toml"
+#define TYPED_CONFIG "tests/typed/.cli-flags.toml"
+#define INVALID_TYPED_CONFIG "tests/audit-invalid-typed/.cli-flags.toml"
 #define DEFAULT_JSON "{\"PORT\":\"3000\",\"DEBUG\":\"false\",\"COLOR\":\"true\"}"
 
 static void expect_json(const char *label, char *actual, const char *expected) {
@@ -35,6 +40,61 @@ int main(void) {
   expect_json("last bool alias wins", f2e_parse_from_file(FIXTURE_CONFIG, 5, normal_argv),
               "{\"PORT\":\"8181\",\"DEBUG\":\"false\",\"COLOR\":\"true\"}");
 
+  const char *subcommand_argv[] = {"app", "exec", "--port", "8181", "--debug"};
+  expect_json("default ignores positionals and keeps scanning", f2e_parse_from_file(FIXTURE_CONFIG, 5, subcommand_argv),
+              "{\"PORT\":\"8181\",\"DEBUG\":\"true\",\"COLOR\":\"true\"}");
+
+  const char *missing_string_value[] = {"app", "--port", "--debug"};
+  expect_json("string flag without value is not set to true", f2e_parse_from_file(FIXTURE_CONFIG, 3, missing_string_value),
+              "{\"PORT\":\"3000\",\"DEBUG\":\"true\",\"COLOR\":\"true\"}");
+
+  const char *unknown_after_string_flag[] = {"app", "--port", "--unknown"};
+  expect_json("string flag does not consume unknown option token", f2e_parse_from_file(FIXTURE_CONFIG, 3, unknown_after_string_flag),
+              DEFAULT_JSON);
+
+  const char *short_unknown_after_string_flag[] = {"app", "-p", "--unknown"};
+  expect_json("short string flag does not consume unknown option token", f2e_parse_from_file(FIXTURE_CONFIG, 3, short_unknown_after_string_flag),
+              DEFAULT_JSON);
+
+  const char *dash_prefixed_string_with_equals[] = {"app", "--host=-internal"};
+  expect_json("dash-prefixed string value uses equals form", f2e_parse_from_file(FIXTURE_CONFIG, 2, dash_prefixed_string_with_equals),
+              "{\"PORT\":\"3000\",\"DEBUG\":\"false\",\"COLOR\":\"true\",\"HOST\":\"-internal\"}");
+
+  const char *strict_separated[] = {"app", "--port", "8181", "--debug", "true", "--unknown", "value", "--", "--after"};
+  expect_json("equals-only leaves separated values positional",
+              f2e_parse_from_file(EQUALS_ONLY_CONFIG, 9, strict_separated),
+              "{\"PORT\":\"3000\",\"DEBUG\":\"true\",\"F2E_POSITIONALS\":\"[\\\"app\\\",\\\"8181\\\",\\\"true\\\",\\\"value\\\",\\\"--after\\\"]\",\"F2E_UNKNOWN_OPTIONS\":\"[\\\"--unknown\\\"]\"}");
+
+  const char *strict_inline[] = {"--port=8181", "--debug=false", "-p9000", "-d=0"};
+  expect_json("equals-only still accepts inline values",
+              f2e_parse_from_file(EQUALS_ONLY_CONFIG, 4, strict_inline),
+              "{\"PORT\":\"9000\",\"DEBUG\":\"false\"}");
+
+  const char *stop_positionals[] = {"exec", "--debug=true"};
+  expect_json("stop at first positional",
+              f2e_parse_from_file(STOP_POSITIONALS_CONFIG, 2, stop_positionals),
+              "{\"DEBUG\":\"false\",\"F2E_POSITIONALS\":\"[\\\"exec\\\",\\\"--debug=true\\\"]\"}");
+
+  const char *typed_valid[] = {"app", "--must-be-int", "1", "--is-json", "{\"foo\":\"bar\"}"};
+  expect_json("typed int and json valid",
+              f2e_parse_from_file(TYPED_CONFIG, 5, typed_valid),
+              "{\"MUST_BE_INT\":\"1\",\"IS_JSON\":\"{\\\"foo\\\":\\\"bar\\\"}\"}");
+
+  const char *typed_negative_values[] = {"app", "--must-be-int", "-1", "--is-json", "-2"};
+  expect_json("typed negative values can be separated",
+              f2e_parse_from_file(TYPED_CONFIG, 5, typed_negative_values),
+              "{\"MUST_BE_INT\":\"-1\",\"IS_JSON\":\"-2\"}");
+
+  const char *typed_unknown_after_int[] = {"app", "--must-be-int", "--bad"};
+  expect_json("typed int does not consume unknown option token",
+              f2e_parse_from_file(TYPED_CONFIG, 3, typed_unknown_after_int),
+              "{\"MUST_BE_INT\":\"5\"}");
+
+  const char *typed_invalid[] = {"app", "--must-be-int", "x", "--is-json", "{bad"};
+  expect_json("typed int and json invalid",
+              f2e_parse_from_file(TYPED_CONFIG, 5, typed_invalid),
+              "{\"MUST_BE_INT\":\"5\",\"F2E_PARSE_ERRORS\":\"[\\\"flags.must_be_int value \\\\\\\"x\\\\\\\" is not a valid int\\\",\\\"flags.is_json value \\\\\\\"{bad\\\\\\\" is not valid JSON\\\"]\"}");
+
   expect_json("null argv with positive argc", f2e_parse_from_file(FIXTURE_CONFIG, 5, NULL), DEFAULT_JSON);
   expect_json("negative argc", f2e_parse_from_file(FIXTURE_CONFIG, -10, normal_argv), DEFAULT_JSON);
   expect_json("missing config", f2e_parse_from_file(NULL, 5, normal_argv), "{}");
@@ -51,6 +111,16 @@ int main(void) {
   expect_json("invalid bool default audit report",
               f2e_audit_config_from_file("tests/audit-invalid-default/.cli-flags.toml"),
               "{\"ok\":false,\"errorCount\":1,\"warningCount\":0,\"errors\":[\"flags.debug default \\\"maybe\\\" is not a valid bool value\"],\"warnings\":[]}");
+
+  expect_status("invalid parse env audit", f2e_audit_config_status_from_file(INVALID_PARSE_CONFIG), 1);
+  expect_json("invalid parse env audit report",
+              f2e_audit_config_from_file(INVALID_PARSE_CONFIG),
+              "{\"ok\":false,\"errorCount\":3,\"warningCount\":0,\"errors\":[\"parse.positionals_env collides with flags.port env \\\"PORT\\\"\",\"parse.unknown_options_env collides with flags.port env \\\"PORT\\\"\",\"parse.positionals_env and parse.unknown_options_env both use env \\\"PORT\\\"\"],\"warnings\":[]}");
+
+  expect_status("invalid typed defaults audit", f2e_audit_config_status_from_file(INVALID_TYPED_CONFIG), 1);
+  expect_json("invalid typed defaults audit report",
+              f2e_audit_config_from_file(INVALID_TYPED_CONFIG),
+              "{\"ok\":false,\"errorCount\":2,\"warningCount\":0,\"errors\":[\"flags.must_be_int default \\\"x\\\" is not a valid int\",\"flags.is_json default \\\"{bad\\\" is not valid JSON\"],\"warnings\":[]}");
 
   return 0;
 }

@@ -1,0 +1,8 @@
+[parse]
+positionals_env = "PORT"
+unknown_options_env = "PORT"
+
+[flags.port]
+env = "PORT"
+aliases = ["port"]
+type = "string"

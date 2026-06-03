@@ -18,6 +18,10 @@ run_case() {
 run_case '{"PORT":"8080","DEBUG":"true","COLOR":"true","HOST":"127.0.0.1","VERBOSE":"true","NODE_ENV":"production"}' app --port 8080 --debug --host 127.0.0.1 -v -mproduction
 run_case '{"PORT":"9000","DEBUG":"false","COLOR":"false"}' app -p 9000 --no-color
 run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true"}' app --unknown value positional
+run_case '{"PORT":"8181","DEBUG":"true","COLOR":"true"}' app exec --port 8181 --debug
+run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true"}' app --port --debug
+run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true"}' app --port --unknown
+run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true","HOST":"-internal"}' app --host=-internal
 run_case '{"PORT":"4000","DEBUG":"true","COLOR":"true","VERBOSE":"true"}' app -dv --listen-port=4000
 run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true"}' app --debug=t
 run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true"}' app --debug false
