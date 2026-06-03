@@ -5,15 +5,19 @@ const defaultLibraryPath = join(import.meta.dir, "<%= nativeLibraryDir || 'nativ
 const libraryPath = process.env.FLAGS2ENV_NATIVE_LIB || "<%= nativeLibraryPath || '' %>" || defaultLibraryPath;
 
 const {
-  symbols: { f2e_parse_json_argv_from_file, f2e_free },
+  symbols: { f2e_parse_json_argv_from_file, f2e_parse_process_from_file, f2e_free },
 } = dlopen(libraryPath, {
   f2e_parse_json_argv_from_file: {
     args: [FFIType.cstring, FFIType.cstring],
     returns: FFIType.ptr,
   },
+  f2e_parse_process_from_file: {
+    args: [FFIType.cstring],
+    returns: FFIType.ptr,
+  },
   f2e_free: {
     args: [FFIType.ptr],
-    returns: FFIType.void,
+    returns: "void",
   },
 });
 
@@ -37,11 +41,30 @@ export function parse(argv = Bun.argv, options = {}) {
   }
 }
 
+export function parseProcess(options = {}) {
+  const configPath = options.configPath ?? `${process.cwd()}/.cli-flags.toml`;
+  const resultPtr = f2e_parse_process_from_file(cstring(configPath));
+  if (!resultPtr) {
+    return {};
+  }
+  try {
+    return JSON.parse(new CString(resultPtr).toString());
+  } finally {
+    f2e_free(resultPtr);
+  }
+}
+
 export function apply(target = process.env, argv = Bun.argv, options = {}) {
   return Object.assign(target, parse(argv, options));
 }
 
+export function applyProcess(target = process.env, options = {}) {
+  return Object.assign(target, parseProcess(options));
+}
+
 export default {
   parse,
+  parseProcess,
   apply,
+  applyProcess,
 };

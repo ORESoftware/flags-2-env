@@ -66,10 +66,42 @@ static napi_value f2e_node_parse_json(napi_env env, napi_callback_info info) {
   return out;
 }
 
+static napi_value f2e_node_parse_process_json(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value args[1];
+  napi_get_cb_info(env, info, &argc, args, NULL, NULL);
+
+  char *config_path = NULL;
+  char *result = NULL;
+  if (argc >= 1) {
+    if (!f2e_node_read_string(env, args[0], &config_path)) {
+      return f2e_node_throw(env, "configPath must be a string");
+    }
+    result = f2e_parse_process_from_file(config_path);
+  } else {
+    result = f2e_parse_process();
+  }
+
+  free(config_path);
+
+  if (!result) {
+    return f2e_node_throw(env, "failed to parse process flags");
+  }
+
+  napi_value out;
+  napi_create_string_utf8(env, result, NAPI_AUTO_LENGTH, &out);
+  f2e_free(result);
+  return out;
+}
+
 static napi_value f2e_node_init(napi_env env, napi_value exports) {
   napi_value parse_json;
   napi_create_function(env, "parseJson", NAPI_AUTO_LENGTH, f2e_node_parse_json, NULL, &parse_json);
   napi_set_named_property(env, exports, "parseJson", parse_json);
+
+  napi_value parse_process_json;
+  napi_create_function(env, "parseProcessJson", NAPI_AUTO_LENGTH, f2e_node_parse_process_json, NULL, &parse_process_json);
+  napi_set_named_property(env, exports, "parseProcessJson", parse_process_json);
   return exports;
 }
 

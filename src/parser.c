@@ -5,6 +5,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if defined(__APPLE__)
+#include <sys/sysctl.h>
+#include <unistd.h>
+#elif defined(_WIN32)
+#include <shellapi.h>
+#include <windows.h>
+#endif
+
 #ifndef PATH_MAX
 #define PATH_MAX 4096
 #endif
@@ -814,16 +822,191 @@ static void f2e_free_json_items(char **items, int count) {
   free(items);
 }
 
+static char *f2e_empty_json_object(void) {
+  char *empty = (char *)malloc(3);
+  if (empty) {
+    f2e_strlcpy(empty, "{}", 3);
+  }
+  return empty;
+}
+
+#if defined(__linux__)
+static int f2e_read_process_argv(char ***items, int *count) {
+  FILE *file = fopen("/proc/self/cmdline", "rb");
+  if (!file) {
+    return 0;
+  }
+
+  size_t len = 0;
+  size_t cap = 256;
+  char *data = (char *)malloc(cap);
+  if (!data) {
+    fclose(file);
+    return 0;
+  }
+
+  int ch;
+  while ((ch = fgetc(file)) != EOF) {
+    if (len + 1 >= cap) {
+      cap *= 2;
+      char *grown = (char *)realloc(data, cap);
+      if (!grown) {
+        free(data);
+        fclose(file);
+        return 0;
+      }
+      data = grown;
+    }
+    data[len++] = (char)ch;
+  }
+  fclose(file);
+
+  int argv_cap = 0;
+  *items = NULL;
+  *count = 0;
+  size_t start = 0;
+  for (size_t i = 0; i <= len; i++) {
+    if (i == len || data[i] == '\0') {
+      if (i > start && !f2e_json_array_append(items, count, &argv_cap, data + start)) {
+        f2e_free_json_items(*items, *count);
+        *items = NULL;
+        *count = 0;
+        free(data);
+        return 0;
+      }
+      start = i + 1;
+    }
+  }
+
+  free(data);
+  return *count > 0;
+}
+#elif defined(__APPLE__)
+static int f2e_read_process_argv(char ***items, int *count) {
+  int mib[3] = {CTL_KERN, KERN_PROCARGS2, getpid()};
+  size_t size = 0;
+  if (sysctl(mib, 3, NULL, &size, NULL, 0) != 0 || size == 0) {
+    return 0;
+  }
+
+  char *data = (char *)malloc(size);
+  if (!data) {
+    return 0;
+  }
+  if (sysctl(mib, 3, data, &size, NULL, 0) != 0) {
+    free(data);
+    return 0;
+  }
+
+  int argc = 0;
+  memcpy(&argc, data, sizeof(argc));
+  if (argc <= 0) {
+    free(data);
+    return 0;
+  }
+
+  char *cursor = data + sizeof(argc);
+  char *end = data + size;
+  while (cursor < end && *cursor != '\0') {
+    cursor++;
+  }
+  while (cursor < end && *cursor == '\0') {
+    cursor++;
+  }
+
+  int argv_cap = 0;
+  *items = NULL;
+  *count = 0;
+  for (int i = 0; i < argc && cursor < end; i++) {
+    if (!f2e_json_array_append(items, count, &argv_cap, cursor)) {
+      f2e_free_json_items(*items, *count);
+      *items = NULL;
+      *count = 0;
+      free(data);
+      return 0;
+    }
+    while (cursor < end && *cursor != '\0') {
+      cursor++;
+    }
+    while (cursor < end && *cursor == '\0') {
+      cursor++;
+    }
+  }
+
+  free(data);
+  return *count > 0;
+}
+#elif defined(_WIN32)
+static int f2e_read_process_argv(char ***items, int *count) {
+  int argc = 0;
+  LPWSTR *wide_argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+  if (!wide_argv || argc <= 0) {
+    return 0;
+  }
+
+  int argv_cap = 0;
+  *items = NULL;
+  *count = 0;
+  for (int i = 0; i < argc; i++) {
+    int utf8_len = WideCharToMultiByte(CP_UTF8, 0, wide_argv[i], -1, NULL, 0, NULL, NULL);
+    if (utf8_len <= 0) {
+      continue;
+    }
+    char *value = (char *)malloc((size_t)utf8_len);
+    if (!value) {
+      f2e_free_json_items(*items, *count);
+      LocalFree(wide_argv);
+      return 0;
+    }
+    WideCharToMultiByte(CP_UTF8, 0, wide_argv[i], -1, value, utf8_len, NULL, NULL);
+    if (!f2e_json_array_append(items, count, &argv_cap, value)) {
+      free(value);
+      f2e_free_json_items(*items, *count);
+      LocalFree(wide_argv);
+      return 0;
+    }
+    free(value);
+  }
+
+  LocalFree(wide_argv);
+  return *count > 0;
+}
+#else
+static int f2e_read_process_argv(char ***items, int *count) {
+  *items = NULL;
+  *count = 0;
+  return 0;
+}
+#endif
+
+char *f2e_parse_process_from_file(const char *config_path) {
+  char **items = NULL;
+  int count = 0;
+  if (!f2e_read_process_argv(&items, &count)) {
+    return f2e_parse_from_file(config_path, 0, NULL);
+  }
+
+  char *result = f2e_parse_from_file(config_path, count, (const char *const *)items);
+  f2e_free_json_items(items, count);
+  return result;
+}
+
+char *f2e_parse_process(void) {
+  char *path = f2e_default_config_path();
+  if (!path) {
+    return NULL;
+  }
+  char *result = f2e_parse_process_from_file(path);
+  free(path);
+  return result;
+}
+
 char *f2e_parse_json_argv_from_file(const char *config_path, const char *argv_json) {
   char **items = NULL;
   int count = 0;
   if (!argv_json || !f2e_parse_json_argv_items(argv_json, &items, &count)) {
     f2e_free_json_items(items, count);
-    char *empty = (char *)malloc(3);
-    if (empty) {
-      f2e_strlcpy(empty, "{}", 3);
-    }
-    return empty;
+    return f2e_empty_json_object();
   }
 
   char *result = f2e_parse_from_file(config_path, count, (const char *const *)items);

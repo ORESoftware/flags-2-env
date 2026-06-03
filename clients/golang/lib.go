@@ -21,6 +21,27 @@ func Parse(argv []string) (map[string]string, error) {
 	return ParseFromFile(defaultConfigPath(), argv)
 }
 
+func ParseProcess() (map[string]string, error) {
+	return ParseProcessFromFile(defaultConfigPath())
+}
+
+func ParseProcessFromFile(configPath string) (map[string]string, error) {
+	cConfigPath := C.CString(configPath)
+	defer C.free(unsafe.Pointer(cConfigPath))
+
+	result := C.f2e_parse_process_from_file(cConfigPath)
+	if result == nil {
+		return map[string]string{}, nil
+	}
+	defer C.f2e_free(result)
+
+	var out map[string]string
+	if err := json.Unmarshal([]byte(C.GoString(result)), &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func ParseFromFile(configPath string, argv []string) (map[string]string, error) {
 	encoded, err := json.Marshal(argv)
 	if err != nil {
@@ -47,6 +68,20 @@ func ParseFromFile(configPath string, argv []string) (map[string]string, error) 
 
 func Apply(target map[string]string, argv []string) (map[string]string, error) {
 	parsed, err := Parse(argv)
+	if err != nil {
+		return nil, err
+	}
+	if target == nil {
+		target = map[string]string{}
+	}
+	for key, value := range parsed {
+		target[key] = value
+	}
+	return target, nil
+}
+
+func ApplyProcess(target map[string]string) (map[string]string, error) {
+	parsed, err := ParseProcess()
 	if err != nil {
 		return nil, err
 	}

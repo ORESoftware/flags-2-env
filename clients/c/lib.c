@@ -253,6 +253,32 @@ int f2e_client_parse(int argc, const char *const argv[], F2EMap *out) {
   return ok;
 }
 
+int f2e_client_parse_process_from_file(const char *config_path, F2EMap *out) {
+  char *json = f2e_parse_process_from_file(config_path);
+  if (!json) {
+    return 0;
+  }
+  int ok = f2e_client_map_from_json(json, out);
+  f2e_free(json);
+  if (!ok) {
+    f2e_map_free(out);
+  }
+  return ok;
+}
+
+int f2e_client_parse_process(F2EMap *out) {
+  char *json = f2e_parse_process();
+  if (!json) {
+    return 0;
+  }
+  int ok = f2e_client_map_from_json(json, out);
+  f2e_free(json);
+  if (!ok) {
+    f2e_map_free(out);
+  }
+  return ok;
+}
+
 int f2e_client_apply_envp(char *const envp[], int argc, const char *const argv[], F2EMap *out) {
   F2EMap parsed = {0};
   out->entries = NULL;
@@ -263,6 +289,27 @@ int f2e_client_apply_envp(char *const envp[], int argc, const char *const argv[]
     return 0;
   }
   if (!f2e_client_parse(argc, argv, &parsed)) {
+    f2e_map_free(out);
+    return 0;
+  }
+  int ok = f2e_map_overlay(out, &parsed);
+  f2e_map_free(&parsed);
+  if (!ok) {
+    f2e_map_free(out);
+  }
+  return ok;
+}
+
+int f2e_client_apply_process_envp(char *const envp[], F2EMap *out) {
+  F2EMap parsed = {0};
+  out->entries = NULL;
+  out->length = 0;
+
+  if (!f2e_map_from_envp(envp, out)) {
+    f2e_map_free(out);
+    return 0;
+  }
+  if (!f2e_client_parse_process(&parsed)) {
     f2e_map_free(out);
     return 0;
   }

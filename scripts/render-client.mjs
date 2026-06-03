@@ -36,7 +36,7 @@ await mkdir(outDir, { recursive: true });
 for (const file of ["lib.ejs", "package.json.ejs", "binding.gyp.ejs"]) {
   try {
     const source = await readFile(join(clientDir, file), "utf8");
-    const outName = basename(file, ".ejs");
+    const outName = file === "lib.ejs" ? "lib.js" : basename(file, ".ejs");
     await writeFile(join(outDir, outName), render(source, values));
   } catch (error) {
     if (error.code !== "ENOENT") {

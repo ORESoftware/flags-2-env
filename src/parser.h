@@ -24,6 +24,18 @@ char *f2e_parse(int argc, const char *const argv[]);
 char *f2e_parse_from_file(const char *config_path, int argc, const char *const argv[]);
 
 /*
+ * Parses the current process command line using PWD/.cli-flags.toml where the
+ * host OS exposes process argv. Explicit f2e_parse(...) is still preferred
+ * when the caller has already adjusted, sliced, or synthesized argv.
+ */
+char *f2e_parse_process(void);
+
+/*
+ * Parses the current process command line using an explicit TOML config path.
+ */
+char *f2e_parse_process_from_file(const char *config_path);
+
+/*
  * FFI-friendly entrypoint: argv_json must be a JSON array of strings.
  * Returns a heap-allocated JSON object string. Call f2e_free().
  */

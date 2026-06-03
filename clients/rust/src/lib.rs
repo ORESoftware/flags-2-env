@@ -6,6 +6,7 @@ use std::os::raw::c_char;
 use std::path::PathBuf;
 
 type ParseFn = unsafe extern "C" fn(*const c_char, *const c_char) -> *mut c_char;
+type ParseProcessFn = unsafe extern "C" fn(*const c_char) -> *mut c_char;
 type FreeFn = unsafe extern "C" fn(*mut c_char);
 
 pub struct Flags2Env {
@@ -36,8 +37,29 @@ impl Flags2Env {
         }
     }
 
+    pub fn parse_process(&self, config_path: Option<&str>) -> Result<HashMap<String, String>, Box<dyn std::error::Error>> {
+        let config_path = CString::new(config_path.map(ToOwned::to_owned).unwrap_or_else(default_config_path))?;
+
+        unsafe {
+            let parse: Symbol<ParseProcessFn> = self.library.get(b"f2e_parse_process_from_file")?;
+            let free: Symbol<FreeFn> = self.library.get(b"f2e_free")?;
+            let result = parse(config_path.as_ptr());
+            if result.is_null() {
+                return Ok(HashMap::new());
+            }
+            let raw = CStr::from_ptr(result).to_string_lossy().to_string();
+            free(result);
+            Ok(serde_json::from_str(&raw)?)
+        }
+    }
+
     pub fn apply(&self, env_map: &mut HashMap<String, String>, argv: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         env_map.extend(self.parse(argv, None)?);
+        Ok(())
+    }
+
+    pub fn apply_process(&self, env_map: &mut HashMap<String, String>) -> Result<(), Box<dyn std::error::Error>> {
+        env_map.extend(self.parse_process(None)?);
         Ok(())
     }
 }

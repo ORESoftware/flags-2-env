@@ -4,6 +4,7 @@ import ctypes
 import json
 import os
 import platform
+import sys
 from pathlib import Path
 from typing import Mapping, MutableMapping, Sequence
 
@@ -21,6 +22,8 @@ def _load_library(library_path: str | None = None) -> ctypes.CDLL:
     lib = ctypes.CDLL(library_path or _default_library_name())
     lib.f2e_parse_json_argv_from_file.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
     lib.f2e_parse_json_argv_from_file.restype = ctypes.c_void_p
+    lib.f2e_parse_process_from_file.argtypes = [ctypes.c_char_p]
+    lib.f2e_parse_process_from_file.restype = ctypes.c_void_p
     lib.f2e_free.argtypes = [ctypes.c_void_p]
     lib.f2e_free.restype = None
     return lib
@@ -42,6 +45,17 @@ class Flags2Env:
         finally:
             self._lib.f2e_free(result)
 
+    def parse_process(self, config_path: str | None = None) -> dict[str, str]:
+        config = (config_path or str(Path.cwd() / ".cli-flags.toml")).encode()
+        result = self._lib.f2e_parse_process_from_file(config)
+        if not result:
+            return {}
+        try:
+            raw = ctypes.string_at(result).decode()
+            return {key: str(value) for key, value in json.loads(raw).items()}
+        finally:
+            self._lib.f2e_free(result)
+
     def apply(
         self,
         env: Mapping[str, str] | None = None,
@@ -49,5 +63,14 @@ class Flags2Env:
         config_path: str | None = None,
     ) -> dict[str, str]:
         merged: MutableMapping[str, str] = dict(os.environ if env is None else env)
-        merged.update(self.parse(list(os.sys.argv if argv is None else argv), config_path))
+        merged.update(self.parse(list(sys.argv if argv is None else argv), config_path))
+        return dict(merged)
+
+    def apply_process(
+        self,
+        env: Mapping[str, str] | None = None,
+        config_path: str | None = None,
+    ) -> dict[str, str]:
+        merged: MutableMapping[str, str] = dict(os.environ if env is None else env)
+        merged.update(self.parse_process(config_path))
         return dict(merged)

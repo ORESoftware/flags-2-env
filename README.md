@@ -66,11 +66,12 @@ build/flags2env
 The shared library exposes:
 
 ```c
+char *f2e_parse_process_from_file(const char *config_path);
 char *f2e_parse_json_argv_from_file(const char *config_path, const char *argv_json);
 void f2e_free(char *value);
 ```
 
-`argv_json` is a JSON array of strings. The return value is a heap-allocated JSON object string and must be released with `f2e_free`.
+`f2e_parse_process_from_file` asks the host OS for the current process command line. This is available on macOS, Linux, and Windows. `argv_json` is a JSON array of strings for callers that want to pass a manually edited argv. Return values are heap-allocated JSON object strings and must be released with `f2e_free`.
 
 ## Runtime Clients
 
@@ -91,12 +92,19 @@ combined = env map + parsed CLI map
 
 When the same key exists in both maps, the parsed CLI value wins.
 
+Most clients expose two parse modes:
+
+```text
+parseProcess()  # read the current process argv through the C library
+parse(argv)     # explicitly pass argv after slicing, popping, or rewriting
+```
+
 ### Node.js
 
 ```js
 import * as f2e from "@oresoftware/cli";
 
-const cli = f2e.parse(process.argv);
+const cli = f2e.parseProcess();
 const combined = { ...process.env, ...cli };
 ```
 
@@ -105,7 +113,7 @@ const combined = { ...process.env, ...cli };
 ```js
 import * as f2e from "@oresoftware/cli/bun";
 
-const cli = f2e.parse(Bun.argv);
+const cli = f2e.parseProcess();
 const combined = { ...process.env, ...cli };
 ```
 
@@ -118,7 +126,10 @@ const combined = { ...process.env, ...cli };
 int main(int argc, const char *const argv[], char *envp[]) {
   F2EMap combined = {0};
 
-  if (!f2e_client_apply_envp(envp, argc, argv, &combined)) {
+  (void)argc;
+  (void)argv;
+
+  if (!f2e_client_apply_process_envp(envp, &combined)) {
     return 1;
   }
 
@@ -134,9 +145,9 @@ int main(int argc, const char *const argv[], char *envp[]) {
 import 'dart:io';
 import 'package:flags2env/flags2env.dart';
 
-void main(List<String> args) {
+void main() {
   final f2e = Flags2Env.load('./build/libflags2env.dylib');
-  final cli = f2e.parse([Platform.resolvedExecutable, ...args]);
+  final cli = f2e.parseProcess();
   final combined = <String, String>{...Platform.environment, ...cli};
 }
 ```
@@ -162,7 +173,7 @@ func main() {
 		}
 	}
 
-	cli, err := flags2env.Parse(os.Args)
+	cli, err := flags2env.ParseProcess()
 	if err != nil {
 		panic(err)
 	}
@@ -176,11 +187,10 @@ func main() {
 
 ```python
 import os
-import sys
 from clients.python.lib import Flags2Env
 
 f2e = Flags2Env("./build/libflags2env.dylib")
-cli = f2e.parse(sys.argv)
+cli = f2e.parse_process()
 combined = {**os.environ, **cli}
 ```
 
@@ -189,7 +199,7 @@ combined = {**os.environ, **cli}
 ```ruby
 require_relative "clients/ruby/lib"
 
-cli = Flags2Env.parse(ARGV)
+cli = Flags2Env.parse_process
 combined = ENV.to_h.merge(cli)
 ```
 
@@ -200,7 +210,7 @@ combined = ENV.to_h.merge(cli)
 require __DIR__ . '/clients/php/lib.php';
 
 $f2e = new Flags2Env(__DIR__ . '/build/libflags2env.dylib');
-$cli = $f2e->parse($argv);
+$cli = $f2e->parseProcess();
 $combined = array_replace($_ENV, $cli);
 ```
 
@@ -213,10 +223,9 @@ use std::env;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sdk = unsafe { Flags2Env::load(Some("./build/libflags2env.dylib"))? };
-    let args: Vec<String> = env::args().collect();
     let mut combined: HashMap<String, String> = env::vars().collect();
 
-    sdk.apply(&mut combined, &args)?;
+    sdk.apply_process(&mut combined)?;
     Ok(())
 }
 ```
@@ -227,10 +236,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 import Foundation
 
 let f2e = try Flags2Env(libraryPath: "./build/libflags2env.dylib")
-let combined = try f2e.apply(
-    env: ProcessInfo.processInfo.environment,
-    argv: CommandLine.arguments
-)
+let combined = try f2e.applyProcess(env: ProcessInfo.processInfo.environment)
 ```
 
 ## Parser Notes

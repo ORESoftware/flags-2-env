@@ -19,7 +19,10 @@ typedef struct {
 
 int f2e_client_parse(int argc, const char *const argv[], F2EMap *out);
 int f2e_client_parse_from_file(const char *config_path, int argc, const char *const argv[], F2EMap *out);
+int f2e_client_parse_process(F2EMap *out);
+int f2e_client_parse_process_from_file(const char *config_path, F2EMap *out);
 int f2e_client_apply_envp(char *const envp[], int argc, const char *const argv[], F2EMap *out);
+int f2e_client_apply_process_envp(char *const envp[], F2EMap *out);
 int f2e_map_set(F2EMap *map, const char *key, const char *value);
 int f2e_map_overlay(F2EMap *target, const F2EMap *source);
 const char *f2e_map_get(const F2EMap *map, const char *key);

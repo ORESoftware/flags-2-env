@@ -12,11 +12,22 @@ export function parse(argv = process.argv, options = {}) {
   return JSON.parse(raw);
 }
 
+export function parseProcess(options = {}) {
+  const configPath = options.configPath ?? `${process.cwd()}/.cli-flags.toml`;
+  return JSON.parse(native.parseProcessJson(configPath));
+}
+
 export function apply(target = process.env, argv = process.argv, options = {}) {
   return Object.assign(target, parse(argv, options));
 }
 
+export function applyProcess(target = process.env, options = {}) {
+  return Object.assign(target, parseProcess(options));
+}
+
 export default {
   parse,
+  parseProcess,
   apply,
+  applyProcess,
 };
