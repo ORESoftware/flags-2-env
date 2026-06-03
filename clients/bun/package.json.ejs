@@ -1,0 +1,19 @@
+{
+  "name": "<%= packageName || '@oresoftware/cli-bun' %>",
+  "version": "<%= version || '0.1.0' %>",
+  "type": "module",
+  "main": "./lib.cjs",
+  "exports": {
+    ".": {
+      "bun": "./lib.mjs",
+      "import": "./lib.mjs",
+      "require": "./lib.cjs",
+      "default": "./lib.mjs"
+    }
+  },
+  "files": [
+    "lib.mjs",
+    "lib.cjs",
+    "native"
+  ]
+}

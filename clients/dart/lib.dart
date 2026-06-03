@@ -6,8 +6,12 @@ import 'package:ffi/ffi.dart';
 
 typedef _ParseNative = Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>);
 typedef _ParseDart = Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>);
+typedef _ParseDefaultNative = Pointer<Utf8> Function(Pointer<Utf8>);
+typedef _ParseDefaultDart = Pointer<Utf8> Function(Pointer<Utf8>);
 typedef _ParseProcessNative = Pointer<Utf8> Function(Pointer<Utf8>);
 typedef _ParseProcessDart = Pointer<Utf8> Function(Pointer<Utf8>);
+typedef _ParseProcessDefaultNative = Pointer<Utf8> Function();
+typedef _ParseProcessDefaultDart = Pointer<Utf8> Function();
 typedef _FreeNative = Void Function(Pointer<Utf8>);
 typedef _FreeDart = void Function(Pointer<Utf8>);
 
@@ -17,14 +21,22 @@ class Flags2Env {
         _parseJsonArgvFromFile = library.lookupFunction<_ParseNative, _ParseDart>(
           'f2e_parse_json_argv_from_file',
         ),
+        _parseJsonArgv = library.lookupFunction<_ParseDefaultNative, _ParseDefaultDart>(
+          'f2e_parse_json_argv',
+        ),
         _parseProcessFromFile = library.lookupFunction<_ParseProcessNative, _ParseProcessDart>(
           'f2e_parse_process_from_file',
+        ),
+        _parseProcess = library.lookupFunction<_ParseProcessDefaultNative, _ParseProcessDefaultDart>(
+          'f2e_parse_process',
         ),
         _free = library.lookupFunction<_FreeNative, _FreeDart>('f2e_free');
 
   final DynamicLibrary _library;
   final _ParseDart _parseJsonArgvFromFile;
+  final _ParseDefaultDart _parseJsonArgv;
   final _ParseProcessDart _parseProcessFromFile;
+  final _ParseProcessDefaultDart _parseProcess;
   final _FreeDart _free;
 
   DynamicLibrary get nativeLibrary => _library;
@@ -34,11 +46,16 @@ class Flags2Env {
   }
 
   Map<String, String> parse(List<String> argv, {String? configPath}) {
-    final config = (configPath ?? '${Directory.current.path}/.cli-flags.toml').toNativeUtf8();
     final encodedArgv = jsonEncode(argv.map((value) => value.toString()).toList()).toNativeUtf8();
-    final result = _parseJsonArgvFromFile(config, encodedArgv);
+    final Pointer<Utf8> result;
 
-    calloc.free(config);
+    if (configPath == null) {
+      result = _parseJsonArgv(encodedArgv);
+    } else {
+      final config = configPath.toNativeUtf8();
+      result = _parseJsonArgvFromFile(config, encodedArgv);
+      calloc.free(config);
+    }
     calloc.free(encodedArgv);
 
     if (result == nullptr) {
@@ -54,9 +71,15 @@ class Flags2Env {
   }
 
   Map<String, String> parseProcess({String? configPath}) {
-    final config = (configPath ?? '${Directory.current.path}/.cli-flags.toml').toNativeUtf8();
-    final result = _parseProcessFromFile(config);
-    calloc.free(config);
+    final Pointer<Utf8> result;
+
+    if (configPath == null) {
+      result = _parseProcess();
+    } else {
+      final config = configPath.toNativeUtf8();
+      result = _parseProcessFromFile(config);
+      calloc.free(config);
+    }
 
     if (result == nullptr) {
       return <String, String>{};

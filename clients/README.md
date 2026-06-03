@@ -11,3 +11,5 @@ void f2e_free(char *value);
 `f2e_parse_process_from_file` reads the current process argv through the host OS where available. `argv_json` is a JSON array of strings for callers that want to pass modified argv explicitly. The return value is a JSON object whose keys are environment variable names and whose values are strings.
 
 The publishing flow should render only the client for the target runtime, copy in the C source or prebuilt native artifact for that platform, and omit every other `clients/*` directory from the package.
+
+BEAM clients use `clients/erlang/flags2env_nif.c` as the shared native module for Erlang, Elixir, and Gleam. Java uses `clients/java/native/flags2env_jni.c` as a JNI bridge.

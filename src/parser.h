@@ -12,8 +12,9 @@ extern "C" {
 const char *f2e_version(void);
 
 /*
- * Parses argv using PWD/.cli-flags.toml and returns a heap-allocated JSON
- * object string. Call f2e_free() with the returned pointer.
+ * Parses argv using the nearest .cli-flags.toml found by walking upward from
+ * the current working directory. Refuses to use $HOME/.cli-flags.toml. Returns
+ * a heap-allocated JSON object string. Call f2e_free() with the returned pointer.
  */
 char *f2e_parse(int argc, const char *const argv[]);
 
@@ -24,9 +25,9 @@ char *f2e_parse(int argc, const char *const argv[]);
 char *f2e_parse_from_file(const char *config_path, int argc, const char *const argv[]);
 
 /*
- * Parses the current process command line using PWD/.cli-flags.toml where the
- * host OS exposes process argv. Explicit f2e_parse(...) is still preferred
- * when the caller has already adjusted, sliced, or synthesized argv.
+ * Parses the current process command line using the nearest .cli-flags.toml
+ * where the host OS exposes process argv. Explicit f2e_parse(...) is still
+ * preferred when the caller has already adjusted, sliced, or synthesized argv.
  */
 char *f2e_parse_process(void);
 

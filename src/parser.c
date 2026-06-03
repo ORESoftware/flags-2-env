@@ -8,6 +8,8 @@
 #if defined(__APPLE__)
 #include <sys/sysctl.h>
 #include <unistd.h>
+#elif defined(__unix__)
+#include <unistd.h>
 #elif defined(_WIN32)
 #include <shellapi.h>
 #include <windows.h>
@@ -34,6 +36,10 @@ typedef struct {
   char env[F2E_MAX_ENV];
   char aliases[F2E_MAX_ALIASES][F2E_MAX_NAME];
   size_t alias_count;
+  char true_aliases[F2E_MAX_ALIASES][F2E_MAX_NAME];
+  size_t true_alias_count;
+  char false_aliases[F2E_MAX_ALIASES][F2E_MAX_NAME];
+  size_t false_alias_count;
   char short_name;
   F2EValueType type;
   int has_default;
@@ -72,6 +78,8 @@ static size_t f2e_strlcpy(char *dst, const char *src, size_t dst_size) {
 static int f2e_streq(const char *a, const char *b) {
   return strcmp(a, b) == 0;
 }
+
+static char *f2e_empty_json_object(void);
 
 static char *f2e_trim_left(char *value) {
   while (*value && isspace((unsigned char)*value)) {
@@ -172,21 +180,25 @@ static int f2e_parse_bare_value(const char *input, char *out, size_t out_size) {
   return out[0] != '\0';
 }
 
-static int f2e_add_alias(F2EFlag *flag, const char *alias) {
+static int f2e_add_alias_to_list(char aliases[][F2E_MAX_NAME], size_t *alias_count, const char *alias) {
   if (!alias || alias[0] == '\0') {
     return 0;
   }
-  for (size_t i = 0; i < flag->alias_count; i++) {
-    if (f2e_streq(flag->aliases[i], alias)) {
+  for (size_t i = 0; i < *alias_count; i++) {
+    if (f2e_streq(aliases[i], alias)) {
       return 1;
     }
   }
-  if (flag->alias_count >= F2E_MAX_ALIASES) {
+  if (*alias_count >= F2E_MAX_ALIASES) {
     return 0;
   }
-  f2e_strlcpy(flag->aliases[flag->alias_count], alias, sizeof(flag->aliases[0]));
-  flag->alias_count++;
+  f2e_strlcpy(aliases[*alias_count], alias, F2E_MAX_NAME);
+  (*alias_count)++;
   return 1;
+}
+
+static int f2e_add_alias(F2EFlag *flag, const char *alias) {
+  return f2e_add_alias_to_list(flag->aliases, &flag->alias_count, alias);
 }
 
 static F2EFlag *f2e_add_flag(F2EConfig *config, const char *name) {
@@ -222,7 +234,7 @@ static F2EFlag *f2e_find_flag_by_short(F2EConfig *config, char short_name) {
   return NULL;
 }
 
-static int f2e_parse_aliases(F2EFlag *flag, const char *value) {
+static int f2e_parse_alias_list(char aliases[][F2E_MAX_NAME], size_t *alias_count, const char *value) {
   const char *cursor = f2e_trim_left((char *)value);
   if (*cursor != '[') {
     return 0;
@@ -237,7 +249,7 @@ static int f2e_parse_aliases(F2EFlag *flag, const char *value) {
     if (!f2e_parse_quoted_string(cursor, alias, sizeof(alias))) {
       return 0;
     }
-    f2e_add_alias(flag, alias);
+    f2e_add_alias_to_list(aliases, alias_count, alias);
     cursor++;
     int escaped = 0;
     while (*cursor) {
@@ -257,6 +269,18 @@ static int f2e_parse_aliases(F2EFlag *flag, const char *value) {
     }
   }
   return 0;
+}
+
+static int f2e_parse_aliases(F2EFlag *flag, const char *value) {
+  return f2e_parse_alias_list(flag->aliases, &flag->alias_count, value);
+}
+
+static int f2e_parse_true_aliases(F2EFlag *flag, const char *value) {
+  return f2e_parse_alias_list(flag->true_aliases, &flag->true_alias_count, value);
+}
+
+static int f2e_parse_false_aliases(F2EFlag *flag, const char *value) {
+  return f2e_parse_alias_list(flag->false_aliases, &flag->false_alias_count, value);
 }
 
 static int f2e_parse_type(const char *value, F2EValueType *type) {
@@ -329,6 +353,10 @@ static int f2e_load_config(const char *config_path, F2EConfig *config) {
       }
     } else if (f2e_streq(key, "aliases")) {
       f2e_parse_aliases(current, value);
+    } else if (f2e_streq(key, "true_aliases")) {
+      f2e_parse_true_aliases(current, value);
+    } else if (f2e_streq(key, "false_aliases")) {
+      f2e_parse_false_aliases(current, value);
     } else if (f2e_streq(key, "short")) {
       char parsed[F2E_MAX_VALUE];
       if (f2e_parse_bare_value(value, parsed, sizeof(parsed)) && parsed[0] != '\0') {
@@ -350,24 +378,93 @@ static int f2e_load_config(const char *config_path, F2EConfig *config) {
 }
 
 static char *f2e_default_config_path(void) {
+  char dir[PATH_MAX];
+  char home[PATH_MAX];
   const char *pwd = getenv("PWD");
-  char base[PATH_MAX];
+  const char *home_env = getenv("HOME");
+
+#if defined(_WIN32)
+  if (GetCurrentDirectoryA(sizeof(dir), dir) == 0) {
+    if (pwd && pwd[0] != '\0') {
+      f2e_strlcpy(dir, pwd, sizeof(dir));
+    } else {
+      f2e_strlcpy(dir, ".", sizeof(dir));
+    }
+  }
+#elif defined(__unix__) || defined(__APPLE__)
+  if (!getcwd(dir, sizeof(dir))) {
+    if (pwd && pwd[0] != '\0') {
+      f2e_strlcpy(dir, pwd, sizeof(dir));
+    } else {
+      f2e_strlcpy(dir, ".", sizeof(dir));
+    }
+  }
+#else
   if (pwd && pwd[0] != '\0') {
-    f2e_strlcpy(base, pwd, sizeof(base));
+    f2e_strlcpy(dir, pwd, sizeof(dir));
   } else {
-    base[0] = '.';
-    base[1] = '\0';
+    f2e_strlcpy(dir, ".", sizeof(dir));
+  }
+#endif
+
+  if (home_env && home_env[0] != '\0') {
+    f2e_strlcpy(home, home_env, sizeof(home));
+  } else {
+    home[0] = '\0';
   }
 
-  size_t len = strlen(base);
-  const char suffix[] = "/.cli-flags.toml";
-  char *path = (char *)malloc(len + sizeof(suffix));
-  if (!path) {
-    return NULL;
+  while (dir[0] != '\0') {
+    size_t dir_len = strlen(dir);
+    while (dir_len > 1 && (dir[dir_len - 1] == '/' || dir[dir_len - 1] == '\\')) {
+      dir[--dir_len] = '\0';
+    }
+
+    if (home[0] != '\0') {
+      size_t home_len = strlen(home);
+      while (home_len > 1 && (home[home_len - 1] == '/' || home[home_len - 1] == '\\')) {
+        home[--home_len] = '\0';
+      }
+      if (f2e_streq(dir, home)) {
+        return NULL;
+      }
+    }
+
+    const char suffix[] = "/.cli-flags.toml";
+    char *candidate = (char *)malloc(dir_len + sizeof(suffix));
+    if (!candidate) {
+      return NULL;
+    }
+    memcpy(candidate, dir, dir_len);
+    memcpy(candidate + dir_len, suffix, sizeof(suffix));
+
+    FILE *file = fopen(candidate, "r");
+    if (file) {
+      fclose(file);
+      return candidate;
+    }
+    free(candidate);
+
+    char *slash = strrchr(dir, '/');
+#if defined(_WIN32)
+    char *backslash = strrchr(dir, '\\');
+    if (!slash || (backslash && backslash > slash)) {
+      slash = backslash;
+    }
+#endif
+    if (!slash) {
+      break;
+    }
+    if (slash == dir) {
+      dir[1] = '\0';
+      if (dir_len == 1) {
+        break;
+      }
+    } else {
+      *slash = '\0';
+    }
   }
-  memcpy(path, base, len);
-  memcpy(path + len, suffix, sizeof(suffix));
-  return path;
+
+  return NULL;
 }
 
 static F2EPair *f2e_find_pair(F2EPair *pairs, size_t pair_count, const char *key) {
@@ -527,6 +624,42 @@ static char *f2e_pairs_to_json(F2EPair *pairs, size_t pair_count) {
   return buffer.data;
 }
 
+static int f2e_bool_value_alias(F2EFlag *flag, const char *value, const char **canonical) {
+  if (!flag || !value) {
+    return 0;
+  }
+  if (f2e_streq(value, "true")) {
+    *canonical = "true";
+    return 1;
+  }
+  if (f2e_streq(value, "false")) {
+    *canonical = "false";
+    return 1;
+  }
+  for (size_t i = 0; i < flag->true_alias_count; i++) {
+    if (f2e_streq(flag->true_aliases[i], value)) {
+      *canonical = "true";
+      return 1;
+    }
+  }
+  for (size_t i = 0; i < flag->false_alias_count; i++) {
+    if (f2e_streq(flag->false_aliases[i], value)) {
+      *canonical = "false";
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int f2e_try_set_bool_value(F2EFlag *flag, F2EPair *pairs, size_t pair_count, const char *value) {
+  const char *canonical = NULL;
+  if (!f2e_bool_value_alias(flag, value, &canonical)) {
+    return 0;
+  }
+  f2e_set_pair(pairs, pair_count, flag->env, canonical);
+  return 1;
+}
+
 static int f2e_token_looks_like_known_option(F2EConfig *config, const char *token) {
   if (!token || token[0] != '-' || token[1] == '\0') {
     return 0;
@@ -551,7 +684,38 @@ static void f2e_apply_defaults(F2EConfig *config, F2EPair *pairs, size_t pair_co
   for (size_t i = 0; i < config->flag_count; i++) {
     F2EFlag *flag = &config->flags[i];
     if (flag->env[0] != '\0' && flag->has_default) {
-      f2e_set_pair(pairs, pair_count, flag->env, flag->default_value);
+      if (flag->type == F2E_TYPE_BOOL) {
+        const char *canonical = NULL;
+        if (f2e_bool_value_alias(flag, flag->default_value, &canonical)) {
+          f2e_set_pair(pairs, pair_count, flag->env, canonical);
+        } else {
+          f2e_set_pair(pairs, pair_count, flag->env, flag->default_value);
+        }
+      } else {
+        f2e_set_pair(pairs, pair_count, flag->env, flag->default_value);
+      }
+    }
+  }
+}
+
+static int f2e_can_bundle_bool_shorts(F2EConfig *config, const char *shorts) {
+  if (!shorts || shorts[0] == '\0') {
+    return 0;
+  }
+  for (const char *cursor = shorts; *cursor; cursor++) {
+    F2EFlag *flag = f2e_find_flag_by_short(config, *cursor);
+    if (!flag || flag->env[0] == '\0' || flag->type != F2E_TYPE_BOOL) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static void f2e_apply_bool_short_bundle(F2EConfig *config, F2EPair *pairs, size_t pair_count, const char *shorts) {
+  for (const char *cursor = shorts; *cursor; cursor++) {
+    F2EFlag *flag = f2e_find_flag_by_short(config, *cursor);
+    if (flag && flag->env[0] != '\0' && flag->type == F2E_TYPE_BOOL) {
+      f2e_set_pair(pairs, pair_count, flag->env, "true");
     }
   }
 }
@@ -585,7 +749,9 @@ static void f2e_apply_long_arg(F2EConfig *config, F2EPair *pairs, size_t pair_co
     if (negated) {
       f2e_set_pair(pairs, pair_count, flag->env, "false");
     } else if (has_inline_value) {
-      f2e_set_pair(pairs, pair_count, flag->env, inline_value);
+      f2e_try_set_bool_value(flag, pairs, pair_count, inline_value);
+    } else if (*index + 1 < argc && strcmp(argv[*index + 1], "--") != 0 && !f2e_token_looks_like_known_option(config, argv[*index + 1]) && f2e_try_set_bool_value(flag, pairs, pair_count, argv[*index + 1])) {
+      (*index)++;
     } else {
       f2e_set_pair(pairs, pair_count, flag->env, "true");
     }
@@ -614,7 +780,9 @@ static void f2e_apply_short_arg(F2EConfig *config, F2EPair *pairs, size_t pair_c
   }
 
   const char *rest = token + 2;
+  int has_inline_value = 0;
   if (*rest == '=') {
+    has_inline_value = 1;
     rest++;
   }
 
@@ -630,18 +798,26 @@ static void f2e_apply_short_arg(F2EConfig *config, F2EPair *pairs, size_t pair_c
     return;
   }
 
+  if (has_inline_value) {
+    f2e_try_set_bool_value(first, pairs, pair_count, rest);
+    return;
+  }
+
   if (*rest == '\0') {
+    if (*index + 1 < argc && strcmp(argv[*index + 1], "--") != 0 && !f2e_token_looks_like_known_option(config, argv[*index + 1]) && f2e_try_set_bool_value(first, pairs, pair_count, argv[*index + 1])) {
+      (*index)++;
+      return;
+    }
     f2e_set_pair(pairs, pair_count, first->env, "true");
     return;
   }
 
-  for (const char *cursor = token + 1; *cursor; cursor++) {
-    F2EFlag *flag = f2e_find_flag_by_short(config, *cursor);
-    if (!flag || flag->env[0] == '\0' || flag->type != F2E_TYPE_BOOL) {
-      return;
-    }
-    f2e_set_pair(pairs, pair_count, flag->env, "true");
+  if (f2e_can_bundle_bool_shorts(config, token + 1)) {
+    f2e_apply_bool_short_bundle(config, pairs, pair_count, token + 1);
+    return;
   }
+
+  f2e_try_set_bool_value(first, pairs, pair_count, rest);
 }
 
 const char *f2e_version(void) {
@@ -649,18 +825,23 @@ const char *f2e_version(void) {
 }
 
 char *f2e_parse_from_file(const char *config_path, int argc, const char *const argv[]) {
-  F2EConfig config;
-  if (!config_path || !f2e_load_config(config_path, &config)) {
-    char *empty = (char *)malloc(3);
-    if (empty) {
-      f2e_strlcpy(empty, "{}", 3);
-    }
-    return empty;
+  F2EConfig *config = (F2EConfig *)malloc(sizeof(F2EConfig));
+  if (!config) {
+    return f2e_empty_json_object();
   }
 
-  F2EPair pairs[F2E_MAX_FLAGS];
-  memset(pairs, 0, sizeof(pairs));
-  f2e_apply_defaults(&config, pairs, F2E_MAX_FLAGS);
+  if (!config_path || !f2e_load_config(config_path, config)) {
+    free(config);
+    return f2e_empty_json_object();
+  }
+
+  F2EPair *pairs = (F2EPair *)calloc(F2E_MAX_FLAGS, sizeof(F2EPair));
+  if (!pairs) {
+    free(config);
+    return f2e_empty_json_object();
+  }
+
+  f2e_apply_defaults(config, pairs, F2E_MAX_FLAGS);
 
   for (int i = 0; i < argc; i++) {
     const char *token = argv[i];
@@ -671,18 +852,17 @@ char *f2e_parse_from_file(const char *config_path, int argc, const char *const a
       break;
     }
     if (token[1] == '-') {
-      f2e_apply_long_arg(&config, pairs, F2E_MAX_FLAGS, token, &i, argc, argv);
+      f2e_apply_long_arg(config, pairs, F2E_MAX_FLAGS, token, &i, argc, argv);
     } else {
-      f2e_apply_short_arg(&config, pairs, F2E_MAX_FLAGS, token, &i, argc, argv);
+      f2e_apply_short_arg(config, pairs, F2E_MAX_FLAGS, token, &i, argc, argv);
     }
   }
 
   char *json = f2e_pairs_to_json(pairs, F2E_MAX_FLAGS);
+  free(pairs);
+  free(config);
   if (!json) {
-    json = (char *)malloc(3);
-    if (json) {
-      f2e_strlcpy(json, "{}", 3);
-    }
+    json = f2e_empty_json_object();
   }
   return json;
 }
@@ -690,7 +870,7 @@ char *f2e_parse_from_file(const char *config_path, int argc, const char *const a
 char *f2e_parse(int argc, const char *const argv[]) {
   char *path = f2e_default_config_path();
   if (!path) {
-    return NULL;
+    return f2e_empty_json_object();
   }
   char *result = f2e_parse_from_file(path, argc, argv);
   free(path);
@@ -994,7 +1174,7 @@ char *f2e_parse_process_from_file(const char *config_path) {
 char *f2e_parse_process(void) {
   char *path = f2e_default_config_path();
   if (!path) {
-    return NULL;
+    return f2e_empty_json_object();
   }
   char *result = f2e_parse_process_from_file(path);
   free(path);
@@ -1017,7 +1197,7 @@ char *f2e_parse_json_argv_from_file(const char *config_path, const char *argv_js
 char *f2e_parse_json_argv(const char *argv_json) {
   char *path = f2e_default_config_path();
   if (!path) {
-    return NULL;
+    return f2e_empty_json_object();
   }
   char *result = f2e_parse_json_argv_from_file(path, argv_json);
   free(path);

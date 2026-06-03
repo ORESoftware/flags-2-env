@@ -12,17 +12,43 @@ import "C"
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"unsafe"
 )
 
 func Parse(argv []string) (map[string]string, error) {
-	return ParseFromFile(defaultConfigPath(), argv)
+	encoded, err := json.Marshal(argv)
+	if err != nil {
+		return nil, err
+	}
+
+	cArgv := C.CString(string(encoded))
+	defer C.free(unsafe.Pointer(cArgv))
+
+	result := C.f2e_parse_json_argv(cArgv)
+	if result == nil {
+		return map[string]string{}, nil
+	}
+	defer C.f2e_free(result)
+
+	var out map[string]string
+	if err := json.Unmarshal([]byte(C.GoString(result)), &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func ParseProcess() (map[string]string, error) {
-	return ParseProcessFromFile(defaultConfigPath())
+	result := C.f2e_parse_process()
+	if result == nil {
+		return map[string]string{}, nil
+	}
+	defer C.f2e_free(result)
+
+	var out map[string]string
+	if err := json.Unmarshal([]byte(C.GoString(result)), &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func ParseProcessFromFile(configPath string) (map[string]string, error) {
@@ -92,11 +118,4 @@ func ApplyProcess(target map[string]string) (map[string]string, error) {
 		target[key] = value
 	}
 	return target, nil
-}
-
-func defaultConfigPath() string {
-	if pwd := os.Getenv("PWD"); pwd != "" {
-		return filepath.Join(pwd, ".cli-flags.toml")
-	}
-	return filepath.Join(".", ".cli-flags.toml")
 }

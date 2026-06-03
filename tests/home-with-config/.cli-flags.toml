@@ -1,0 +1,5 @@
+[flags.bad]
+env = "SHOULD_NOT_LOAD"
+aliases = ["bad"]
+type = "bool"
+default = "true"

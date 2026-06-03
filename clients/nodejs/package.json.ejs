@@ -2,16 +2,21 @@
   "name": "<%= packageName || '@oresoftware/cli' %>",
   "version": "<%= version || '0.1.0' %>",
   "type": "module",
-  "main": "./lib.js",
+  "main": "./lib.cjs",
   "exports": {
-    ".": "./lib.js"
+    ".": {
+      "import": "./lib.mjs",
+      "require": "./lib.cjs",
+      "default": "./lib.mjs"
+    }
   },
   "scripts": {
     "install": "node-gyp rebuild"
   },
   "gypfile": true,
   "files": [
-    "lib.js",
+    "lib.mjs",
+    "lib.cjs",
     "addon.c",
     "binding.gyp",
     "src"

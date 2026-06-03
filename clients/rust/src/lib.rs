@@ -1,12 +1,12 @@
 use libloading::{Library, Symbol};
 use std::collections::HashMap;
-use std::env;
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
-use std::path::PathBuf;
 
 type ParseFn = unsafe extern "C" fn(*const c_char, *const c_char) -> *mut c_char;
+type ParseDefaultFn = unsafe extern "C" fn(*const c_char) -> *mut c_char;
 type ParseProcessFn = unsafe extern "C" fn(*const c_char) -> *mut c_char;
+type ParseProcessDefaultFn = unsafe extern "C" fn() -> *mut c_char;
 type FreeFn = unsafe extern "C" fn(*mut c_char);
 
 pub struct Flags2Env {
@@ -21,13 +21,18 @@ impl Flags2Env {
     }
 
     pub fn parse(&self, argv: &[String], config_path: Option<&str>) -> Result<HashMap<String, String>, Box<dyn std::error::Error>> {
-        let config_path = CString::new(config_path.map(ToOwned::to_owned).unwrap_or_else(default_config_path))?;
         let argv_json = CString::new(serde_json::to_string(argv)?)?;
 
         unsafe {
-            let parse: Symbol<ParseFn> = self.library.get(b"f2e_parse_json_argv_from_file")?;
             let free: Symbol<FreeFn> = self.library.get(b"f2e_free")?;
-            let result = parse(config_path.as_ptr(), argv_json.as_ptr());
+            let result = if let Some(config_path) = config_path {
+                let config_path = CString::new(config_path)?;
+                let parse: Symbol<ParseFn> = self.library.get(b"f2e_parse_json_argv_from_file")?;
+                parse(config_path.as_ptr(), argv_json.as_ptr())
+            } else {
+                let parse: Symbol<ParseDefaultFn> = self.library.get(b"f2e_parse_json_argv")?;
+                parse(argv_json.as_ptr())
+            };
             if result.is_null() {
                 return Ok(HashMap::new());
             }
@@ -38,12 +43,16 @@ impl Flags2Env {
     }
 
     pub fn parse_process(&self, config_path: Option<&str>) -> Result<HashMap<String, String>, Box<dyn std::error::Error>> {
-        let config_path = CString::new(config_path.map(ToOwned::to_owned).unwrap_or_else(default_config_path))?;
-
         unsafe {
-            let parse: Symbol<ParseProcessFn> = self.library.get(b"f2e_parse_process_from_file")?;
             let free: Symbol<FreeFn> = self.library.get(b"f2e_free")?;
-            let result = parse(config_path.as_ptr());
+            let result = if let Some(config_path) = config_path {
+                let config_path = CString::new(config_path)?;
+                let parse: Symbol<ParseProcessFn> = self.library.get(b"f2e_parse_process_from_file")?;
+                parse(config_path.as_ptr())
+            } else {
+                let parse: Symbol<ParseProcessDefaultFn> = self.library.get(b"f2e_parse_process")?;
+                parse()
+            };
             if result.is_null() {
                 return Ok(HashMap::new());
             }
@@ -62,15 +71,6 @@ impl Flags2Env {
         env_map.extend(self.parse_process(None)?);
         Ok(())
     }
-}
-
-fn default_config_path() -> String {
-    env::var("PWD")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join(".cli-flags.toml")
-        .to_string_lossy()
-        .to_string()
 }
 
 fn default_library_name() -> &'static str {

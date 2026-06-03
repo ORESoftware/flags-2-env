@@ -8,7 +8,9 @@ final class Flags2Env
     {
         $libraryPath ??= self::defaultLibraryPath();
         $this->ffi = FFI::cdef(
-            'char *f2e_parse_json_argv_from_file(const char *config_path, const char *argv_json);
+            'char *f2e_parse_json_argv(const char *argv_json);
+             char *f2e_parse_json_argv_from_file(const char *config_path, const char *argv_json);
+             char *f2e_parse_process(void);
              char *f2e_parse_process_from_file(const char *config_path);
              void f2e_free(char *value);',
             $libraryPath
@@ -21,8 +23,10 @@ final class Flags2Env
      */
     public function parse(array $argv, ?string $configPath = null): array
     {
-        $configPath ??= getcwd() . DIRECTORY_SEPARATOR . '.cli-flags.toml';
-        $result = $this->ffi->f2e_parse_json_argv_from_file($configPath, json_encode(array_values($argv)));
+        $argvJson = json_encode(array_values($argv));
+        $result = $configPath === null
+            ? $this->ffi->f2e_parse_json_argv($argvJson)
+            : $this->ffi->f2e_parse_json_argv_from_file($configPath, $argvJson);
         if ($result === null) {
             return [];
         }
@@ -40,8 +44,9 @@ final class Flags2Env
      */
     public function parseProcess(?string $configPath = null): array
     {
-        $configPath ??= getcwd() . DIRECTORY_SEPARATOR . '.cli-flags.toml';
-        $result = $this->ffi->f2e_parse_process_from_file($configPath);
+        $result = $configPath === null
+            ? $this->ffi->f2e_parse_process()
+            : $this->ffi->f2e_parse_process_from_file($configPath);
         if ($result === null) {
             return [];
         }
