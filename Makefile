@@ -26,7 +26,7 @@ CLI := $(BUILD_DIR)/flags2env
 PROCESS_SMOKE := $(BUILD_DIR)/process-smoke
 PARSER_OBJ := $(BUILD_DIR)/parser.o
 
-.PHONY: all clean test shared static cli
+.PHONY: all borrow-check clean test shared static cli
 
 all: shared static cli
 
@@ -51,12 +51,15 @@ cli: $(CLI)
 $(CLI): $(SRC) $(CLI_SRC) $(HEADER) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(SRC) $(CLI_SRC) -o $@
 
-test: $(CLI) $(PROCESS_SMOKE)
+test: borrow-check $(CLI) $(PROCESS_SMOKE)
 	./tests/run.sh
 	$(PROCESS_SMOKE) --port 7777 -d
 
 process-test: $(PROCESS_SMOKE)
 	$(PROCESS_SMOKE) --port 7777 -d
+
+borrow-check:
+	./scripts/borrow-check.sh
 
 $(PROCESS_SMOKE): $(SRC) tests/process_smoke.c $(HEADER) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -Isrc $(SRC) tests/process_smoke.c -o $@

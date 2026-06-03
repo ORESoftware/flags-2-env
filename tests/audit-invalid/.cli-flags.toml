@@ -1,0 +1,14 @@
+[flags.debug]
+env = "DEBUG"
+aliases = ["debug"]
+short = "d"
+type = "bool"
+true_aliases = ["t", "false"]
+false_aliases = ["f", "t"]
+
+[flags.trace]
+env = "DEBUG"
+aliases = ["debug", "no-debug"]
+short = "d"
+type = "string"
+true_aliases = ["1"]

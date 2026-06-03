@@ -1,0 +1,11 @@
+.git
+build
+dist
+node_modules
+clients/nodejs/build
+clients/rust/target
+clients/rust/Cargo.lock
+clients/dart/.dart_tool
+clients/dart/pubspec.lock
+__pycache__
+*.log

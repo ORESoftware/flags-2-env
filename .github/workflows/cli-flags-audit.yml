@@ -1,0 +1,31 @@
+name: CLI Flags Audit
+
+on:
+  pull_request:
+    paths:
+      - ".cli-flags.toml"
+      - "**/.cli-flags.toml"
+  push:
+    paths:
+      - ".cli-flags.toml"
+      - "**/.cli-flags.toml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build audit CLI
+        run: make clean && make all
+
+      - name: Audit changed flag configs
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: scripts/audit-changed-cli-flags.sh

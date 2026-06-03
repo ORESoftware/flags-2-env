@@ -3,8 +3,10 @@
   "version": "<%= version || '0.1.0' %>",
   "type": "module",
   "main": "./lib.cjs",
+  "types": "./lib.ts",
   "exports": {
     ".": {
+      "types": "./lib.ts",
       "import": "./lib.mjs",
       "require": "./lib.cjs",
       "default": "./lib.mjs"
@@ -17,11 +19,13 @@
   "files": [
     "lib.mjs",
     "lib.cjs",
+    "lib.ts",
     "addon.c",
     "binding.gyp",
     "src"
   ],
   "devDependencies": {
+    "@types/node": "^22.0.0",
     "node-gyp": "^10.0.0"
   }
 }

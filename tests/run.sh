@@ -28,6 +28,24 @@ run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true"}' app -d=1
 run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true"}' app --color=0
 run_case '{"PORT":"3000","DEBUG":"false","COLOR":"false"}' app --color=false
 
+actual="$(cd "$FIXTURE_DIR/nested/deeper" && "$CLI" audit)"
+expected='{"ok":true,"errorCount":0,"warningCount":0,"errors":[],"warnings":[]}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected clean audit: %s\nActual:               %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+
+INVALID_CONFIG="$ROOT_DIR/tests/audit-invalid/.cli-flags.toml"
+set +e
+actual="$("$CLI" audit "$INVALID_CONFIG")"
+status=$?
+set -e
+expected='{"ok":false,"errorCount":6,"warningCount":1,"errors":["flags.debug true_aliases contains canonical false","flags.debug value alias \"t\" appears in both true_aliases and false_aliases","alias \"no-debug\" clashes with negated bool flag flags.debug","flags.debug and flags.trace both map to env \"DEBUG\"","flags.debug and flags.trace both use short flag \"d\"","flags.debug and flags.trace both use alias \"debug\""],"warnings":["flags.trace declares boolean value aliases but type is not bool"]}'
+if [ "$status" -eq 0 ] || [ "$actual" != "$expected" ]; then
+  printf 'Expected failing audit status and report:\n%s\nActual status: %s\nActual: %s\n' "$expected" "$status" "$actual" >&2
+  exit 1
+fi
+
 actual="$(cd "$FIXTURE_DIR/nested/deeper" && "$CLI" app --debug=t)"
 expected='{"PORT":"3000","DEBUG":"true","COLOR":"true"}'
 if [ "$actual" != "$expected" ]; then

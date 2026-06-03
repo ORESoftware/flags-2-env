@@ -1,6 +1,7 @@
 #include "parser.h"
 
 #include <ctype.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -62,6 +63,14 @@ typedef struct {
   size_t len;
   size_t cap;
 } F2EBuffer;
+
+typedef struct {
+  F2EBuffer errors;
+  F2EBuffer warnings;
+  size_t error_count;
+  size_t warning_count;
+  int failed;
+} F2EAudit;
 
 static size_t f2e_strlcpy(char *dst, const char *src, size_t dst_size) {
   size_t src_len = src ? strlen(src) : 0;
@@ -216,6 +225,18 @@ static F2EFlag *f2e_add_flag(F2EConfig *config, const char *name) {
 static F2EFlag *f2e_find_flag_by_alias(F2EConfig *config, const char *alias) {
   for (size_t i = 0; i < config->flag_count; i++) {
     F2EFlag *flag = &config->flags[i];
+    for (size_t j = 0; j < flag->alias_count; j++) {
+      if (f2e_streq(flag->aliases[j], alias)) {
+        return flag;
+      }
+    }
+  }
+  return NULL;
+}
+
+static const F2EFlag *f2e_find_flag_by_alias_const(const F2EConfig *config, const char *alias) {
+  for (size_t i = 0; i < config->flag_count; i++) {
+    const F2EFlag *flag = &config->flags[i];
     for (size_t j = 0; j < flag->alias_count; j++) {
       if (f2e_streq(flag->aliases[j], alias)) {
         return flag;
@@ -601,6 +622,111 @@ static int f2e_buffer_append_json_string(F2EBuffer *buffer, const char *value) {
   return f2e_buffer_append_char(buffer, '"');
 }
 
+static int f2e_audit_init(F2EAudit *audit) {
+  memset(audit, 0, sizeof(*audit));
+  if (!f2e_buffer_init(&audit->errors)) {
+    return 0;
+  }
+  if (!f2e_buffer_init(&audit->warnings)) {
+    free(audit->errors.data);
+    memset(audit, 0, sizeof(*audit));
+    return 0;
+  }
+  if (!f2e_buffer_append_char(&audit->errors, '[') || !f2e_buffer_append_char(&audit->warnings, '[')) {
+    audit->failed = 1;
+  }
+  return 1;
+}
+
+static void f2e_audit_discard(F2EAudit *audit) {
+  free(audit->errors.data);
+  free(audit->warnings.data);
+  memset(audit, 0, sizeof(*audit));
+}
+
+static void f2e_audit_add(F2EAudit *audit, int is_error, const char *format, ...) {
+  if (!audit || audit->failed) {
+    return;
+  }
+
+  char message[512];
+  va_list args;
+  va_start(args, format);
+  vsnprintf(message, sizeof(message), format, args);
+  va_end(args);
+
+  F2EBuffer *target = is_error ? &audit->errors : &audit->warnings;
+  size_t *count = is_error ? &audit->error_count : &audit->warning_count;
+  if (*count > 0 && !f2e_buffer_append_char(target, ',')) {
+    audit->failed = 1;
+    return;
+  }
+  if (!f2e_buffer_append_json_string(target, message)) {
+    audit->failed = 1;
+    return;
+  }
+  (*count)++;
+}
+
+static char *f2e_audit_report(F2EAudit *audit, int *status_out) {
+  if (!audit || audit->failed || !audit->errors.data || !audit->warnings.data) {
+    if (status_out) {
+      *status_out = 1;
+    }
+    if (audit) {
+      f2e_audit_discard(audit);
+    }
+    const char failure_json[] = "{\"ok\":false,\"errorCount\":1,\"warningCount\":0,\"errors\":[\"audit allocation failed\"],\"warnings\":[]}";
+    char *failed = (char *)malloc(sizeof(failure_json));
+    if (failed) {
+      f2e_strlcpy(failed, failure_json, sizeof(failure_json));
+    }
+    return failed;
+  }
+
+  if (!f2e_buffer_append_char(&audit->errors, ']') || !f2e_buffer_append_char(&audit->warnings, ']')) {
+    if (status_out) {
+      *status_out = 1;
+    }
+    f2e_audit_discard(audit);
+    return f2e_empty_json_object();
+  }
+
+  F2EBuffer report;
+  if (!f2e_buffer_init(&report)) {
+    if (status_out) {
+      *status_out = 1;
+    }
+    f2e_audit_discard(audit);
+    return f2e_empty_json_object();
+  }
+
+  char counts[96];
+  int ok = audit->error_count == 0;
+  snprintf(counts, sizeof(counts), "{\"ok\":%s,\"errorCount\":%lu,\"warningCount\":%lu,\"errors\":",
+           ok ? "true" : "false",
+           (unsigned long)audit->error_count,
+           (unsigned long)audit->warning_count);
+  if (!f2e_buffer_append(&report, counts) ||
+      !f2e_buffer_append(&report, audit->errors.data) ||
+      !f2e_buffer_append(&report, ",\"warnings\":") ||
+      !f2e_buffer_append(&report, audit->warnings.data) ||
+      !f2e_buffer_append_char(&report, '}')) {
+    free(report.data);
+    if (status_out) {
+      *status_out = 1;
+    }
+    f2e_audit_discard(audit);
+    return f2e_empty_json_object();
+  }
+
+  if (status_out) {
+    *status_out = ok ? 0 : 1;
+  }
+  f2e_audit_discard(audit);
+  return report.data;
+}
+
 static char *f2e_pairs_to_json(F2EPair *pairs, size_t pair_count) {
   F2EBuffer buffer;
   if (!f2e_buffer_init(&buffer)) {
@@ -820,8 +946,191 @@ static void f2e_apply_short_arg(F2EConfig *config, F2EPair *pairs, size_t pair_c
   f2e_try_set_bool_value(first, pairs, pair_count, rest);
 }
 
+static const char *f2e_audit_flag_name(const F2EFlag *flag) {
+  return flag && flag->name[0] != '\0' ? flag->name : "<unnamed>";
+}
+
+static void f2e_audit_bool_value_aliases(const F2EFlag *flag, F2EAudit *audit) {
+  if (flag->type != F2E_TYPE_BOOL) {
+    if (flag->true_alias_count > 0 || flag->false_alias_count > 0) {
+      f2e_audit_add(audit, 0, "flags.%s declares boolean value aliases but type is not bool", f2e_audit_flag_name(flag));
+    }
+    return;
+  }
+
+  for (size_t i = 0; i < flag->true_alias_count; i++) {
+    if (f2e_streq(flag->true_aliases[i], "false")) {
+      f2e_audit_add(audit, 1, "flags.%s true_aliases contains canonical false", f2e_audit_flag_name(flag));
+    } else if (f2e_streq(flag->true_aliases[i], "true")) {
+      f2e_audit_add(audit, 0, "flags.%s true_aliases redundantly contains canonical true", f2e_audit_flag_name(flag));
+    }
+  }
+
+  for (size_t i = 0; i < flag->false_alias_count; i++) {
+    if (f2e_streq(flag->false_aliases[i], "true")) {
+      f2e_audit_add(audit, 1, "flags.%s false_aliases contains canonical true", f2e_audit_flag_name(flag));
+    } else if (f2e_streq(flag->false_aliases[i], "false")) {
+      f2e_audit_add(audit, 0, "flags.%s false_aliases redundantly contains canonical false", f2e_audit_flag_name(flag));
+    }
+  }
+
+  for (size_t i = 0; i < flag->true_alias_count; i++) {
+    for (size_t j = 0; j < flag->false_alias_count; j++) {
+      if (f2e_streq(flag->true_aliases[i], flag->false_aliases[j])) {
+        f2e_audit_add(audit, 1, "flags.%s value alias \"%s\" appears in both true_aliases and false_aliases",
+                      f2e_audit_flag_name(flag),
+                      flag->true_aliases[i]);
+      }
+    }
+  }
+}
+
+static void f2e_audit_config_semantics(const F2EConfig *config, F2EAudit *audit) {
+  if (config->flag_count == 0) {
+    f2e_audit_add(audit, 1, "no [flags.*] tables declared");
+    return;
+  }
+
+  for (size_t i = 0; i < config->flag_count; i++) {
+    const F2EFlag *flag = &config->flags[i];
+    if (flag->env[0] == '\0') {
+      f2e_audit_add(audit, 1, "flags.%s is missing env", f2e_audit_flag_name(flag));
+    }
+    if (flag->alias_count == 0) {
+      f2e_audit_add(audit, 1, "flags.%s has no long aliases", f2e_audit_flag_name(flag));
+    }
+    for (size_t j = 0; j < flag->alias_count; j++) {
+      const char *alias = flag->aliases[j];
+      if (alias[0] == '\0') {
+        f2e_audit_add(audit, 1, "flags.%s contains an empty alias", f2e_audit_flag_name(flag));
+      } else if (alias[0] == '-') {
+        f2e_audit_add(audit, 1, "flags.%s alias \"%s\" should not include leading dashes", f2e_audit_flag_name(flag), alias);
+      }
+    }
+    if (flag->short_name != '\0' && (flag->short_name == '-' || isspace((unsigned char)flag->short_name))) {
+      f2e_audit_add(audit, 1, "flags.%s has invalid short flag \"%c\"", f2e_audit_flag_name(flag), flag->short_name);
+    }
+    f2e_audit_bool_value_aliases(flag, audit);
+  }
+
+  for (size_t i = 0; i < config->flag_count; i++) {
+    const F2EFlag *left = &config->flags[i];
+
+    if (left->type == F2E_TYPE_BOOL) {
+      for (size_t alias_index = 0; alias_index < left->alias_count; alias_index++) {
+        char negated_alias[F2E_MAX_NAME + 3];
+        snprintf(negated_alias, sizeof(negated_alias), "no-%s", left->aliases[alias_index]);
+        const F2EFlag *clash = f2e_find_flag_by_alias_const(config, negated_alias);
+        if (clash) {
+          f2e_audit_add(audit, 1, "alias \"%s\" clashes with negated bool flag flags.%s",
+                        negated_alias,
+                        f2e_audit_flag_name(left));
+        }
+      }
+    }
+
+    for (size_t j = i + 1; j < config->flag_count; j++) {
+      const F2EFlag *right = &config->flags[j];
+      if (left->env[0] != '\0' && right->env[0] != '\0' && f2e_streq(left->env, right->env)) {
+        f2e_audit_add(audit, 1, "flags.%s and flags.%s both map to env \"%s\"",
+                      f2e_audit_flag_name(left),
+                      f2e_audit_flag_name(right),
+                      left->env);
+      }
+      if (left->short_name != '\0' && right->short_name != '\0' && left->short_name == right->short_name) {
+        f2e_audit_add(audit, 1, "flags.%s and flags.%s both use short flag \"%c\"",
+                      f2e_audit_flag_name(left),
+                      f2e_audit_flag_name(right),
+                      left->short_name);
+      }
+      for (size_t left_alias = 0; left_alias < left->alias_count; left_alias++) {
+        for (size_t right_alias = 0; right_alias < right->alias_count; right_alias++) {
+          if (f2e_streq(left->aliases[left_alias], right->aliases[right_alias])) {
+            f2e_audit_add(audit, 1, "flags.%s and flags.%s both use alias \"%s\"",
+                          f2e_audit_flag_name(left),
+                          f2e_audit_flag_name(right),
+                          left->aliases[left_alias]);
+          }
+        }
+      }
+    }
+  }
+}
+
+static char *f2e_audit_error_report(const char *message, int *status_out) {
+  F2EAudit audit;
+  if (!f2e_audit_init(&audit)) {
+    if (status_out) {
+      *status_out = 1;
+    }
+    return f2e_empty_json_object();
+  }
+  f2e_audit_add(&audit, 1, "%s", message);
+  return f2e_audit_report(&audit, status_out);
+}
+
+static char *f2e_audit_config_from_file_impl(const char *config_path, int *status_out) {
+  F2EAudit audit;
+  if (!f2e_audit_init(&audit)) {
+    if (status_out) {
+      *status_out = 1;
+    }
+    return f2e_empty_json_object();
+  }
+
+  F2EConfig *config = (F2EConfig *)malloc(sizeof(F2EConfig));
+  if (!config) {
+    f2e_audit_add(&audit, 1, "audit allocation failed");
+    return f2e_audit_report(&audit, status_out);
+  }
+
+  if (!config_path || config_path[0] == '\0') {
+    f2e_audit_add(&audit, 1, "config path is empty");
+  } else if (!f2e_load_config(config_path, config)) {
+    f2e_audit_add(&audit, 1, "could not read config \"%s\"", config_path);
+  } else {
+    f2e_audit_config_semantics(config, &audit);
+  }
+
+  free(config);
+  return f2e_audit_report(&audit, status_out);
+}
+
 const char *f2e_version(void) {
   return F2E_VERSION;
+}
+
+char *f2e_audit_config_from_file(const char *config_path) {
+  return f2e_audit_config_from_file_impl(config_path, NULL);
+}
+
+char *f2e_audit_config(void) {
+  char *path = f2e_default_config_path();
+  if (!path) {
+    return f2e_audit_error_report("no usable .cli-flags.toml found before HOME", NULL);
+  }
+  char *result = f2e_audit_config_from_file(path);
+  free(path);
+  return result;
+}
+
+int f2e_audit_config_status_from_file(const char *config_path) {
+  int status = 1;
+  char *report = f2e_audit_config_from_file_impl(config_path, &status);
+  free(report);
+  return status;
+}
+
+int f2e_audit_config_status(void) {
+  int status = 1;
+  char *path = f2e_default_config_path();
+  if (!path) {
+    return 1;
+  }
+  char *report = f2e_audit_config_from_file_impl(path, &status);
+  free(report);
+  free(path);
+  return status;
 }
 
 char *f2e_parse_from_file(const char *config_path, int argc, const char *const argv[]) {

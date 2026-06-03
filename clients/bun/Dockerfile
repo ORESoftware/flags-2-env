@@ -7,4 +7,4 @@ RUN apt-get update && apt-get install -y --no-install-recommends build-essential
 RUN make clean && make all
 
 ENV FLAGS2ENV_NATIVE_LIB=/repo/build/libflags2env.so
-CMD cd clients/bun && bun test.mjs && bun test.cjs
+CMD cd clients/bun && bun test.mjs && bun test.cjs && bun test.ts

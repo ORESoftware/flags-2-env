@@ -57,8 +57,11 @@ Every parsed value is returned as a string. Boolean flags return `"true"` or `"f
 
 ```sh
 make all
+make borrow-check
 make test
 ```
+
+`make test` runs the C smoke tests plus `make borrow-check`. The borrow check uses Clang's static analyzer with ownership annotations on heap-returning C APIs, so returned strings must be released through `f2e_free`.
 
 Outputs:
 
@@ -75,10 +78,20 @@ The shared library exposes:
 ```c
 char *f2e_parse_process_from_file(const char *config_path);
 char *f2e_parse_json_argv_from_file(const char *config_path, const char *argv_json);
+char *f2e_audit_config_from_file(const char *config_path);
 void f2e_free(char *value);
 ```
 
 `f2e_parse_process_from_file` asks the host OS for the current process command line. This is available on macOS, Linux, and Windows. `argv_json` is a JSON array of strings for callers that want to pass a manually edited argv. Return values are heap-allocated JSON object strings and must be released with `f2e_free`.
+
+Audit a config before parsing or in CI:
+
+```sh
+build/flags2env audit .cli-flags.toml
+scripts/audit-changed-cli-flags.sh
+```
+
+The audit fails on ambiguous long aliases, duplicate short flags, duplicate env targets, `--no-*` namespace clashes, and conflicting boolean value aliases.
 
 ## Runtime Clients
 
@@ -96,8 +109,10 @@ Node, Bun, and Deno use syntax-highlighted source files instead of `.ejs` templa
 ```text
 clients/nodejs/lib.mjs
 clients/nodejs/lib.cjs
+clients/nodejs/lib.ts
 clients/bun/lib.mjs
 clients/bun/lib.cjs
+clients/bun/lib.ts
 clients/deno/lib.ts
 ```
 
@@ -110,9 +125,12 @@ Each client has a smoke test and a Dockerfile that runs it on Linux:
 ```sh
 docker build -f clients/nodejs/Dockerfile -t flags2env-nodejs .
 docker run --rm flags2env-nodejs
+scripts/test-docker-clients.sh nodejs bun deno
 ```
 
 Swap `nodejs` for `c`, `bun`, `deno`, `dart`, `golang`, `python`, `ruby`, `php`, `rust`, `swift`, `erlang`, `elixir`, `gleam`, or `java`. Docker can test Linux userland and can vary CPU architecture with `--platform`, but it cannot faithfully emulate macOS or Windows kernels; use native CI runners for those.
+
+The repository also includes `.github/workflows/cli-flags-audit.yml`, a GitHub Actions bot that runs when any `.cli-flags.toml` changes and reports audit failures as PR annotations.
 
 ## Usage
 

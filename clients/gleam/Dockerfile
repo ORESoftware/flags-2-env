@@ -1,4 +1,4 @@
-FROM ghcr.io/gleam-lang/gleam:v1.6.3-erlang
+FROM ghcr.io/gleam-lang/gleam:v1.14.0-erlang
 
 WORKDIR /repo
 COPY . .
@@ -13,4 +13,4 @@ RUN cp clients/gleam/lib.gleam /tmp/gleam/src/flags2env.gleam && cp clients/glea
 RUN printf 'name = "flags2env_test"\nversion = "1.0.0"\n\n[dependencies]\ngleam_stdlib = ">= 0.34.0 and < 2.0.0"\n' > /tmp/gleam/gleam.toml
 RUN cd /tmp/gleam && gleam deps download
 
-CMD cd /repo/tests/fixtures/nested/deeper && ERL_FLAGS="-pa /tmp/beam/ebin" gleam run --root /tmp/gleam
+CMD cd /tmp/gleam && ERL_FLAGS="-pa /tmp/beam/ebin" gleam run -m main
