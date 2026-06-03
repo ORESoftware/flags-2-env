@@ -13,3 +13,12 @@ parsed = sdk.parse(["app", "--debug=t", "--port", "8181"])
 assert parsed["DEBUG"] == "true", parsed
 assert parsed["PORT"] == "8181", parsed
 assert parsed["COLOR"] == "true", parsed
+
+explicit = sdk.parse(["app", "--debug=f"], "../../.cli-flags.toml")
+assert explicit["DEBUG"] == "false", explicit
+assert explicit["PORT"] == "3000", explicit
+
+combined = sdk.apply({"PORT": "env", "KEEP": "1"}, ["app", "--port", "8181"])
+assert combined["PORT"] == "8181", combined
+assert combined["KEEP"] == "1", combined
+assert combined["COLOR"] == "true", combined

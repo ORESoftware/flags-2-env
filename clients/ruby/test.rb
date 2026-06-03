@@ -7,3 +7,9 @@ Dir.chdir("../../tests/fixtures/nested/deeper")
 
 parsed = Flags2Env.parse(["app", "--debug=t", "--port", "8181"])
 raise "unexpected parsed map: #{parsed.inspect}" unless parsed["DEBUG"] == "true" && parsed["PORT"] == "8181" && parsed["COLOR"] == "true"
+
+explicit = Flags2Env.parse(["app", "--debug=f"], config_path: "../../.cli-flags.toml")
+raise "unexpected explicit config map: #{explicit.inspect}" unless explicit["DEBUG"] == "false" && explicit["PORT"] == "3000"
+
+combined = Flags2Env.apply({ "PORT" => "env", "KEEP" => "1" }, ["app", "--port", "8181"])
+raise "unexpected combined map: #{combined.inspect}" unless combined["PORT"] == "8181" && combined["KEEP"] == "1" && combined["COLOR"] == "true"

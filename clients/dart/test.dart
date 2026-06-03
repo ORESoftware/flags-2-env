@@ -12,4 +12,10 @@ void main() {
     stderr.writeln('unexpected parsed map: $parsed');
     exit(1);
   }
+
+  final explicit = f2e.parse(['app', '--debug=f'], configPath: '../../.cli-flags.toml');
+  if (explicit['DEBUG'] != 'false' || explicit['PORT'] != '3000') {
+    stderr.writeln('unexpected explicit config map: $explicit');
+    exit(1);
+  }
 }

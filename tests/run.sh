@@ -27,6 +27,11 @@ run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true"}' app -d1 -d0
 run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true"}' app -d=1
 run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true"}' app --color=0
 run_case '{"PORT":"3000","DEBUG":"false","COLOR":"false"}' app --color=false
+run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true"}' app --debug=1 --debug=0
+run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true"}' app --debug=t --debug=f
+run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true"}' app --color=1
+run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true"}' app -v0
+run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true"}' app -- --port 9999 --debug
 
 actual="$(cd "$ROOT_DIR" && "$CLI" app --config .cli-flags.toml --native-lib ./build/libflags2env.so --node-addon ./clients/nodejs/build/Release/flags2env.node --runtime nodejs --audit=t)"
 expected='{"FLAGS2ENV_CONFIG":".cli-flags.toml","FLAGS2ENV_NATIVE_LIB":"./build/libflags2env.so","FLAGS2ENV_NODE_ADDON":"./clients/nodejs/build/Release/flags2env.node","FLAGS2ENV_RUNTIME":"nodejs","FLAGS2ENV_AUDIT":"true"}'

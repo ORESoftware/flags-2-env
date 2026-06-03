@@ -15,7 +15,11 @@ extern "C" {
 #define F2E_WARN_UNUSED_RESULT
 #endif
 
-#if defined(__clang__) && !defined(__clang_analyzer__)
+#ifndef __has_attribute
+#define __has_attribute(attribute_name) 0
+#endif
+
+#if defined(__clang__) && __has_attribute(ownership_returns) && __has_attribute(ownership_takes)
 #define F2E_OWNED_RESULT __attribute__((ownership_returns(malloc))) F2E_WARN_UNUSED_RESULT
 #define F2E_TAKES_OWNED_ARG_1 __attribute__((ownership_takes(malloc, 1)))
 #else

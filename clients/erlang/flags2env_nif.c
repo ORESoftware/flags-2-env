@@ -269,4 +269,8 @@ static ErlNifFunc f2e_beam_funcs[] = {
   {"parse", 2, f2e_beam_parse, 0}
 };
 
+#ifdef F2E_BEAM_MODULE_NATIVE
+ERL_NIF_INIT(flags2env_native, f2e_beam_funcs, NULL, NULL, NULL, NULL)
+#else
 ERL_NIF_INIT(flags2env, f2e_beam_funcs, NULL, NULL, NULL, NULL)
+#endif

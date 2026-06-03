@@ -24,6 +24,7 @@ endif
 
 CLI := $(BUILD_DIR)/flags2env
 PROCESS_SMOKE := $(BUILD_DIR)/process-smoke
+API_HARDENING := $(BUILD_DIR)/api-hardening
 PARSER_OBJ := $(BUILD_DIR)/parser.o
 
 .PHONY: all borrow-check clean readme-test test shared static cli
@@ -51,8 +52,9 @@ cli: $(CLI)
 $(CLI): $(SRC) $(CLI_SRC) $(HEADER) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(SRC) $(CLI_SRC) -o $@
 
-test: borrow-check readme-test $(CLI) $(PROCESS_SMOKE)
+test: borrow-check readme-test $(CLI) $(PROCESS_SMOKE) $(API_HARDENING)
 	./tests/run.sh
+	$(API_HARDENING)
 	$(PROCESS_SMOKE) --port 7777 -d
 
 readme-test: ./scripts/test-readme-snippets.mjs
@@ -66,6 +68,9 @@ borrow-check:
 
 $(PROCESS_SMOKE): $(SRC) tests/process_smoke.c $(HEADER) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -Isrc $(SRC) tests/process_smoke.c -o $@
+
+$(API_HARDENING): $(SRC) tests/api_hardening.c $(HEADER) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -Isrc $(SRC) tests/api_hardening.c -o $@
 
 clean:
 	rm -rf $(BUILD_DIR)

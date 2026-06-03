@@ -3,6 +3,7 @@
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -529,11 +530,19 @@ static int f2e_buffer_init(F2EBuffer *buffer) {
 }
 
 static int f2e_buffer_reserve(F2EBuffer *buffer, size_t extra) {
-  if (buffer->len + extra + 1 <= buffer->cap) {
+  if (extra > SIZE_MAX - buffer->len - 1) {
+    return 0;
+  }
+  size_t needed = buffer->len + extra + 1;
+  if (needed <= buffer->cap) {
     return 1;
   }
   size_t next = buffer->cap;
-  while (buffer->len + extra + 1 > next) {
+  while (needed > next) {
+    if (next > SIZE_MAX / 2) {
+      next = needed;
+      break;
+    }
     next *= 2;
   }
   char *data = (char *)realloc(buffer->data, next);
@@ -732,25 +741,37 @@ static char *f2e_pairs_to_json(F2EPair *pairs, size_t pair_count) {
   if (!f2e_buffer_init(&buffer)) {
     return NULL;
   }
-  f2e_buffer_append_char(&buffer, '{');
+  if (!f2e_buffer_append_char(&buffer, '{')) {
+    free(buffer.data);
+    return NULL;
+  }
   int wrote = 0;
   for (size_t i = 0; i < pair_count; i++) {
     if (!pairs[i].set) {
       continue;
     }
     if (wrote) {
-      f2e_buffer_append_char(&buffer, ',');
+      if (!f2e_buffer_append_char(&buffer, ',')) {
+        free(buffer.data);
+        return NULL;
+      }
     }
-    f2e_buffer_append_json_string(&buffer, pairs[i].key);
-    f2e_buffer_append_char(&buffer, ':');
-    f2e_buffer_append_json_string(&buffer, pairs[i].value);
+    if (!f2e_buffer_append_json_string(&buffer, pairs[i].key) ||
+        !f2e_buffer_append_char(&buffer, ':') ||
+        !f2e_buffer_append_json_string(&buffer, pairs[i].value)) {
+      free(buffer.data);
+      return NULL;
+    }
     wrote = 1;
   }
-  f2e_buffer_append_char(&buffer, '}');
+  if (!f2e_buffer_append_char(&buffer, '}')) {
+    free(buffer.data);
+    return NULL;
+  }
   return buffer.data;
 }
 
-static int f2e_bool_value_alias(F2EFlag *flag, const char *value, const char **canonical) {
+static int f2e_bool_value_alias(const F2EFlag *flag, const char *value, const char **canonical) {
   if (!flag || !value) {
     return 0;
   }
@@ -983,6 +1004,15 @@ static void f2e_audit_bool_value_aliases(const F2EFlag *flag, F2EAudit *audit) {
       }
     }
   }
+
+  if (flag->has_default) {
+    const char *canonical = NULL;
+    if (!f2e_bool_value_alias(flag, flag->default_value, &canonical)) {
+      f2e_audit_add(audit, 1, "flags.%s default \"%s\" is not a valid bool value",
+                    f2e_audit_flag_name(flag),
+                    flag->default_value);
+    }
+  }
 }
 
 static void f2e_audit_config_semantics(const F2EConfig *config, F2EAudit *audit) {
@@ -993,6 +1023,9 @@ static void f2e_audit_config_semantics(const F2EConfig *config, F2EAudit *audit)
 
   for (size_t i = 0; i < config->flag_count; i++) {
     const F2EFlag *flag = &config->flags[i];
+    if (flag->name[0] == '\0') {
+      f2e_audit_add(audit, 1, "flags.%lu has empty name", (unsigned long)i);
+    }
     if (flag->env[0] == '\0') {
       f2e_audit_add(audit, 1, "flags.%s is missing env", f2e_audit_flag_name(flag));
     }
@@ -1134,6 +1167,10 @@ int f2e_audit_config_status(void) {
 }
 
 char *f2e_parse_from_file(const char *config_path, int argc, const char *const argv[]) {
+  if (argc < 0 || !argv) {
+    argc = 0;
+  }
+
   F2EConfig *config = (F2EConfig *)malloc(sizeof(F2EConfig));
   if (!config) {
     return f2e_empty_json_object();
@@ -1266,6 +1303,8 @@ static int f2e_parse_json_string_token(const char **cursor_ref, char *out, size_
 static int f2e_parse_json_argv_items(const char *argv_json, char ***items, int *count) {
   const char *cursor = f2e_trim_left((char *)argv_json);
   int cap = 0;
+  int expecting_value = 1;
+  int saw_value = 0;
   *items = NULL;
   *count = 0;
 
@@ -1277,7 +1316,7 @@ static int f2e_parse_json_argv_items(const char *argv_json, char ***items, int *
   while (*cursor) {
     cursor = f2e_trim_left((char *)cursor);
     if (*cursor == ']') {
-      return 1;
+      return !saw_value || !expecting_value;
     }
 
     char value[F2E_MAX_VALUE];
@@ -1287,10 +1326,13 @@ static int f2e_parse_json_argv_items(const char *argv_json, char ***items, int *
     if (!f2e_json_array_append(items, count, &cap, value)) {
       return 0;
     }
+    saw_value = 1;
+    expecting_value = 0;
 
     cursor = f2e_trim_left((char *)cursor);
     if (*cursor == ',') {
       cursor++;
+      expecting_value = 1;
       continue;
     }
     if (*cursor == ']') {

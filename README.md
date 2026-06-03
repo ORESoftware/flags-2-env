@@ -104,7 +104,7 @@ node scripts/render-client.mjs nodejs dist/nodejs
 node scripts/render-client.mjs bun dist/bun
 ```
 
-BEAM clients share the Erlang NIF in `clients/erlang/flags2env_nif.c`; compile it with Erlang headers plus `src/parser.c` into `priv/flags2env_nif.so`. The Java client uses `clients/java/native/flags2env_jni.c`; compile it with JNI headers plus `src/parser.c` into `libflags2env_jni`.
+BEAM clients share the Erlang NIF in `clients/erlang/flags2env_nif.c`; compile it with Erlang headers plus `src/parser.c` into `priv/flags2env_nif.so`. Gleam uses `clients/gleam/flags2env_native.erl` as a native shim so its public module can be named `flags2env` without colliding with the NIF module. The Java client uses `clients/java/native/flags2env_jni.c`; compile it with JNI headers plus `src/parser.c` into `libflags2env_jni`.
 
 Node, Bun, and Deno use syntax-highlighted source files instead of `.ejs` templates:
 

@@ -12,4 +12,4 @@ void f2e_free(char *value);
 
 The publishing flow should render only the client for the target runtime, copy in the C source or prebuilt native artifact for that platform, and omit every other `clients/*` directory from the package.
 
-BEAM clients use `clients/erlang/flags2env_nif.c` as the shared native module for Erlang, Elixir, and Gleam. Java uses `clients/java/native/flags2env_jni.c` as a JNI bridge.
+BEAM clients use `clients/erlang/flags2env_nif.c` as the shared native implementation. Erlang and Elixir load it through the `flags2env` module; Gleam loads the same C implementation through `clients/gleam/flags2env_native.erl` so the public Gleam module can still be named `flags2env`. Java uses `clients/java/native/flags2env_jni.c` as a JNI bridge.

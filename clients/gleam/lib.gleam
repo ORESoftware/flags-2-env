@@ -1,18 +1,18 @@
 import gleam/dict.{type Dict}
 
-@external(erlang, "flags2env", "parse_process")
+@external(erlang, "flags2env_native", "parse_process")
 pub fn parse_process() -> Dict(String, String)
 
-@external(erlang, "flags2env", "parse_process")
+@external(erlang, "flags2env_native", "parse_process")
 pub fn parse_process_with_config(config_path: String) -> Dict(String, String)
 
-@external(erlang, "flags2env", "parse")
+@external(erlang, "flags2env_native", "parse")
 pub fn parse(argv: List(String)) -> Dict(String, String)
 
-@external(erlang, "flags2env", "parse")
+@external(erlang, "flags2env_native", "parse")
 pub fn parse_with_config(argv: List(String), config_path: String) -> Dict(String, String)
 
-@external(erlang, "flags2env", "env_map")
+@external(erlang, "flags2env_native", "env_map")
 pub fn env_map() -> Dict(String, String)
 
 pub fn apply_process(env: Dict(String, String)) -> Dict(String, String) {

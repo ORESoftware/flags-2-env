@@ -1,0 +1,8 @@
+[flags.debug]
+env = "DEBUG"
+aliases = ["debug"]
+short = "d"
+type = "bool"
+default = "maybe"
+true_aliases = ["t", "1"]
+false_aliases = ["f", "0"]
