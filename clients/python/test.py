@@ -1,7 +1,7 @@
 import os
 import platform
 
-from lib import Flags2Env
+from flags2env import Flags2Env
 
 
 suffix = "dylib" if platform.system() == "Darwin" else "dll" if platform.system() == "Windows" else "so"

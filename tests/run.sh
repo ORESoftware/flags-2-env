@@ -28,6 +28,27 @@ run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true"}' app -d=1
 run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true"}' app --color=0
 run_case '{"PORT":"3000","DEBUG":"false","COLOR":"false"}' app --color=false
 
+actual="$(cd "$ROOT_DIR" && "$CLI" app --config .cli-flags.toml --native-lib ./build/libflags2env.so --node-addon ./clients/nodejs/build/Release/flags2env.node --runtime nodejs --audit=t)"
+expected='{"FLAGS2ENV_CONFIG":".cli-flags.toml","FLAGS2ENV_NATIVE_LIB":"./build/libflags2env.so","FLAGS2ENV_NODE_ADDON":"./clients/nodejs/build/Release/flags2env.node","FLAGS2ENV_RUNTIME":"nodejs","FLAGS2ENV_AUDIT":"true"}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected root config parse: %s\nActual:                     %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+
+case "$actual" in
+  *PORT*|*NODE_ENV*)
+    printf 'Root config should not parse app env names: %s\n' "$actual" >&2
+    exit 1
+    ;;
+esac
+
+actual="$(cd "$ROOT_DIR" && "$CLI" audit)"
+expected='{"ok":true,"errorCount":0,"warningCount":0,"errors":[],"warnings":[]}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected root config audit: %s\nActual:                     %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+
 actual="$(cd "$FIXTURE_DIR/nested/deeper" && "$CLI" audit)"
 expected='{"ok":true,"errorCount":0,"warningCount":0,"errors":[],"warnings":[]}'
 if [ "$actual" != "$expected" ]; then

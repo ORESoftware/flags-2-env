@@ -32,6 +32,8 @@ short = "m"
 type = "string"
 ```
 
+This repository's own root `.cli-flags.toml` is intentionally library-shaped for CLI smoke tests and maps to `FLAGS2ENV_*` variables. App-shaped examples like `PORT` and `NODE_ENV` live under `tests/fixtures/`.
+
 Supported CLI forms:
 
 ```sh
@@ -154,8 +156,13 @@ parse(argv)     # explicitly pass argv after slicing, popping, or rewriting
 ```js
 import * as f2e from "@oresoftware/cli";
 
-const cli = f2e.parseProcess();
-const combined = { ...process.env, ...cli };
+function getEnvMap(argv = process.argv) {
+  const envMap = process.env;
+  const cli = f2e.parse(argv);
+  return { ...envMap, ...cli };
+}
+
+const combined = getEnvMap();
 ```
 
 ### Bun
@@ -163,8 +170,13 @@ const combined = { ...process.env, ...cli };
 ```js
 import * as f2e from "@oresoftware/cli/bun";
 
-const cli = f2e.parseProcess();
-const combined = { ...process.env, ...cli };
+function getEnvMap(argv = Bun.argv) {
+  const envMap = process.env;
+  const cli = f2e.parse(argv);
+  return { ...envMap, ...cli };
+}
+
+const combined = getEnvMap();
 ```
 
 ### Deno
@@ -172,8 +184,10 @@ const combined = { ...process.env, ...cli };
 ```ts
 import * as f2e from "./clients/deno/mod.ts";
 
-function getEnvMap(): Record<string, string> {
-  return f2e.applyProcess();
+function getEnvMap(argv: string[] = Deno.args): Record<string, string> {
+  const envMap = f2e.envMap();
+  const cli = f2e.parse(argv);
+  return { ...envMap, ...cli };
 }
 
 const combined = getEnvMap();
@@ -184,22 +198,45 @@ const combined = getEnvMap();
 ```c
 #include "clients/c/lib.h"
 #include <stdio.h>
+#include <string.h>
 
-F2EMap get_env_map(char *envp[]) {
-  F2EMap combined = {0};
+F2EMap env_map_from_envp(char *envp[]) {
+  F2EMap env_map = {0};
 
-  if (!f2e_client_apply_process_envp(envp, &combined)) {
+  for (size_t i = 0; envp[i]; i++) {
+    char *eq = strchr(envp[i], '=');
+    if (eq) {
+      char key[512];
+      size_t key_len = (size_t)(eq - envp[i]);
+      if (key_len < sizeof(key)) {
+        memcpy(key, envp[i], key_len);
+        key[key_len] = '\0';
+        f2e_map_set(&env_map, key, eq + 1);
+      }
+    }
+  }
+
+  return env_map;
+}
+
+F2EMap get_env_map(int argc, const char *const argv[], char *envp[]) {
+  F2EMap env_map = env_map_from_envp(envp);
+  F2EMap cli = {0};
+
+  if (!f2e_client_parse(argc, argv, &cli)) {
+    f2e_map_free(&env_map);
     return (F2EMap){0};
   }
 
+  f2e_map_overlay(&env_map, &cli);
+  f2e_map_free(&cli);
+
+  F2EMap combined = env_map;
   return combined;
 }
 
 int main(int argc, const char *const argv[], char *envp[]) {
-  (void)argc;
-  (void)argv;
-
-  F2EMap combined = get_env_map(envp);
+  F2EMap combined = get_env_map(argc, argv, envp);
   printf("PORT=%s\n", f2e_map_get(&combined, "PORT"));
   f2e_map_free(&combined);
   return 0;
@@ -212,14 +249,14 @@ int main(int argc, const char *const argv[], char *envp[]) {
 import 'dart:io';
 import 'package:flags2env/flags2env.dart';
 
-Map<String, String> getEnvMap() {
+Map<String, String> getEnvMap(List<String> args) {
   final f2e = Flags2Env.load('./build/libflags2env.dylib');
-  final cli = f2e.parseProcess();
+  final cli = f2e.parse(args);
   return <String, String>{...Platform.environment, ...cli};
 }
 
-void main() {
-  final combined = getEnvMap();
+void main(List<String> args) {
+  final combined = getEnvMap(args);
 }
 ```
 
@@ -235,27 +272,38 @@ import (
 	flags2env "github.com/oresoftware/flags-2-env/clients/golang"
 )
 
-func getEnvMap() (map[string]string, error) {
-	combined := map[string]string{}
+func envMap() map[string]string {
+	env := map[string]string{}
 	for _, entry := range os.Environ() {
 		key, value, ok := strings.Cut(entry, "=")
 		if ok {
-			combined[key] = value
+			env[key] = value
 		}
 	}
+	return env
+}
 
-	cli, err := flags2env.ParseProcess()
-	if err != nil {
-		return nil, err
+func mergeMaps(env map[string]string, cli map[string]string) map[string]string {
+	combined := make(map[string]string, len(env)+len(cli))
+	for key, value := range env {
+		combined[key] = value
 	}
 	for key, value := range cli {
 		combined[key] = value
 	}
-	return combined, nil
+	return combined
+}
+
+func getEnvMap(args []string) (map[string]string, error) {
+	cli, err := flags2env.Parse(args)
+	if err != nil {
+		return nil, err
+	}
+	return mergeMaps(envMap(), cli), nil
 }
 
 func main() {
-	combined, err := getEnvMap()
+	combined, err := getEnvMap(os.Args)
 	if err != nil {
 		panic(err)
 	}
@@ -270,7 +318,9 @@ func main() {
 -export([get_env_map/0, main/1]).
 
 get_env_map() ->
-  flags2env:apply_process(flags2env:env_map()).
+  Env = flags2env:env_map(),
+  Cli = flags2env:parse(init:get_plain_arguments()),
+  maps:merge(Env, Cli).
 
 main(_Args) ->
   Combined = get_env_map(),
@@ -284,7 +334,12 @@ import gleam/dict.{type Dict}
 import flags2env
 
 pub fn get_env_map() -> Dict(String, String) {
-  flags2env.apply_process(flags2env.env_map())
+  let env_map = flags2env.env_map()
+  let cli = flags2env.parse([])
+
+  dict.fold(cli, env_map, fn(combined, key, value) {
+    dict.insert(combined, key, value)
+  })
 }
 
 pub fn main() {
@@ -297,12 +352,15 @@ pub fn main() {
 
 ```elixir
 defmodule MyApp do
-  def get_env_map do
-    Flags2Env.apply_process(System.get_env())
+  def get_env_map(args) do
+    env_map = System.get_env()
+    cli = Flags2Env.parse(args)
+
+    Map.merge(env_map, cli)
   end
 
-  def main(_args) do
-    combined = get_env_map()
+  def main(args) do
+    combined = get_env_map(args)
     combined
   end
 end
@@ -313,14 +371,24 @@ end
 ```java
 import com.oresoftware.flags2env.Flags2Env;
 import java.util.Map;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 public final class Main {
-  private static Map<String, String> getEnvMap() {
-    return Flags2Env.applyProcess(System.getenv());
+  private static Map<String, String> getEnvMap(String[] args) {
+    Map<String, String> envMap = System.getenv();
+    Map<String, String> cli = Flags2Env.parse(args);
+
+    return Stream.concat(envMap.entrySet().stream(), cli.entrySet().stream())
+        .collect(Collectors.toMap(
+            Map.Entry::getKey,
+            Map.Entry::getValue,
+            (env, cliValue) -> cliValue
+        ));
   }
 
   public static void main(String[] args) {
-    Map<String, String> combined = getEnvMap();
+    Map<String, String> combined = getEnvMap(args);
   }
 }
 ```
@@ -329,11 +397,17 @@ public final class Main {
 
 ```python
 import os
-from clients.python.lib import Flags2Env
+import sys
+from flags2env import Flags2Env
 
-f2e = Flags2Env("./build/libflags2env.dylib")
-cli = f2e.parse_process()
-combined = {**os.environ, **cli}
+def get_env_map(argv=None):
+    sdk = Flags2Env("./build/libflags2env.dylib")
+    env_map = dict(os.environ)
+    cli = sdk.parse(sys.argv if argv is None else argv)
+
+    return {**env_map, **cli}
+
+combined = get_env_map()
 ```
 
 ### Ruby
@@ -341,8 +415,14 @@ combined = {**os.environ, **cli}
 ```ruby
 require_relative "clients/ruby/lib"
 
-cli = Flags2Env.parse_process
-combined = ENV.to_h.merge(cli)
+def get_env_map(argv = ARGV)
+  env_map = ENV.to_h
+  cli = Flags2Env.parse(argv)
+
+  env_map.merge(cli)
+end
+
+combined = get_env_map
 ```
 
 ### PHP
@@ -352,8 +432,15 @@ combined = ENV.to_h.merge(cli)
 require __DIR__ . '/clients/php/lib.php';
 
 $f2e = new Flags2Env(__DIR__ . '/build/libflags2env.dylib');
-$cli = $f2e->parseProcess();
-$combined = array_replace($_ENV, $cli);
+
+function get_env_map(Flags2Env $f2e, array $argv): array {
+    $envMap = $_ENV;
+    $cli = $f2e->parse($argv);
+
+    return array_replace($envMap, $cli);
+}
+
+$combined = get_env_map($f2e, $argv);
 ```
 
 ### Rust
@@ -365,9 +452,11 @@ use std::env;
 
 fn get_env_map() -> Result<HashMap<String, String>, Box<dyn std::error::Error>> {
     let sdk = unsafe { Flags2Env::load(Some("./build/libflags2env.dylib"))? };
-    let mut combined: HashMap<String, String> = env::vars().collect();
+    let env_map: HashMap<String, String> = env::vars().collect();
+    let argv: Vec<String> = env::args().collect();
+    let cli = sdk.parse(&argv, None)?;
 
-    sdk.apply_process(&mut combined)?;
+    let combined = env_map.into_iter().chain(cli).collect();
     Ok(combined)
 }
 
@@ -383,8 +472,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```swift
 import Foundation
 
-let f2e = try Flags2Env(libraryPath: "./build/libflags2env.dylib")
-let combined = try f2e.applyProcess(env: ProcessInfo.processInfo.environment)
+func getEnvMap(args: [String] = CommandLine.arguments) throws -> [String: String] {
+    let f2e = try Flags2Env(libraryPath: "./build/libflags2env.dylib")
+    let envMap = ProcessInfo.processInfo.environment
+    let cli = try f2e.parse(args)
+
+    return envMap.merging(cli) { _, cli in cli }
+}
+
+let combined = try getEnvMap()
 ```
 
 ## Parser Notes

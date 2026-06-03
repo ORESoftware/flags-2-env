@@ -1,33 +1,30 @@
-[flags.port]
-env = "PORT"
-aliases = ["port", "listen-port"]
-short = "p"
-type = "string"
-default = "3000"
-
-[flags.host]
-env = "HOST"
-aliases = ["host"]
-short = "h"
+[flags.config]
+env = "FLAGS2ENV_CONFIG"
+aliases = ["config", "config-path", "cli-flags"]
+short = "c"
 type = "string"
 
-[flags.debug]
-env = "DEBUG"
-aliases = ["debug"]
-short = "d"
+[flags.native_lib]
+env = "FLAGS2ENV_NATIVE_LIB"
+aliases = ["native-lib", "shared-lib", "library"]
+short = "l"
+type = "string"
+
+[flags.node_addon]
+env = "FLAGS2ENV_NODE_ADDON"
+aliases = ["node-addon", "node-native-addon"]
+type = "string"
+
+[flags.runtime]
+env = "FLAGS2ENV_RUNTIME"
+aliases = ["runtime", "client", "target"]
+short = "r"
+type = "string"
+
+[flags.audit]
+env = "FLAGS2ENV_AUDIT"
+aliases = ["audit"]
+short = "a"
 type = "bool"
-default = "false"
-true_aliases = ["t", "1"]
-false_aliases = ["f", "0"]
-
-[flags.verbose]
-env = "VERBOSE"
-aliases = ["verbose"]
-short = "v"
-type = "bool"
-
-[flags.mode]
-env = "NODE_ENV"
-aliases = ["mode", "env"]
-short = "m"
-type = "string"
+true_aliases = ["t", "1", "yes"]
+false_aliases = ["f", "0", "no"]
