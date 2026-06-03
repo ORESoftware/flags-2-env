@@ -1,0 +1,18 @@
+{
+  "targets": [
+    {
+      "target_name": "flags2env",
+      "sources": [
+        "<%= addonSource || 'addon.c' %>",
+        "<%= parserSource || '../../src/parser.c' %>"
+      ],
+      "include_dirs": [
+        "<%= parserIncludeDir || '../../src' %>"
+      ],
+      "cflags": ["-std=c99"],
+      "xcode_settings": {
+        "OTHER_CFLAGS": ["-std=c99"]
+      }
+    }
+  ]
+}

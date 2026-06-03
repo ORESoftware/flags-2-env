@@ -1,0 +1,38 @@
+[flags.port]
+env = "PORT"
+aliases = ["port", "listen-port"]
+short = "p"
+type = "string"
+default = "3000"
+
+[flags.host]
+env = "HOST"
+aliases = ["host"]
+short = "h"
+type = "string"
+
+[flags.debug]
+env = "DEBUG"
+aliases = ["debug"]
+short = "d"
+type = "bool"
+default = "false"
+
+[flags.verbose]
+env = "VERBOSE"
+aliases = ["verbose"]
+short = "v"
+type = "bool"
+
+[flags.color]
+env = "COLOR"
+aliases = ["color"]
+short = "c"
+type = "bool"
+default = "true"
+
+[flags.mode]
+env = "NODE_ENV"
+aliases = ["mode", "env"]
+short = "m"
+type = "string"

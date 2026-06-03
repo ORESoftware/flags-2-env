@@ -1,0 +1,22 @@
+{
+  "name": "<%= packageName || '@oresoftware/cli' %>",
+  "version": "<%= version || '0.1.0' %>",
+  "type": "module",
+  "main": "./lib.js",
+  "exports": {
+    ".": "./lib.js"
+  },
+  "scripts": {
+    "install": "node-gyp rebuild"
+  },
+  "gypfile": true,
+  "files": [
+    "lib.js",
+    "addon.c",
+    "binding.gyp",
+    "src"
+  ],
+  "devDependencies": {
+    "node-gyp": "^10.0.0"
+  }
+}

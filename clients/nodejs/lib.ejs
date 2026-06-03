@@ -1,0 +1,22 @@
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+const native = require("<%= nativeModulePath || './build/Release/flags2env.node' %>");
+
+export function parse(argv = process.argv, options = {}) {
+  if (!Array.isArray(argv)) {
+    throw new TypeError("argv must be an array of strings");
+  }
+  const configPath = options.configPath ?? `${process.cwd()}/.cli-flags.toml`;
+  const raw = native.parseJson(JSON.stringify(argv.map(String)), configPath);
+  return JSON.parse(raw);
+}
+
+export function apply(target = process.env, argv = process.argv, options = {}) {
+  return Object.assign(target, parse(argv, options));
+}
+
+export default {
+  parse,
+  apply,
+};
