@@ -10,8 +10,10 @@ dev-repo: "git+https://github.com/ORESoftware/flags-2-env.git"
 depends: [
   "ocaml"
   "dune" {>= "3.11"}
+  "reason"
   "flags2env"
 ]
 build: [
   ["dune" "build" "-p" name "-j" jobs]
+  ["dune" "runtest" "-p" name "-j" jobs] {with-test}
 ]

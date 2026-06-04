@@ -9,7 +9,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    module.addIncludePath(b.path("../../src"));
+    module.addIncludePath(b.path("native"));
 
     const parser = b.addStaticLibrary(.{
         .name = "flags2env_parser",
@@ -17,10 +17,10 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     parser.addCSourceFile(.{
-        .file = b.path("../../src/parser.c"),
+        .file = b.path("native/parser.c"),
         .flags = &.{"-std=c99", "-Wall", "-Wextra"},
     });
-    parser.addIncludePath(b.path("../../src"));
+    parser.addIncludePath(b.path("native"));
     parser.linkLibC();
 
     const tests = b.addTest(.{

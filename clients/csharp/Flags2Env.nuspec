@@ -16,7 +16,7 @@
   </metadata>
   <files>
     <file src="Flags2Env.cs" target="src" exclude="bin/**;obj/**;*.nupkg" />
-    <file src="../../src/parser.c" target="native/src" exclude="../../tests/**;../../clients/**" />
-    <file src="../../src/parser.h" target="native/include" exclude="../../tests/**;../../clients/**" />
+    <file src="native/parser.c" target="native" exclude="bin/**;obj/**;*.nupkg" />
+    <file src="native/parser.h" target="native" exclude="bin/**;obj/**;*.nupkg" />
   </files>
 </package>

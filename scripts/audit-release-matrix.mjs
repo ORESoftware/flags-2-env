@@ -66,9 +66,12 @@ const packageControls = {
   ],
   java: [
     ["clients/java/pom.xml", /central-publishing-maven-plugin/, "Maven Central publishing plugin"],
-    ["clients/java/pom.xml", /<include>parser\.c<\/include>/, "Maven package includes parser.c"],
-    ["clients/java/pom.xml", /<include>parser\.h<\/include>/, "Maven package includes parser.h"],
+    ["clients/java/pom.xml", /<directory>native<\/directory>/, "Maven package uses package-local native sources"],
+    ["clients/java/pom.xml", /<include>\*\*\/\*\.c<\/include>/, "Maven package includes C sources"],
+    ["clients/java/pom.xml", /<include>\*\*\/\*\.h<\/include>/, "Maven package includes C headers"],
     ["clients/java/pom.xml", /<excludes>[\s\S]*<exclude>\*\*\/publish\.sh<\/exclude>/, "Maven resources exclude publish wrappers"],
+    ["clients/java/native/flags2env_jni.c", /#include "parser\.h"/, "JNI source includes package-local parser header"],
+    ["clients/java/Dockerfile", /clients\/java\/native\/parser\.c/, "Java Docker smoke builds package-local parser source"],
   ],
   kotlin: [
     ["clients/kotlin/build.gradle.kts", /`maven-publish`/, "Gradle maven-publish plugin"],
@@ -98,7 +101,11 @@ const packageControls = {
   ],
   rust: [
     ["clients/rust/Cargo.toml", /^include = \[/m, "Cargo include allowlist"],
+    ["clients/rust/Cargo.toml", /"native\/\*\*"/, "Cargo includes package-local parser sources"],
     ["clients/rust/Cargo.toml", /"src\/\*\*"/, "Cargo includes Rust source"],
+    ["clients/rust/Cargo.toml", /"tests\/\*\*"/, "Cargo includes package-local smoke tests"],
+    ["clients/rust/Dockerfile", /COPY clients\/rust \.\/clients\/rust/, "Rust Docker smoke copies only the Rust package"],
+    ["clients/rust/tests/smoke.rs", /native\/parser\.c/, "Rust smoke test builds package-local parser source"],
   ],
   golang: [
     ["clients/golang/go.mod", /^module github\.com\/oresoftware\/flags-2-env\/clients\/golang$/m, "Go module path for pkg.go.dev indexing"],
@@ -113,19 +120,25 @@ const packageControls = {
   ],
   cpp: [
     ["clients/cpp/CMakeLists.txt", /add_library\(flags2env_cpp INTERFACE\)/, "C++ package exposes interface target"],
-    ["clients/cpp/CMakeLists.txt", /target_include_directories\(flags2env_cpp INTERFACE include \.\.\/\.\.\/src\)/, "C++ target includes header paths"],
+    ["clients/cpp/CMakeLists.txt", /add_library\(flags2env_native STATIC native\/parser\.c\)/, "C++ package builds package-local parser source"],
+    ["clients/cpp/CMakeLists.txt", /target_include_directories\(flags2env_cpp INTERFACE include native\)/, "C++ target includes package-local header paths"],
+    ["clients/cpp/CMakeLists.txt", /add_test\(NAME flags2env_cpp_smoke/, "C++ CMake registers smoke test"],
   ],
   csharp: [
     ["clients/csharp/Flags2Env.nuspec", /<files>/, "NuGet files list"],
-    ["clients/csharp/Flags2Env.nuspec", /exclude="[^"]*\.\.\/\.\.\/clients\/\*\*/, "NuGet excludes other clients"],
-    ["clients/csharp/Flags2Env.csproj", /Pack="true"[\s\S]*PackagePath="native\/src\/"/, "dotnet pack includes native parser source"],
-    ["clients/csharp/Flags2Env.csproj", /Pack="true"[\s\S]*PackagePath="native\/include\/"/, "dotnet pack includes native parser header"],
+    ["clients/csharp/Flags2Env.nuspec", /native\/parser\.c/, "NuGet includes package-local parser source"],
+    ["clients/csharp/Flags2Env.nuspec", /native\/parser\.h/, "NuGet includes package-local parser header"],
+    ["clients/csharp/Flags2Env.csproj", /Include="native\/parser\.c"[\s\S]*PackagePath="native\/"/, "dotnet pack includes package-local parser source"],
+    ["clients/csharp/Flags2Env.csproj", /Include="native\/parser\.h"[\s\S]*PackagePath="native\/"/, "dotnet pack includes package-local parser header"],
+    ["clients/csharp/Flags2EnvTest.cs", /clients\/csharp\/native\/parser\.c/, "C# smoke test can build package-local parser source"],
   ],
   fsharp: [
     ["clients/fsharp/Flags2Env.FSharp.nuspec", /<files>/, "NuGet files list"],
-    ["clients/fsharp/Flags2Env.FSharp.nuspec", /exclude="[^"]*\.\.\/\.\.\/clients\/\*\*/, "NuGet excludes other clients"],
-    ["clients/fsharp/Flags2Env.FSharp.fsproj", /Pack="true"[\s\S]*PackagePath="native\/src\/"/, "dotnet pack includes native parser source"],
-    ["clients/fsharp/Flags2Env.FSharp.fsproj", /Pack="true"[\s\S]*PackagePath="native\/include\/"/, "dotnet pack includes native parser header"],
+    ["clients/fsharp/Flags2Env.FSharp.nuspec", /native\/parser\.c/, "NuGet includes package-local parser source"],
+    ["clients/fsharp/Flags2Env.FSharp.nuspec", /native\/parser\.h/, "NuGet includes package-local parser header"],
+    ["clients/fsharp/Flags2Env.FSharp.fsproj", /Include="native\/parser\.c"[\s\S]*PackagePath="native\/"/, "dotnet pack includes package-local parser source"],
+    ["clients/fsharp/Flags2Env.FSharp.fsproj", /Include="native\/parser\.h"[\s\S]*PackagePath="native\/"/, "dotnet pack includes package-local parser header"],
+    ["clients/fsharp/Flags2EnvTest.fs", /SetDllImportResolver/, "F# smoke test resolves package-local parser library"],
   ],
   php: [
     ["clients/php/composer.json", /"archive"\s*:\s*\{/, "Composer archive controls"],
@@ -151,34 +164,56 @@ const packageControls = {
     ["scripts/publish-client.sh", /git tag "\$\{PACKAGE_VERSION:\?set PACKAGE_VERSION\}"/, "Swift release uses full semantic version tag"],
   ],
   elixir: [
-    ["clients/elixir/mix.exs", /files: \["lib\.ex", "README\.md", "mix\.exs"\]/, "Hex package file list"],
+    ["clients/elixir/mix.exs", /name: "flags2env_elixir"/, "Elixir Hex package name avoids Erlang package collision"],
+    ["clients/elixir/mix.exs", /erlc_paths: \["native"\]/, "Elixir package compiles package-local Erlang module"],
+    ["clients/elixir/mix.exs", /"native\/flags2env\.erl"/, "Elixir Hex package includes Erlang facade"],
+    ["clients/elixir/mix.exs", /"native\/flags2env_nif\.c"/, "Elixir Hex package includes NIF source"],
+    ["clients/elixir/mix.exs", /"native\/parser\.c"/, "Elixir Hex package includes parser source"],
+    ["clients/elixir/mix.exs", /"native\/parser\.h"/, "Elixir Hex package includes parser header"],
+    ["clients/elixir/README.md", /flags2env_elixir/, "Elixir package README documents Hex package name"],
+    ["clients/elixir/Dockerfile", /clients\/elixir\/native\/parser\.c/, "Elixir Docker smoke builds package-local parser source"],
   ],
   erlang: [
-    ["clients/erlang/rebar.config", /\{files, \["flags2env\.erl", "flags2env_nif\.c", "rebar\.config"\]\}/, "Hex package file list"],
+    ["clients/erlang/rebar.config", /\{files, \["flags2env\.erl", "flags2env_nif\.c", "parser\.c", "parser\.h", "rebar\.config"\]\}/, "Hex package file list"],
+    ["clients/erlang/flags2env_nif.c", /#include "parser\.h"/, "Erlang NIF includes package-local parser header"],
+    ["clients/erlang/Dockerfile", /clients\/erlang\/parser\.c/, "Erlang Docker smoke builds package-local parser source"],
   ],
   gleam: [
     ["clients/gleam/gleam.toml", /^repository = /m, "Gleam package repository metadata"],
     ["clients/gleam/gleam.toml", /^licences = \["MIT"\]/m, "Gleam package license metadata"],
+    ["clients/gleam/Dockerfile", /clients\/erlang\/parser\.c/, "Gleam Docker smoke builds package-local parser source"],
   ],
   haskell: [
     ["clients/haskell/flags2env.cabal", /^extra-source-files:/m, "Cabal source manifest controls"],
     ["clients/haskell/flags2env.cabal", /^  exposed-modules: Flags2Env/m, "Cabal exposes runtime module"],
+    ["clients/haskell/flags2env.cabal", /^test-suite flags2env-smoke$/m, "Cabal exposes smoke test suite"],
+    ["clients/haskell/flags2env.cabal", /^  main-is: test\.hs$/m, "Cabal smoke test entrypoint"],
   ],
   ocaml: [
     ["clients/ocaml/flags2env.opam", /^build: \[/m, "opam build metadata"],
+    ["clients/ocaml/flags2env.opam", /\{with-test\}/, "opam test metadata"],
     ["clients/ocaml/dune-project", /\(package/, "OCaml dune package metadata"],
+    ["clients/ocaml/dune", /\(test/, "OCaml dune smoke test"],
   ],
   reasonml: [
     ["clients/reasonml/flags2env.opam", /^build: \[/m, "opam build metadata"],
+    ["clients/reasonml/flags2env.opam", /"reason"/, "ReasonML opam Reason syntax dependency"],
+    ["clients/reasonml/flags2env.opam", /\{with-test\}/, "ReasonML opam test metadata"],
     ["clients/reasonml/dune-project", /\(package/, "ReasonML dune package metadata"],
+    ["clients/reasonml/src/dune", /\(test/, "ReasonML dune smoke test"],
   ],
   perl: [
     ["clients/perl/MANIFEST.SKIP", /^\^blib\//m, "CPAN skips build output"],
     ["clients/perl/MANIFEST.SKIP", /^\^Makefile\$/m, "CPAN skips generated Makefile"],
+    ["clients/perl/MANIFEST.SKIP", /^\^MYMETA\\\./m, "CPAN skips generated MYMETA files"],
+    ["clients/perl/MANIFEST.SKIP", /^\^publish\\\.sh\$/m, "CPAN skips publish wrapper"],
   ],
   lua: [
     ["clients/lua/flags2env-dev-1.rockspec", /^build = \{/m, "LuaRocks build metadata"],
-    ["clients/lua/flags2env-dev-1.rockspec", /flags2env = "flags2env\.lua"/, "LuaRocks module mapping"],
+    ["clients/lua/flags2env-dev-1.rockspec", /flags2env = "clients\/lua\/flags2env\.lua"/, "LuaRocks dev module mapping from repository root"],
+    ["clients/lua/flags2env-0.1.0-1.rockspec", /^version = "0\.1\.0-1"$/m, "LuaRocks stable version"],
+    ["clients/lua/flags2env-0.1.0-1.rockspec", /tag = "v0\.1\.0"/, "LuaRocks stable source tag"],
+    ["clients/lua/flags2env-0.1.0-1.rockspec", /flags2env = "clients\/lua\/flags2env\.lua"/, "LuaRocks stable module mapping from repository root"],
   ],
   nim: [
     ["clients/nim/flags2env.nimble", /^installFiles\s+=\s+@\["flags2env\.nim"\]/m, "Nimble install file list"],
@@ -186,14 +221,20 @@ const packageControls = {
   r: [
     ["clients/r/.Rbuildignore", /^\^Dockerfile\$$/m, "R build excludes Dockerfile"],
     ["clients/r/.Rbuildignore", /^\^publish\\\.sh\$$/m, "R build excludes publish wrapper"],
+    ["clients/r/src/flags2env_r.c", /#include "parser\.h"/, "R staged package includes local parser header"],
+    ["clients/r/tests/smoke.R", /parse_flags/, "R package smoke test"],
   ],
   matlab: [
     ["clients/matlab/README.md", /MATLAB bindings use `loadlibrary`/, "MATLAB source-archive usage docs"],
+    ["clients/matlab/test.m", /flags2env\.parse/, "MATLAB smoke test"],
     ["scripts/publish-client.sh", /zip -r flags2env-matlab\.zip \+flags2env README\.md/, "MATLAB publish command archives only MATLAB source"],
   ],
   julia: [
     ["clients/julia/Project.toml", /^name = "Flags2Env"$/m, "Julia package name"],
+    ["clients/julia/Project.toml", /^uuid = "[0-9a-f-]{36}"$/m, "Julia package UUID"],
+    ["clients/julia/Project.toml", /^version = "0\.1\.0"$/m, "Julia package version"],
     ["clients/julia/Project.toml", /^\[compat\]/m, "Julia compatibility metadata"],
+    ["clients/julia/REGISTRATION.md", /@JuliaRegistrator register subdir=clients\/julia/, "Julia subdir Registrator instruction"],
   ],
   fortran: [
     ["clients/fortran/fpm.toml", /^\[library\]/m, "fpm library metadata"],
@@ -202,6 +243,8 @@ const packageControls = {
   zig: [
     ["clients/zig/build.zig", /b\.addModule\("flags2env"/, "Zig package module"],
     ["clients/zig/build.zig", /b\.step\("test", "Run Zig smoke tests"\)/, "Zig smoke test target"],
+    ["clients/zig/build.zig", /native\/parser\.c/, "Zig package builds against package-local C parser"],
+    ["clients/zig/build.zig", /b\.path\("native"\)/, "Zig package uses package-local include path"],
   ],
   crystal: [
     ["clients/crystal/shard.yml", /^name: flags2env$/m, "Shard package name"],
@@ -216,6 +259,71 @@ const packageControls = {
   ],
   zsh: [
     ["packaging/homebrew/Formula/flags2env.rb", /clients\/zsh\/flags2env\.zsh/, "Homebrew installs zsh helper"],
+  ],
+};
+
+const forbiddenPackageContent = {
+  csharp: [
+    ["clients/csharp/Flags2Env.nuspec", /\.\.\/\.\.\/src|\.\.\/\.\.\/clients/, "C# NuGet spec reaches outside package root"],
+    ["clients/csharp/Flags2Env.csproj", /\.\.\/\.\.\/src/, "C# project pack item reaches outside package root"],
+    ["clients/csharp/Flags2EnvTest.cs", /build\/libflags2env|tests\/fixtures|\.\.\/\.\.\/tests/, "C# smoke test depends on repo build output or fixture tree"],
+  ],
+  fsharp: [
+    ["clients/fsharp/Flags2Env.FSharp.nuspec", /\.\.\/\.\.\/src|\.\.\/\.\.\/clients/, "F# NuGet spec reaches outside package root"],
+    ["clients/fsharp/Flags2Env.FSharp.fsproj", /\.\.\/\.\.\/src/, "F# project pack item reaches outside package root"],
+    ["clients/fsharp/Flags2EnvTest.fs", /build\/libflags2env|tests\/fixtures|\.\.\/\.\.\/tests/, "F# smoke test depends on repo build output or fixture tree"],
+  ],
+  elixir: [
+    ["clients/elixir/Dockerfile", /COPY src|COPY tests|src\/parser\.c|tests\/fixtures|clients\/erlang/, "Elixir Docker smoke depends on repo source, fixtures, or Erlang client tree"],
+    ["clients/elixir/test.exs", /tests\/fixtures|\.\.\/\.\.\/tests|\.\.\/\.cli-flags\.toml/, "Elixir smoke test depends on repo fixture tree"],
+  ],
+  java: [
+    ["clients/java/pom.xml", /\.\.\/\.\.\/src/, "Java Maven package reaches into repo source directory"],
+    ["clients/java/native/flags2env_jni.c", /\.\.\/\.\.\/\.\.\/src\/parser\.h/, "JNI source reaches into repo source directory"],
+    ["clients/java/Dockerfile", /COPY src|COPY tests|src\/parser\.c/, "Java Docker smoke depends on repo source or fixture tree"],
+  ],
+  erlang: [
+    ["clients/erlang/flags2env_nif.c", /\.\.\/\.\.\/src\/parser\.h/, "Erlang NIF reaches into repo source directory"],
+    ["clients/erlang/Dockerfile", /COPY src|COPY tests|src\/parser\.c|tests\/fixtures/, "Erlang Docker smoke depends on repo source or fixture tree"],
+    ["clients/erlang/flags2env_test.erl", /tests\/fixtures|\.\.\/\.\.\/tests/, "Erlang smoke test depends on repo fixture tree"],
+  ],
+  gleam: [
+    ["clients/gleam/Dockerfile", /COPY src|COPY tests|src\/parser\.c|tests\/fixtures/, "Gleam Docker smoke depends on repo source or fixture tree"],
+    ["clients/gleam/test.gleam", /\/repo\/tests|tests\/fixtures/, "Gleam smoke test depends on repo fixture tree"],
+  ],
+  rust: [
+    ["clients/rust/Dockerfile", /COPY src|COPY tests|src\/parser\.c|tests\/fixtures|make all|LD_LIBRARY_PATH/, "Rust Docker smoke depends on repo source, fixtures, or build artifacts"],
+    ["clients/rust/tests/smoke.rs", /\.\.\/\.\.\/build|tests\/fixtures|\.\.\/\.\.\/tests/, "Rust smoke test depends on repo build output or fixture tree"],
+  ],
+  cpp: [
+    ["clients/cpp/test.cpp", /tests\/fixtures|\.\.\/\.\.\/tests/, "C++ smoke test depends on repo fixture tree"],
+  ],
+  crystal: [
+    ["clients/crystal/test.cr", /tests\/fixtures|\.\.\/\.\.\/tests/, "Crystal smoke test depends on repo fixture tree"],
+  ],
+  fortran: [
+    ["clients/fortran/test.f90", /tests\/fixtures|\.\.\/\.\.\/tests/, "Fortran smoke test depends on repo fixture tree"],
+  ],
+  haskell: [
+    ["clients/haskell/test.hs", /tests\/fixtures|\.\.\/\.\.\/tests/, "Haskell smoke test depends on repo fixture tree"],
+  ],
+  julia: [
+    ["clients/julia/test/runtests.jl", /tests\/fixtures|\.\.\/\.\.\/tests/, "Julia smoke test depends on repo fixture tree"],
+  ],
+  lua: [
+    ["clients/lua/test.lua", /tests\/fixtures|\.\.\/\.\.\/tests/, "Lua smoke test depends on repo fixture tree"],
+  ],
+  nim: [
+    ["clients/nim/test.nim", /tests\/fixtures|\.\.\/\.\.\/tests/, "Nim smoke test depends on repo fixture tree"],
+  ],
+  ocaml: [
+    ["clients/ocaml/test.ml", /tests\/fixtures|\.\.\/\.\.\/tests/, "OCaml smoke test depends on repo fixture tree"],
+  ],
+  reasonml: [
+    ["clients/reasonml/src/Test.re", /tests\/fixtures|\.\.\/\.\.\/tests/, "ReasonML smoke test depends on repo fixture tree"],
+  ],
+  zig: [
+    ["clients/zig/test.zig", /tests\/fixtures|\.\.\/\.\.\/tests/, "Zig smoke test depends on repo fixture tree"],
   ],
 };
 
@@ -243,7 +351,7 @@ const matrix = [
     client: "java",
     repository: "Maven Central / Sonatype",
     controls: ["clients/java/pom.xml"],
-    sources: ["clients/java/src/main/java/com/oresoftware/flags2env/Flags2Env.java", "clients/java/native/flags2env_jni.c"],
+    sources: ["clients/java/src/main/java/com/oresoftware/flags2env/Flags2Env.java", "clients/java/native/flags2env_jni.c", "clients/java/native/parser.c", "clients/java/native/parser.h"],
     tests: ["clients/java/src/test/java/com/oresoftware/flags2env/Flags2EnvTest.java"],
     publishIncludes: ["mvn -P release deploy"],
   },
@@ -287,8 +395,8 @@ const matrix = [
     language: "Rust",
     client: "rust",
     repository: "crates.io",
-    controls: ["clients/rust/Cargo.toml"],
-    sources: ["clients/rust/src/lib.rs"],
+    controls: ["clients/rust/Cargo.toml", "clients/rust/Dockerfile"],
+    sources: ["clients/rust/src/lib.rs", "clients/rust/native/parser.c", "clients/rust/native/parser.h"],
     tests: ["clients/rust/tests/smoke.rs"],
     publishIncludes: ["cargo publish"],
   },
@@ -315,7 +423,7 @@ const matrix = [
     client: "cpp",
     repository: "Git repository / source archive",
     controls: ["clients/cpp/CMakeLists.txt"],
-    sources: ["clients/cpp/include/flags2env.hpp"],
+    sources: ["clients/cpp/include/flags2env.hpp", "clients/cpp/native/parser.c", "clients/cpp/native/parser.h"],
     tests: ["clients/cpp/test.cpp"],
     publishIncludes: ["git tag"],
   },
@@ -324,7 +432,7 @@ const matrix = [
     client: "csharp",
     repository: "NuGet Gallery",
     controls: ["clients/csharp/Flags2Env.nuspec", "clients/csharp/Flags2Env.csproj"],
-    sources: ["clients/csharp/Flags2Env.cs"],
+    sources: ["clients/csharp/Flags2Env.cs", "clients/csharp/native/parser.c", "clients/csharp/native/parser.h"],
     tests: ["clients/csharp/Flags2EnvTest.cs"],
     publishIncludes: ["dotnet nuget push"],
   },
@@ -333,7 +441,7 @@ const matrix = [
     client: "fsharp",
     repository: "NuGet Gallery",
     controls: ["clients/fsharp/Flags2Env.FSharp.nuspec", "clients/fsharp/Flags2Env.FSharp.fsproj"],
-    sources: ["clients/fsharp/Flags2Env.fs"],
+    sources: ["clients/fsharp/Flags2Env.fs", "clients/fsharp/native/parser.c", "clients/fsharp/native/parser.h"],
     tests: ["clients/fsharp/Flags2EnvTest.fs"],
     publishIncludes: ["dotnet nuget push"],
   },
@@ -377,8 +485,8 @@ const matrix = [
     language: "Elixir",
     client: "elixir",
     repository: "Hex.pm",
-    controls: ["clients/elixir/mix.exs"],
-    sources: ["clients/elixir/lib.ex"],
+    controls: ["clients/elixir/mix.exs", "clients/elixir/README.md"],
+    sources: ["clients/elixir/lib.ex", "clients/elixir/native/flags2env.erl", "clients/elixir/native/flags2env_nif.c", "clients/elixir/native/parser.c", "clients/elixir/native/parser.h"],
     tests: ["clients/elixir/test.exs"],
     publishIncludes: ["mix hex.publish"],
   },
@@ -387,7 +495,7 @@ const matrix = [
     client: "erlang",
     repository: "Hex.pm",
     controls: ["clients/erlang/rebar.config"],
-    sources: ["clients/erlang/flags2env.erl", "clients/erlang/flags2env_nif.c"],
+    sources: ["clients/erlang/flags2env.erl", "clients/erlang/flags2env_nif.c", "clients/erlang/parser.c", "clients/erlang/parser.h"],
     tests: ["clients/erlang/flags2env_test.erl"],
     publishIncludes: ["rebar3 hex publish"],
   },
@@ -413,7 +521,7 @@ const matrix = [
     language: "OCaml",
     client: "ocaml",
     repository: "opam Repository",
-    controls: ["clients/ocaml/flags2env.opam", "clients/ocaml/dune-project"],
+    controls: ["clients/ocaml/flags2env.opam", "clients/ocaml/dune-project", "clients/ocaml/dune"],
     sources: ["clients/ocaml/lib/flags2env.ml"],
     tests: ["clients/ocaml/test.ml"],
     publishIncludes: ["opam publish submit"],
@@ -422,7 +530,7 @@ const matrix = [
     language: "ReasonML",
     client: "reasonml",
     repository: "opam Repository",
-    controls: ["clients/reasonml/flags2env.opam", "clients/reasonml/dune-project"],
+    controls: ["clients/reasonml/flags2env.opam", "clients/reasonml/dune-project", "clients/reasonml/src/dune"],
     sources: ["clients/reasonml/src/Flags2Env.re"],
     tests: ["clients/reasonml/src/Test.re"],
     publishIncludes: ["opam publish submit"],
@@ -440,7 +548,7 @@ const matrix = [
     language: "Lua",
     client: "lua",
     repository: "LuaRocks Repository",
-    controls: ["clients/lua/flags2env-dev-1.rockspec"],
+    controls: ["clients/lua/flags2env-dev-1.rockspec", "clients/lua/flags2env-0.1.0-1.rockspec"],
     sources: ["clients/lua/flags2env.lua"],
     tests: ["clients/lua/test.lua"],
     publishIncludes: ["luarocks upload"],
@@ -460,7 +568,7 @@ const matrix = [
     repository: "CRAN / R-universe",
     controls: ["clients/r/DESCRIPTION", "clients/r/.Rbuildignore"],
     sources: ["clients/r/R/flags2env.R", "clients/r/src/flags2env_r.c"],
-    tests: [],
+    tests: ["clients/r/tests/smoke.R"],
     publishIncludes: ["submit_cran"],
   },
   {
@@ -469,14 +577,14 @@ const matrix = [
     repository: "Source archive / Git repository",
     controls: ["clients/matlab/README.md"],
     sources: ["clients/matlab/+flags2env/parse.m", "clients/matlab/+flags2env/apply.m"],
-    tests: [],
+    tests: ["clients/matlab/test.m"],
     publishIncludes: ["zip -r flags2env-matlab.zip"],
   },
   {
     language: "Julia",
     client: "julia",
     repository: "Julia General Registry",
-    controls: ["clients/julia/Project.toml"],
+    controls: ["clients/julia/Project.toml", "clients/julia/LICENSE", "clients/julia/README.md", "clients/julia/REGISTRATION.md"],
     sources: ["clients/julia/src/Flags2Env.jl"],
     tests: ["clients/julia/test/runtests.jl"],
     publishIncludes: ["Registrator"],
@@ -495,7 +603,7 @@ const matrix = [
     client: "zig",
     repository: "Git repository / Zig package",
     controls: ["clients/zig/build.zig"],
-    sources: ["clients/zig/src/flags2env.zig"],
+    sources: ["clients/zig/src/flags2env.zig", "clients/zig/native/parser.c", "clients/zig/native/parser.h"],
     tests: ["clients/zig/test.zig"],
     publishIncludes: ["git tag"],
   },
@@ -567,6 +675,17 @@ function requirePackageControls(entry) {
   }
 }
 
+function forbidPackageContent(entry) {
+  const checks = forbiddenPackageContent[entry.client] || [];
+  for (const [path, pattern, description] of checks) {
+    const text = readText(entry, path);
+    if (text && pattern.test(text)) {
+      console.error(`${entry.language}: forbidden package content (${description}) in ${path}`);
+      failures++;
+    }
+  }
+}
+
 function requireMatrixCompleteness() {
   const seen = new Map();
   for (const entry of matrix) {
@@ -631,6 +750,7 @@ for (const entry of matrix) {
     requirePath(entry, "test", path);
   }
   requirePackageControls(entry);
+  forbidPackageContent(entry);
   dryRunPublish(entry);
 }
 

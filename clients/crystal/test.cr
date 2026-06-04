@@ -1,6 +1,22 @@
 require "./src/flags2env"
 
-config = "tests/fixtures/.cli-flags.toml"
+file = File.tempfile("flags2env-crystal-smoke", ".toml")
+config = file.path
+file.print <<-TOML
+[flags.port]
+env = "PORT"
+aliases = ["port"]
+type = "integer"
+
+[flags.debug]
+env = "DEBUG"
+aliases = ["debug"]
+type = "bool"
+true_aliases = ["t"]
+TOML
+file.close
+at_exit { File.delete(config) if File.exists?(config) }
+
 parsed = Flags2Env.parse(["app", "--debug=t", "--port", "8181"], config)
 raise "unexpected parsed map" unless parsed["DEBUG"] == "true" && parsed["PORT"] == "8181"
 

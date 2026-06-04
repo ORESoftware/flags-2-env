@@ -44,16 +44,48 @@ module carries package-local copies of `src/parser.c` and `src/parser.h` so
 consumers can build it from a module cache without a prebuilt native library;
 the packaging audit verifies those copies match the root C parser sources.
 
+The Java Maven package carries package-local copies of the native parser under
+`clients/java/native`, and the JNI source includes the local `parser.h` instead
+of reaching back to the repository root.
+
+The Erlang Hex package carries `parser.c` and `parser.h` beside the NIF source,
+and the Gleam Docker smoke uses the same package-local Erlang native sources.
+The Elixir facade publishes as `flags2env_elixir`, includes its own package-local
+copy of the Erlang NIF source and parser sources, and avoids reaching into the
+Erlang client tree during package smoke checks.
+
+The C# and F# NuGet packages carry package-local `native/parser.c` and
+`native/parser.h` copies, so the native source files in each `.nupkg` do not
+depend on repository-relative `../../src` paths.
+
+The C++ package is rooted at `clients/cpp` and carries package-local parser
+sources under `clients/cpp/native`, so its CMake target can be consumed without
+repository-relative `../../src` paths.
+
 SwiftPM expects a `Package.swift` manifest in the repository root and a full
 semantic-version tag such as `0.1.0`, so the root manifest points at
 `clients/swift` while the Swift publish command uses an unprefixed SemVer tag.
 
+The Julia package is rooted at `clients/julia`, not the repository root. Its
+publish preflight runs `Pkg.test()` in that project and then prints the
+Registrator trigger comment:
+
+```text
+@JuliaRegistrator register subdir=clients/julia
+```
+
+The Zig package is rooted at `clients/zig` and carries package-local copies of
+`src/parser.c` and `src/parser.h` under `clients/zig/native`. The packaging
+audit verifies those copies match the root parser sources so consumers can build
+the Zig package without relying on repository-relative `../../src` paths.
+
 Docker-backed verification for the newer client scaffolds lives in
 `scripts/docker-check-new-clients.sh`. Run the default set for practical local
 coverage, or pass `--full` in CI to include heavier Haskell, OCaml/opam, Julia,
-Scala, Kotlin, Groovy, and JVM facade checks. The GitHub Actions client
-packaging workflow runs the default Docker set automatically and exposes a
-manual `full_docker_checks` input for the heavyweight set.
+Scala, Kotlin, Groovy, and JVM facade checks. The Haskell full check runs the
+Cabal smoke test suite against the freshly built native library. The GitHub
+Actions client packaging workflow runs the default Docker set automatically and
+exposes a manual `full_docker_checks` input for the heavyweight set.
 
 The registry/package-control audit is available without language toolchains:
 
@@ -70,11 +102,23 @@ command. It also checks ecosystem-specific manifest controls such as npm
 allowlists, `MANIFEST.in`, Cargo `include`, `.gemspec` file lists, Composer
 archive excludes, Maven/Gradle resource excludes, NuGet file excludes,
 `.pubignore`, SwiftPM excludes, Hex file lists, Cabal/opam metadata, CPAN skip
-rules, LuaRocks modules, Nimble install files, R build ignores, and Homebrew
-shell helper installation. The package-control, release matrix, and npm
+rules, LuaRocks modules, Nimble install files, R build ignores, Julia subdir
+registration metadata, and Homebrew shell helper installation. The
+package-control, release matrix, and npm
 package-content audits run in `.github/workflows/client-packaging.yml`
 alongside the core shell integration tests whenever client, packaging, script,
 source, or test files change.
+
+The Rust crate includes `clients/rust/native/parser.c` and
+`clients/rust/native/parser.h` in its Cargo allowlist. Its packaged smoke test
+compiles those local sources into a temporary shared library, so `cargo test`
+does not depend on the monorepo `build/` directory or shared test fixtures.
+
+The C# and F# smoke programs use the package-local `native/parser.c` fallback
+when `FLAGS2ENV_NATIVE_LIB` is not set and write their own temporary TOML
+fixture when `FLAGS2ENV_FIXTURE` is absent. The F# smoke program registers a
+`DllImportResolver` before the first native call so `DllImport("flags2env")`
+loads that temporary library.
 
 The native C CLI has a Homebrew formula at
 `packaging/homebrew/Formula/flags2env.rb`. It builds the CLI and C library,

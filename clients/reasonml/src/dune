@@ -2,3 +2,7 @@
  (name flags2env_reason)
  (public_name flags2env-reason)
  (libraries flags2env))
+
+(test
+ (name Test)
+ (libraries flags2env_reason))

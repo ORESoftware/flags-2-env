@@ -1,4 +1,4 @@
-#include "../../../src/parser.h"
+#include "parser.h"
 
 #include <jni.h>
 #include <stdlib.h>

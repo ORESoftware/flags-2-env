@@ -7,6 +7,7 @@ defmodule Flags2Env.MixProject do
       version: "0.1.0",
       elixir: "~> 1.15",
       elixirc_paths: ["."],
+      erlc_paths: ["native"],
       package: package(),
       description: "Elixir bindings for flags2env"
     ]
@@ -18,9 +19,18 @@ defmodule Flags2Env.MixProject do
 
   defp package do
     [
+      name: "flags2env_elixir",
       licenses: ["MIT"],
       links: %{"GitHub" => "https://github.com/ORESoftware/flags-2-env"},
-      files: ["lib.ex", "README.md", "mix.exs"]
+      files: [
+        "lib.ex",
+        "README.md",
+        "mix.exs",
+        "native/flags2env.erl",
+        "native/flags2env_nif.c",
+        "native/parser.c",
+        "native/parser.h"
+      ]
     ]
   end
 end

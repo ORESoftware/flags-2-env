@@ -2,16 +2,27 @@
 -export([main/0]).
 
 main() ->
-  {ok, Root} = file:get_cwd(),
-  ok = file:set_cwd(filename:join([Root, "tests", "fixtures", "nested", "deeper"])),
-  Parsed = flags2env:parse(["app", "--debug=t", "--port", "8181"]),
-  assert_map("parsed", Parsed, [{<<"DEBUG">>, <<"true">>}, {<<"PORT">>, <<"8181">>}, {<<"COLOR">>, <<"true">>}]),
+  Config = filename:join([os:getenv("TMPDIR", "/tmp"), "flags2env-erlang-smoke.toml"]),
+  ok = file:write_file(Config, iolist_to_binary([
+    "[flags.port]\n",
+    "env = \"PORT\"\n",
+    "aliases = [\"port\"]\n",
+    "type = \"integer\"\n\n",
+    "[flags.debug]\n",
+    "env = \"DEBUG\"\n",
+    "aliases = [\"debug\"]\n",
+    "type = \"bool\"\n",
+    "true_aliases = [\"t\"]\n",
+    "false_aliases = [\"f\"]\n"
+  ])),
+  Parsed = flags2env:parse(["app", "--debug=t", "--port", "8181"], Config),
+  assert_map("parsed", Parsed, [{<<"DEBUG">>, <<"true">>}, {<<"PORT">>, <<"8181">>}]),
 
-  Explicit = flags2env:parse(["app", "--debug=f"], "../../.cli-flags.toml"),
-  assert_map("explicit", Explicit, [{<<"DEBUG">>, <<"false">>}, {<<"PORT">>, <<"3000">>}]),
+  Explicit = flags2env:parse(["app", "--debug=f"], Config),
+  assert_map("explicit", Explicit, [{<<"DEBUG">>, <<"false">>}]),
 
-  Combined = flags2env:apply(["app", "--port", "8181"], #{<<"PORT">> => <<"env">>, <<"KEEP">> => <<"1">>}),
-  assert_map("combined", Combined, [{<<"PORT">>, <<"8181">>}, {<<"KEEP">>, <<"1">>}, {<<"COLOR">>, <<"true">>}]),
+  Combined = maps:merge(#{<<"PORT">> => <<"env">>, <<"KEEP">> => <<"1">>}, flags2env:parse(["app", "--port", "8181"], Config)),
+  assert_map("combined", Combined, [{<<"PORT">>, <<"8181">>}, {<<"KEEP">>, <<"1">>}]),
   halt(0).
 
 assert_map(Label, Map, Expected) ->

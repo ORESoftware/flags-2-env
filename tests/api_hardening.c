@@ -8,6 +8,8 @@
 #define EQUALS_ONLY_CONFIG "tests/equals-only/.cli-flags.toml"
 #define STOP_POSITIONALS_CONFIG "tests/stop-positionals/.cli-flags.toml"
 #define INVALID_PARSE_CONFIG "tests/audit-invalid-parse/.cli-flags.toml"
+#define INVALID_CONFIG_LISTS_CONFIG "tests/audit-invalid-config-lists/.cli-flags.toml"
+#define INVALID_CONFIG_OPTIONS_CONFIG "tests/audit-invalid-config-options/.cli-flags.toml"
 #define INVALID_ENV_ONLY_CONFIG "tests/audit-invalid-env-only/.cli-flags.toml"
 #define TYPED_CONFIG "tests/typed/.cli-flags.toml"
 #define NATIVE_SCALARS_CONFIG "tests/native-scalars/.cli-flags.toml"
@@ -202,6 +204,16 @@ int main(void) {
   expect_json("invalid parse env audit report",
               f2e_audit_config_from_file(INVALID_PARSE_CONFIG),
               "{\"ok\":false,\"errorCount\":3,\"warningCount\":0,\"errors\":[\"parse.positionals_env collides with flags.port env \\\"PORT\\\"\",\"parse.unknown_options_env collides with flags.port env \\\"PORT\\\"\",\"parse.positionals_env and parse.unknown_options_env both use env \\\"PORT\\\"\"],\"warnings\":[]}");
+
+  expect_status("invalid config option audit", f2e_audit_config_status_from_file(INVALID_CONFIG_OPTIONS_CONFIG), 1);
+  expect_json("invalid config option audit report",
+              f2e_audit_config_from_file(INVALID_CONFIG_OPTIONS_CONFIG),
+              "{\"ok\":false,\"errorCount\":4,\"warningCount\":0,\"errors\":[\"help.columns must be a list of supported table column names\",\"help.exclude must be a list of supported table column names\",\"env.ignore contains invalid env var name \\\"BAD-KEY\\\"\",\"env.ignore contains invalid env var name \\\"\\\"\"],\"warnings\":[]}");
+
+  expect_status("invalid config list audit", f2e_audit_config_status_from_file(INVALID_CONFIG_LISTS_CONFIG), 1);
+  expect_json("invalid config list audit report",
+              f2e_audit_config_from_file(INVALID_CONFIG_LISTS_CONFIG),
+              "{\"ok\":false,\"errorCount\":2,\"warningCount\":0,\"errors\":[\"help.columns must be a list of supported table column names\",\"env.ignore must be a list of env var names\"],\"warnings\":[]}");
 
   expect_status("invalid env-only audit", f2e_audit_config_status_from_file(INVALID_ENV_ONLY_CONFIG), 1);
   expect_json("invalid env-only audit report",

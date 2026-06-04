@@ -1,0 +1,11 @@
+[help]
+columns = ["options", "bogus"]
+exclude = ["default", "wat"]
+
+[env]
+ignore = ["BAD-KEY", ""]
+
+[flags.port]
+env = "PORT"
+aliases = ["port"]
+type = "integer"

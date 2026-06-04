@@ -1,0 +1,10 @@
+[help]
+columns = "options"
+
+[env]
+ignore = ["EXTRA", bad]
+
+[flags.port]
+env = "PORT"
+aliases = ["port"]
+type = "integer"

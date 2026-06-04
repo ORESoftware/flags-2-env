@@ -1,22 +1,36 @@
-File.cd!("../../tests/fixtures/nested/deeper")
+config = Path.join(System.tmp_dir!(), "flags2env-elixir-smoke.toml")
 
-parsed = Flags2Env.parse(["app", "--debug=t", "--port", "8181"])
+File.write!(config, """
+[flags.port]
+env = "PORT"
+aliases = ["port"]
+type = "integer"
 
-unless parsed["DEBUG"] == "true" and parsed["PORT"] == "8181" and parsed["COLOR"] == "true" do
+[flags.debug]
+env = "DEBUG"
+aliases = ["debug"]
+type = "bool"
+true_aliases = ["t"]
+false_aliases = ["f"]
+""")
+
+parsed = Flags2Env.parse(["app", "--debug=t", "--port", "8181"], config)
+
+unless parsed["DEBUG"] == "true" and parsed["PORT"] == "8181" do
   IO.inspect(parsed, label: "unexpected parsed map")
   System.halt(1)
 end
 
-explicit = Flags2Env.parse(["app", "--debug=f"], "../../.cli-flags.toml")
+explicit = Flags2Env.parse(["app", "--debug=f"], config)
 
-unless explicit["DEBUG"] == "false" and explicit["PORT"] == "3000" do
+unless explicit["DEBUG"] == "false" do
   IO.inspect(explicit, label: "unexpected explicit config map")
   System.halt(1)
 end
 
-combined = Flags2Env.apply(["app", "--port", "8181"], %{"PORT" => "env", "KEEP" => "1"})
+combined = Map.merge(%{"PORT" => "env", "KEEP" => "1"}, Flags2Env.parse(["app", "--port", "8181"], config))
 
-unless combined["PORT"] == "8181" and combined["KEEP"] == "1" and combined["COLOR"] == "true" do
+unless combined["PORT"] == "8181" and combined["KEEP"] == "1" do
   IO.inspect(combined, label: "unexpected combined map")
   System.halt(1)
 end

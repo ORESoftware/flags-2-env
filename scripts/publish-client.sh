@@ -113,7 +113,7 @@ case "$client" in
     run_root 'git status --short && git tag "${PACKAGE_VERSION:?set PACKAGE_VERSION}" && git push origin "${PACKAGE_VERSION}"'
     ;;
   c|cpp|fortran|zig|crystal|bash|zsh)
-    run 'git status --short && git tag "v${PACKAGE_VERSION:?set PACKAGE_VERSION}" && git push --tags'
+    run 'git status --short && git tag "v${PACKAGE_VERSION:?set PACKAGE_VERSION}" && git push origin "v${PACKAGE_VERSION}"'
     ;;
   solidity)
     run 'npm pack --dry-run && npm publish --access public'
@@ -146,7 +146,7 @@ case "$client" in
     run 'perl Makefile.PL && make manifest && make dist && cpan-upload *.tar.gz'
     ;;
   lua)
-    run 'luarocks lint flags2env-dev-1.rockspec && luarocks upload flags2env-dev-1.rockspec'
+    run 'luarocks lint flags2env-0.1.0-1.rockspec && luarocks upload flags2env-0.1.0-1.rockspec'
     ;;
   nim)
     run 'nimble check && nimble publish'
@@ -155,10 +155,10 @@ case "$client" in
     run_root 'rm -rf dist/r && mkdir -p dist/r && cp -R clients/r/. dist/r/ && cp src/parser.c src/parser.h dist/r/src/ && cd dist && R CMD build r && R CMD check flags2env_*.tar.gz && pkg="$(ls flags2env_*.tar.gz | tail -1)" && Rscript -e "if (!requireNamespace('\''devtools'\'', quietly = TRUE)) stop('\''install devtools to submit to CRAN'\''); devtools::submit_cran(commandArgs(TRUE)[1])" "$pkg"'
     ;;
   matlab)
-    run 'zip -r flags2env-matlab.zip +flags2env README.md'
+    run 'zip -r flags2env-matlab.zip +flags2env native README.md'
     ;;
   julia)
-    run 'julia -e "using Pkg; Pkg.test()" && julia -e "using Registrator"'
+    run_root 'julia --project=clients/julia -e "using Pkg; Pkg.instantiate(); Pkg.test()" && printf "%s\n" "@JuliaRegistrator register subdir=clients/julia"'
     ;;
   *)
     printf 'no publish command configured for client: %s\n' "$client" >&2

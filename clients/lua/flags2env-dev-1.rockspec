@@ -15,6 +15,6 @@ dependencies = {
 build = {
   type = "builtin",
   modules = {
-    flags2env = "flags2env.lua"
+    flags2env = "clients/lua/flags2env.lua"
   }
 }

@@ -6,6 +6,7 @@ license = "MIT"
 description = "Rust bindings for flags2env."
 repository = "https://github.com/ORESoftware/flags-2-env"
 include = [
+  "native/**",
   "src/**",
   "tests/**",
   "Cargo.toml"

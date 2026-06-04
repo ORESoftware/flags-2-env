@@ -272,6 +272,28 @@ if [ "$status" -eq 0 ] || [ "$actual" != "$expected" ]; then
   exit 1
 fi
 
+INVALID_CONFIG_OPTIONS_CONFIG="$ROOT_DIR/tests/audit-invalid-config-options/.cli-flags.toml"
+set +e
+actual="$("$CLI" audit "$INVALID_CONFIG_OPTIONS_CONFIG")"
+status=$?
+set -e
+expected='{"ok":false,"errorCount":4,"warningCount":0,"errors":["help.columns must be a list of supported table column names","help.exclude must be a list of supported table column names","env.ignore contains invalid env var name \"BAD-KEY\"","env.ignore contains invalid env var name \"\""],"warnings":[]}'
+if [ "$status" -eq 0 ] || [ "$actual" != "$expected" ]; then
+  printf 'Expected invalid config-options audit status and report:\n%s\nActual status: %s\nActual: %s\n' "$expected" "$status" "$actual" >&2
+  exit 1
+fi
+
+INVALID_CONFIG_LISTS_CONFIG="$ROOT_DIR/tests/audit-invalid-config-lists/.cli-flags.toml"
+set +e
+actual="$("$CLI" audit "$INVALID_CONFIG_LISTS_CONFIG")"
+status=$?
+set -e
+expected='{"ok":false,"errorCount":2,"warningCount":0,"errors":["help.columns must be a list of supported table column names","env.ignore must be a list of env var names"],"warnings":[]}'
+if [ "$status" -eq 0 ] || [ "$actual" != "$expected" ]; then
+  printf 'Expected invalid config-list audit status and report:\n%s\nActual status: %s\nActual: %s\n' "$expected" "$status" "$actual" >&2
+  exit 1
+fi
+
 INVALID_ENV_ONLY_CONFIG="$ROOT_DIR/tests/audit-invalid-env-only/.cli-flags.toml"
 set +e
 actual="$("$CLI" audit "$INVALID_ENV_ONLY_CONFIG")"

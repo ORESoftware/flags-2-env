@@ -79,10 +79,13 @@ typedef struct {
   int allow_unknown;
   char env_audit_ignored_keys[F2E_MAX_ENV_FILE_KEYS][F2E_MAX_ENV];
   size_t env_audit_ignored_count;
+  int invalid_env_audit_ignore;
   char help_url[F2E_MAX_VALUE];
   unsigned help_columns;
   int help_columns_configured;
   unsigned help_exclude_columns;
+  int invalid_help_columns;
+  int invalid_help_exclude_columns;
 } F2EConfig;
 
 typedef struct {
@@ -436,7 +439,7 @@ static int f2e_parse_aliases(F2EFlag *flag, const char *value) {
 }
 
 static int f2e_add_env_key_to_list(char keys[][F2E_MAX_ENV], size_t *key_count, const char *key) {
-  if (!key || key[0] == '\0') {
+  if (!keys || !key_count || !key) {
     return 0;
   }
   for (size_t i = 0; i < *key_count; i++) {
@@ -453,6 +456,7 @@ static int f2e_add_env_key_to_list(char keys[][F2E_MAX_ENV], size_t *key_count, 
 }
 
 static int f2e_parse_env_key_list(char keys[][F2E_MAX_ENV], size_t *key_count, const char *value) {
+  size_t original_count = key_count ? *key_count : 0;
   const char *cursor = f2e_trim_left((char *)value);
   if (*cursor != '[') {
     return 0;
@@ -465,9 +469,17 @@ static int f2e_parse_env_key_list(char keys[][F2E_MAX_ENV], size_t *key_count, c
     }
     char key[F2E_MAX_ENV];
     if (!f2e_parse_quoted_string(cursor, key, sizeof(key))) {
+      if (key_count) {
+        *key_count = original_count;
+      }
       return 0;
     }
-    f2e_add_env_key_to_list(keys, key_count, key);
+    if (!f2e_add_env_key_to_list(keys, key_count, key)) {
+      if (key_count) {
+        *key_count = original_count;
+      }
+      return 0;
+    }
     cursor++;
     int escaped = 0;
     while (*cursor) {
@@ -485,6 +497,9 @@ static int f2e_parse_env_key_list(char keys[][F2E_MAX_ENV], size_t *key_count, c
     if (*cursor == ',') {
       cursor++;
     }
+  }
+  if (key_count) {
+    *key_count = original_count;
   }
   return 0;
 }
@@ -526,7 +541,11 @@ static int f2e_parse_help_column_list(const char *value, unsigned *mask_out) {
     if (!f2e_parse_quoted_string(cursor, column, sizeof(column))) {
       return 0;
     }
-    mask |= f2e_help_column_mask_for_name(column);
+    unsigned column_mask = f2e_help_column_mask_for_name(column);
+    if (column_mask == 0) {
+      return 0;
+    }
+    mask |= column_mask;
     cursor++;
     int escaped = 0;
     while (*cursor) {
@@ -924,9 +943,11 @@ static int f2e_load_config(const char *config_path, F2EConfig *config) {
                  f2e_streq(key, "ignore_envs") ||
                  f2e_streq(key, "ignored_envs") ||
                  f2e_streq(key, "ignored_env")) {
-        f2e_parse_env_key_list(config->env_audit_ignored_keys,
-                               &config->env_audit_ignored_count,
-                               value);
+        if (!f2e_parse_env_key_list(config->env_audit_ignored_keys,
+                                    &config->env_audit_ignored_count,
+                                    value)) {
+          config->invalid_env_audit_ignore = 1;
+        }
       }
       continue;
     }
@@ -945,6 +966,8 @@ static int f2e_load_config(const char *config_path, F2EConfig *config) {
         if (f2e_parse_help_column_list(value, &parsed)) {
           config->help_columns = parsed;
           config->help_columns_configured = 1;
+        } else {
+          config->invalid_help_columns = 1;
         }
       } else if (f2e_streq(key, "exclude") ||
                  f2e_streq(key, "exclude_columns") ||
@@ -952,6 +975,8 @@ static int f2e_load_config(const char *config_path, F2EConfig *config) {
         unsigned parsed = 0;
         if (f2e_parse_help_column_list(value, &parsed)) {
           config->help_exclude_columns |= parsed;
+        } else {
+          config->invalid_help_exclude_columns = 1;
         }
       }
       continue;
@@ -968,9 +993,11 @@ static int f2e_load_config(const char *config_path, F2EConfig *config) {
           f2e_streq(key, "ignored_envs") ||
           f2e_streq(key, "env_audit_ignore") ||
           f2e_streq(key, "env_audit_ignore_keys")) {
-        f2e_parse_env_key_list(config->env_audit_ignored_keys,
-                               &config->env_audit_ignored_count,
-                               value);
+        if (!f2e_parse_env_key_list(config->env_audit_ignored_keys,
+                                    &config->env_audit_ignored_count,
+                                    value)) {
+          config->invalid_env_audit_ignore = 1;
+        }
       }
       continue;
     }
@@ -1983,6 +2010,15 @@ static void f2e_audit_config_semantics(const F2EConfig *config, F2EAudit *audit)
       !f2e_env_name_is_valid(config->errors_env)) {
     f2e_audit_add(audit, 1, "parse.errors_env \"%s\" is not a valid env var name",
                   config->errors_env);
+  }
+  if (config->invalid_help_columns) {
+    f2e_audit_add(audit, 1, "help.columns must be a list of supported table column names");
+  }
+  if (config->invalid_help_exclude_columns) {
+    f2e_audit_add(audit, 1, "help.exclude must be a list of supported table column names");
+  }
+  if (config->invalid_env_audit_ignore) {
+    f2e_audit_add(audit, 1, "env.ignore must be a list of env var names");
   }
   for (size_t i = 0; i < config->env_audit_ignored_count; i++) {
     if (!f2e_env_name_is_valid(config->env_audit_ignored_keys[i])) {

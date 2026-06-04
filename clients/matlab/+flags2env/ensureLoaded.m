@@ -1,7 +1,7 @@
 function alias = ensureLoaded(libraryPath, headerPath)
 arguments
     libraryPath string = flags2env.defaultLibraryName()
-    headerPath string = fullfile(pwd, "src", "parser.h")
+    headerPath string = flags2env.defaultHeaderPath()
 end
 
 alias = "flags2env";

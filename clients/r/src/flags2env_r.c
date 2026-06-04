@@ -1,4 +1,4 @@
-#include "../../../src/parser.h"
+#include "parser.h"
 
 #include <R_ext/Rdynload.h>
 #include <Rinternals.h>

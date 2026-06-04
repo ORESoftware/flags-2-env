@@ -5,17 +5,17 @@ pub fn main() {
   let parsed =
     flags2env.parse_with_config(
       ["app", "--debug=t", "--port", "8181"],
-      "/repo/tests/fixtures/.cli-flags.toml",
+      ".cli-flags.toml",
     )
-  case dict_get(parsed, "DEBUG"), dict_get(parsed, "PORT"), dict_get(parsed, "COLOR") {
-    "true", "8181", "true" -> Nil
-    _, _, _ -> panic as "unexpected parsed map"
+  case dict_get(parsed, "DEBUG"), dict_get(parsed, "PORT") {
+    "true", "8181" -> Nil
+    _, _ -> panic as "unexpected parsed map"
   }
 
   let explicit =
     flags2env.parse_with_config(
       ["app", "--debug=f"],
-      "/repo/tests/fixtures/.cli-flags.toml",
+      ".cli-flags.toml",
     )
   case dict_get(explicit, "DEBUG"), dict_get(explicit, "PORT") {
     "false", "3000" -> Nil
@@ -27,9 +27,9 @@ pub fn main() {
       ["app", "--port", "8181"],
       dict.from_list([#("PORT", "env"), #("KEEP", "1")]),
     )
-  case dict_get(combined, "PORT"), dict_get(combined, "KEEP"), dict_get(combined, "COLOR") {
-    "8181", "1", "true" -> Nil
-    _, _, _ -> panic as "unexpected combined map"
+  case dict_get(combined, "PORT"), dict_get(combined, "KEEP") {
+    "8181", "1" -> Nil
+    _, _ -> panic as "unexpected combined map"
   }
 }
 

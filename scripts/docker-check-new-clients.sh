@@ -23,10 +23,10 @@ run perl perl:5.38-bookworm \
   'apt-get update && apt-get install -y --no-install-recommends build-essential libffi-dev cpanminus make && cpanm -n FFI::Platypus JSON::PP && make clean && make all && FLAGS2ENV_NATIVE_LIB=build/libflags2env.so perl clients/perl/test.pl'
 
 run dotnet mcr.microsoft.com/dotnet/sdk:8.0 \
-  'apt-get update && apt-get install -y --no-install-recommends build-essential make && make clean && make all && dotnet build clients/csharp/Flags2Env.csproj --nologo && dotnet build clients/fsharp/Flags2Env.FSharp.fsproj --nologo && dotnet new console --language C# --framework net8.0 --output /tmp/f2e-csharp-test --force && cp clients/csharp/Flags2EnvTest.cs /tmp/f2e-csharp-test/Program.cs && dotnet add /tmp/f2e-csharp-test/f2e-csharp-test.csproj reference clients/csharp/Flags2Env.csproj && FLAGS2ENV_NATIVE_LIB=build/libflags2env.so FLAGS2ENV_FIXTURE=tests/fixtures/.cli-flags.toml dotnet run --project /tmp/f2e-csharp-test/f2e-csharp-test.csproj && dotnet new console --language F# --framework net8.0 --output /tmp/f2e-fsharp-test --force && cp clients/fsharp/Flags2EnvTest.fs /tmp/f2e-fsharp-test/Program.fs && dotnet add /tmp/f2e-fsharp-test/f2e-fsharp-test.fsproj reference clients/fsharp/Flags2Env.FSharp.fsproj && LD_LIBRARY_PATH=build FLAGS2ENV_FIXTURE=tests/fixtures/.cli-flags.toml dotnet run --project /tmp/f2e-fsharp-test/f2e-fsharp-test.fsproj'
+  'apt-get update && apt-get install -y --no-install-recommends build-essential && dotnet build clients/csharp/Flags2Env.csproj --nologo && dotnet build clients/fsharp/Flags2Env.FSharp.fsproj --nologo && dotnet new console --language C# --framework net8.0 --output /tmp/f2e-csharp-test --force && cp clients/csharp/Flags2EnvTest.cs /tmp/f2e-csharp-test/Program.cs && dotnet add /tmp/f2e-csharp-test/f2e-csharp-test.csproj reference clients/csharp/Flags2Env.csproj && dotnet run --project /tmp/f2e-csharp-test/f2e-csharp-test.csproj && dotnet new console --language F# --framework net8.0 --output /tmp/f2e-fsharp-test --force && cp clients/fsharp/Flags2EnvTest.fs /tmp/f2e-fsharp-test/Program.fs && dotnet add /tmp/f2e-fsharp-test/f2e-fsharp-test.fsproj reference clients/fsharp/Flags2Env.FSharp.fsproj && dotnet run --project /tmp/f2e-fsharp-test/f2e-fsharp-test.fsproj'
 
 run cpp gcc:13-bookworm \
-  'cc -std=c99 -Wall -Wextra -Wpedantic -O2 -fPIC -c src/parser.c -o /tmp/flags2env-parser.o && c++ -std=c++17 -Iclients/cpp/include -Isrc clients/cpp/test.cpp /tmp/flags2env-parser.o -o /tmp/flags2env-cpp-test && /tmp/flags2env-cpp-test && c++ -std=c++17 -Iclients/cpp/include -Isrc -x c++ -c -o /tmp/flags2env-cpp-check.o - <<EOF
+  'cc -std=c99 -Wall -Wextra -Wpedantic -O2 -fPIC -c clients/cpp/native/parser.c -Iclients/cpp/native -o /tmp/flags2env-parser.o && c++ -std=c++17 -Iclients/cpp/include -Iclients/cpp/native clients/cpp/test.cpp /tmp/flags2env-parser.o -o /tmp/flags2env-cpp-test && /tmp/flags2env-cpp-test && c++ -std=c++17 -Iclients/cpp/include -Iclients/cpp/native -x c++ -c -o /tmp/flags2env-cpp-check.o - <<EOF
 #include "flags2env.hpp"
 int main() {
   auto parsed = flags2env::parse({"app", "--port", "8080"});
@@ -69,7 +69,7 @@ if [ "$FULL" -eq 1 ]; then
     'apt-get update && apt-get install -y --no-install-recommends maven && mvn -q -f clients/java/pom.xml -DskipTests install && cd clients/scala && sbt -batch -Dsbt.supershell=false compile'
 
   run haskell haskell:latest \
-    'cd clients/haskell && cabal check'
+    'make clean && make all && cd clients/haskell && cabal update && cabal check && LIBRARY_PATH=/work/build LD_LIBRARY_PATH=/work/build cabal test --extra-lib-dirs=/work/build all'
 
   run ocaml debian:bookworm \
     'apt-get update && apt-get install -y --no-install-recommends opam ca-certificates && opam lint clients/ocaml/flags2env.opam && opam lint clients/reasonml/flags2env.opam'
