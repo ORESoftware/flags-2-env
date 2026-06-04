@@ -1,11 +1,144 @@
-.git
-build
-dist
-node_modules
-clients/nodejs/build
-clients/rust/target
-clients/rust/Cargo.lock
-clients/dart/.dart_tool
-clients/dart/pubspec.lock
-__pycache__
+# Version control and local tooling metadata
+.git/
+.github/
+.idea/
+.vscode/
+.DS_Store
+*.swp
+*.swo
+
+# Local env/config files. Test fixture .env files live under tests/ and are
+# intentionally left in the build context.
+/.env
+/.env.*
+/.envrc
+/.npmrc
+
+# Credentials and host-specific secrets
+.aws/
+**/.aws/
+.azure/
+**/.azure/
+.gcloud/
+**/.gcloud/
+.ssh/
+**/.ssh/
+.netrc
+**/.netrc
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cert
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
+
+# Package manager dependency directories and caches
+node_modules/
+**/node_modules/
+vendor/
+**/vendor/
+.pnpm-store/
+.yarn/
+.bun/
+
+# Build outputs and coverage reports
+build/
+**/build/
+dist/
+**/dist/
+target/
+**/target/
+coverage/
+**/coverage/
+tmp/
+**/tmp/
 *.log
+
+# Native/compiler artifacts
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+*.class
+*.jar
+*.beam
+*.node
+
+# Node/native addon builds
+clients/nodejs/build/
+clients/nodejs/.node-gyp/
+
+# Rust
+clients/rust/target/
+clients/rust/Cargo.lock
+
+# Dart
+clients/dart/.dart_tool/
+clients/dart/pubspec.lock
+
+# Python
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# BEAM/Gleam generated files
+_build/
+**/_build/
+deps/
+**/deps/
+erl_crash.dump
+clients/gleam/manifest.toml
+
+# JVM/Gradle/Maven
+.gradle/
+**/.gradle/
+out/
+**/out/
+bin/
+**/bin/
+obj/
+**/obj/
+
+# Swift
+.build/
+**/.build/
+.swiftpm/
+**/.swiftpm/
+
+# C/C++/CMake
+CMakeFiles/
+**/CMakeFiles/
+CMakeCache.txt
+**/CMakeCache.txt
+compile_commands.json
+
+# Other client toolchains
+.cpcache/
+**/.cpcache/
+.stack-work/
+**/.stack-work/
+dist-newstyle/
+**/dist-newstyle/
+zig-cache/
+zig-out/
+.zig-cache/
+nimcache/
+**/nimcache/
+artifacts/
+**/artifacts/
+cache/
+**/cache/
+*.Rcheck/
+**/*.Rcheck/
+*.tar.gz

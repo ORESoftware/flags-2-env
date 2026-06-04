@@ -12,12 +12,14 @@ import {
 } from "./lib.mjs";
 
 function usage(stream = process.stderr) {
-  stream.write("usage:\n");
-  stream.write("  f2e [argv...]\n");
-  stream.write("  f2e audit [config]\n");
-  stream.write("  f2e audit env [config] [env]\n");
-  stream.write("  f2e completion <bash|zsh> <command> [config]\n");
-  stream.write("  f2e completion install <bash|zsh> <command> [config]\n");
+  stream.write(
+    "usage:\n" +
+      "  f2e [argv...]\n" +
+      "  f2e audit [config]\n" +
+      "  f2e audit env [config] [env]\n" +
+      "  f2e completion <bash|zsh> <command> [config]\n" +
+      "  f2e completion install <bash|zsh> <command> [config]\n",
+  );
 }
 
 function printJson(value) {
@@ -33,12 +35,12 @@ function shellQuote(value) {
 }
 
 function completionDir(shell) {
-  if (process.env.F2E_COMPLETION_DIR) {
-    return process.env.F2E_COMPLETION_DIR;
-  }
   if (shell === "bash") {
     if (process.env.F2E_BASH_COMPLETION_DIR) {
       return process.env.F2E_BASH_COMPLETION_DIR;
+    }
+    if (process.env.F2E_COMPLETION_DIR) {
+      return process.env.F2E_COMPLETION_DIR;
     }
     if (process.env.XDG_DATA_HOME) {
       return join(process.env.XDG_DATA_HOME, "bash-completion", "completions");
@@ -48,6 +50,9 @@ function completionDir(shell) {
   if (shell === "zsh") {
     if (process.env.F2E_ZSH_COMPLETION_DIR) {
       return process.env.F2E_ZSH_COMPLETION_DIR;
+    }
+    if (process.env.F2E_COMPLETION_DIR) {
+      return process.env.F2E_COMPLETION_DIR;
     }
     return join(process.env.ZDOTDIR || homedir(), ".zfunc");
   }
@@ -73,13 +78,14 @@ function appendOnce(path, marker, block) {
 
 function installCompletion(shell, command, configPath) {
   const script = completionScript(shell, command, { configPath });
+  const commandName = safeName(command);
   const dir = completionDir(shell);
-  const fileName = shell === "zsh" ? `_${safeName(command)}` : safeName(command);
+  const fileName = shell === "zsh" ? `_${commandName}` : commandName;
   const outPath = join(dir, fileName);
   mkdirSync(dir, { recursive: true });
   writeFileSync(outPath, script);
 
-  const marker = `# flags2env completion: ${shell} ${command}`;
+  const marker = `# flags2env completion: ${shell} ${commandName}`;
   const rc = rcPath(shell);
   if (shell === "bash") {
     appendOnce(rc, marker, `\n${marker}\n[ -f ${shellQuote(outPath)} ] && . ${shellQuote(outPath)}\n`);
@@ -91,13 +97,22 @@ function installCompletion(shell, command, configPath) {
     );
   }
 
-  process.stdout.write(`Installed ${shell} completion for ${command} to ${outPath}\n`);
+  process.stdout.write(`Installed ${shell} completion for ${commandName} to ${outPath}\n`);
 }
 
 function main(argv) {
   const [command, ...rest] = argv;
+  let parsedForCli;
 
-  if (!command || command === "help" || command === "--help" || command === "-h") {
+  if (command) {
+    parsedForCli = parse([process.argv[1], ...argv]);
+    if (parsedForCli.isHelpMenu) {
+      parsedForCli.printTable();
+      return 0;
+    }
+  }
+
+  if (!command || command === "help" || command === "-h") {
     usage(process.stdout);
     return 0;
   }
@@ -146,7 +161,7 @@ function main(argv) {
     return 0;
   }
 
-  printJson(parse([process.argv[1], ...argv]));
+  printJson(parsedForCli || parse([process.argv[1], ...argv]));
   return 0;
 }
 

@@ -16,4 +16,43 @@ The publishing flow should render only the client for the target runtime, copy i
 
 The npm package exposes a Node-backed `f2e` / `flags2env` CLI bin that can generate static bash/zsh completion scripts, install them into user shell locations, and audit `.env` files against `.cli-flags.toml`.
 
-BEAM clients use `clients/erlang/flags2env_nif.c` as the shared native implementation. Erlang and Elixir load it through the `flags2env` module; Gleam loads the same C implementation through `clients/gleam/flags2env_native.erl` so the public Gleam module can still be named `flags2env`. Java uses `clients/java/native/flags2env_jni.c` as a JNI bridge.
+BEAM clients use `clients/erlang/flags2env_nif.c` as the shared native implementation. Erlang and Elixir load it through the `flags2env` module; Gleam loads the same C implementation through `clients/gleam/flags2env_native.erl` so the public Gleam module can still be named `flags2env`. Java uses `clients/java/native/flags2env_jni.c` as a JNI bridge. Kotlin, Scala, Groovy, and Clojure reuse that Java bridge with small facade packages.
+
+Additional native-runtime clients are scaffolded under:
+
+```text
+c
+cpp
+csharp
+fsharp
+fortran
+haskell
+julia
+lua
+matlab
+nim
+ocaml
+perl
+r
+reasonml
+zig
+crystal
+solidity
+```
+
+Solidity is intentionally an adapter, not an on-chain parser. EVM contracts
+cannot load a C shared library, read TOML, or inspect process argv, so the
+Solidity package verifies off-chain `flags2env` key/value commitments.
+
+## Publishing
+
+Run a client publish script from any client directory. Scripts default to
+dry-run output; pass `--release` from CI after credentials are configured:
+
+```sh
+clients/nodejs/publish.sh
+clients/python/publish.sh --release
+clients/kotlin/publish.sh --dry-run
+```
+
+See `clients/PUBLISHING.md` for the registry mapping and manifest controls.

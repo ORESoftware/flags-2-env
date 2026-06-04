@@ -1,0 +1,11 @@
+Package: flags2env
+Title: Parse CLI Flags into Environment Overrides
+Version: 0.1.0
+Authors@R: person("ORESoftware", role = c("aut", "cre"), email = "opensource@oresoftware.com")
+Description: R bindings for the flags2env native parser.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Imports:
+    jsonlite
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.0

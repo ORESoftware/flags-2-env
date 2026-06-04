@@ -1,0 +1,8 @@
+name: flags2env
+version: 0.1.0
+description: Crystal bindings for flags2env
+license: MIT
+authors:
+  - ORESoftware
+repository: https://github.com/ORESoftware/flags-2-env
+crystal: ">= 1.9.0"

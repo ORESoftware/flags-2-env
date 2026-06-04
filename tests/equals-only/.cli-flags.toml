@@ -7,8 +7,8 @@ unknown_options_env = "F2E_UNKNOWN_OPTIONS"
 env = "PORT"
 aliases = ["port"]
 short = "p"
-type = "string"
-default = "3000"
+type = "integer"
+default = 3000
 
 [flags.debug]
 env = "DEBUG"

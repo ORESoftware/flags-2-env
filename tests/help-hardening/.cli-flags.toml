@@ -1,0 +1,8 @@
+[help]
+url = "https://example.com/help\twith-tab"
+
+[flags.message]
+env = "MESSAGE"
+aliases = ["message"]
+type = "string"
+help = "Alpha\tbeta"

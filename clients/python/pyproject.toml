@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flags2env"
+version = "0.1.0"
+description = "Python bindings for flags2env."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "ORESoftware" }]
+
+[tool.setuptools]
+py-modules = ["flags2env", "lib"]
+include-package-data = true

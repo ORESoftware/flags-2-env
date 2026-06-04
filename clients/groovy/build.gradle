@@ -1,0 +1,56 @@
+plugins {
+  id 'java-library'
+  id 'groovy'
+  id 'maven-publish'
+  id 'signing'
+}
+
+group = 'com.oresoftware'
+version = '0.1.0'
+
+dependencies {
+  implementation localGroovy()
+  api 'com.oresoftware:flags2env:0.1.0'
+}
+
+java {
+  toolchain {
+    languageVersion = JavaLanguageVersion.of(11)
+  }
+  withSourcesJar()
+  withJavadocJar()
+}
+
+publishing {
+  repositories {
+    maven {
+      name = 'sonatype'
+      def releasesRepo = uri(System.getenv('SONATYPE_RELEASE_URL') ?: 'https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/')
+      def snapshotsRepo = uri(System.getenv('SONATYPE_SNAPSHOT_URL') ?: 'https://s01.oss.sonatype.org/content/repositories/snapshots/')
+      url = version.toString().endsWith('SNAPSHOT') ? snapshotsRepo : releasesRepo
+      credentials {
+        username = System.getenv('SONATYPE_USERNAME') ?: ''
+        password = System.getenv('SONATYPE_PASSWORD') ?: ''
+      }
+    }
+  }
+  publications {
+    mavenJava(MavenPublication) {
+      from components.java
+      artifactId = 'flags2env-groovy'
+      pom {
+        name = 'flags2env Groovy'
+        description = 'Groovy facade for the flags2env Java native bridge.'
+        url = 'https://github.com/ORESoftware/flags-2-env'
+        licenses { license { name = 'MIT'; url = 'https://opensource.org/license/mit' } }
+        developers { developer { id = 'oresoftware'; name = 'ORESoftware' } }
+        scm { url = 'https://github.com/ORESoftware/flags-2-env' }
+      }
+    }
+  }
+}
+
+signing {
+  required { project.hasProperty('release') }
+  sign publishing.publications.mavenJava
+}

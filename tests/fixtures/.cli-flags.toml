@@ -1,15 +1,20 @@
+[help]
+url = "https://example.com/flags2env/help"
+
 [flags.port]
 env = "PORT"
 aliases = ["port", "listen-port"]
 short = "p"
-type = "string"
-default = "3000"
+type = "integer"
+default = 3000
+help = "TCP port for the app listener."
 
 [flags.host]
 env = "HOST"
 aliases = ["host"]
 short = "h"
 type = "string"
+help = "Host interface or address to bind."
 
 [flags.debug]
 env = "DEBUG"
@@ -19,12 +24,14 @@ type = "bool"
 default = "false"
 true_aliases = ["t", "1"]
 false_aliases = ["f", "0"]
+help = "Enable debug logging."
 
 [flags.verbose]
 env = "VERBOSE"
 aliases = ["verbose"]
 short = "v"
 type = "bool"
+help = "Print verbose execution details."
 
 [flags.color]
 env = "COLOR"
@@ -32,9 +39,11 @@ aliases = ["color"]
 short = "c"
 type = "bool"
 default = "true"
+help = "Control colored terminal output."
 
 [flags.mode]
 env = "NODE_ENV"
 aliases = ["mode", "env"]
 short = "m"
 type = "string"
+help = "Runtime environment name."

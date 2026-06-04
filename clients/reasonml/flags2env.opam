@@ -1,0 +1,17 @@
+opam-version: "2.0"
+synopsis: "ReasonML facade for flags2env"
+description: "Reason syntax facade over the flags2env OCaml bindings."
+maintainer: "ORESoftware"
+authors: "ORESoftware"
+license: "MIT"
+homepage: "https://github.com/ORESoftware/flags-2-env"
+bug-reports: "https://github.com/ORESoftware/flags-2-env/issues"
+dev-repo: "git+https://github.com/ORESoftware/flags-2-env.git"
+depends: [
+  "ocaml"
+  "dune" {>= "3.11"}
+  "flags2env"
+]
+build: [
+  ["dune" "build" "-p" name "-j" jobs]
+]

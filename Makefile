@@ -27,7 +27,7 @@ PROCESS_SMOKE := $(BUILD_DIR)/process-smoke
 API_HARDENING := $(BUILD_DIR)/api-hardening
 PARSER_OBJ := $(BUILD_DIR)/parser.o
 
-.PHONY: all borrow-check clean readme-test test shared static cli
+.PHONY: all borrow-check clean parity-test readme-test test shared static cli
 
 all: shared static cli
 
@@ -52,13 +52,16 @@ cli: $(CLI)
 $(CLI): $(SRC) $(CLI_SRC) $(HEADER) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(SRC) $(CLI_SRC) -o $@
 
-test: borrow-check readme-test $(CLI) $(PROCESS_SMOKE) $(API_HARDENING)
+test: borrow-check readme-test parity-test $(PROCESS_SMOKE) $(API_HARDENING)
 	./tests/run.sh
 	$(API_HARDENING)
 	$(PROCESS_SMOKE) --port 7777 -d
 
 readme-test: ./scripts/test-readme-snippets.mjs
 	./scripts/test-readme-snippets.mjs
+
+parity-test: $(CLI)
+	./tests/parity/run.sh
 
 process-test: $(PROCESS_SMOKE)
 	$(PROCESS_SMOKE) --port 7777 -d

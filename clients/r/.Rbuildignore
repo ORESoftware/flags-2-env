@@ -1,0 +1,4 @@
+^Dockerfile$
+^publish\.sh$
+^.*\.Rcheck$
+^flags2env_.*\.tar\.gz$

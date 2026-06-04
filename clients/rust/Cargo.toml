@@ -2,6 +2,14 @@
 name = "flags2env"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+description = "Rust bindings for flags2env."
+repository = "https://github.com/ORESoftware/flags-2-env"
+include = [
+  "src/**",
+  "tests/**",
+  "Cargo.toml"
+]
 
 [dependencies]
 libloading = "0.8"

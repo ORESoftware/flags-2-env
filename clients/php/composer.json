@@ -1,0 +1,19 @@
+{
+  "name": "oresoftware/flags2env",
+  "description": "PHP bindings for flags2env.",
+  "type": "library",
+  "license": "MIT",
+  "autoload": {
+    "files": ["lib.php"]
+  },
+  "require": {
+    "php": ">=8.1",
+    "ext-ffi": "*"
+  },
+  "archive": {
+    "exclude": [
+      "/Dockerfile",
+      "/test.php"
+    ]
+  }
+}

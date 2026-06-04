@@ -1,0 +1,9 @@
+name = "flags2env"
+version = "0.1.0"
+license = "MIT"
+author = "ORESoftware"
+maintainer = "ORESoftware"
+copyright = "Copyright ORESoftware"
+
+[library]
+source-dir = "src"

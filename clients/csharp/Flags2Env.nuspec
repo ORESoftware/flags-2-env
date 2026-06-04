@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<package>
+  <metadata>
+    <id>OreSoftware.Flags2Env</id>
+    <version>0.1.0</version>
+    <authors>ORESoftware</authors>
+    <license type="expression">MIT</license>
+    <projectUrl>https://github.com/ORESoftware/flags-2-env</projectUrl>
+    <repository type="git" url="https://github.com/ORESoftware/flags-2-env" />
+    <description>C# bindings for flags2env.</description>
+    <dependencies>
+      <group targetFramework="net6.0">
+        <dependency id="System.Text.Json" version="8.0.5" />
+      </group>
+    </dependencies>
+  </metadata>
+  <files>
+    <file src="Flags2Env.cs" target="src" />
+    <file src="../../src/parser.c" target="native/src" />
+    <file src="../../src/parser.h" target="native/include" />
+  </files>
+</package>

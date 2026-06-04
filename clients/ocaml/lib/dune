@@ -1,0 +1,4 @@
+(library
+ (name flags2env)
+ (public_name flags2env)
+ (libraries ctypes ctypes.foreign yojson unix))

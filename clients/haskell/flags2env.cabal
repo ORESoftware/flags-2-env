@@ -1,0 +1,25 @@
+cabal-version: 3.0
+name: flags2env
+version: 0.1.0
+synopsis: Haskell bindings for flags2env
+description: Thin Haskell bindings over the flags2env C ABI.
+license: MIT
+author: ORESoftware
+maintainer: ORESoftware
+homepage: https://github.com/ORESoftware/flags-2-env
+bug-reports: https://github.com/ORESoftware/flags-2-env/issues
+build-type: Simple
+extra-source-files:
+  README.md
+
+library
+  exposed-modules: Flags2Env
+  hs-source-dirs: src
+  extra-libraries: flags2env
+  build-depends:
+      base >=4.14 && <5
+    , aeson
+    , bytestring
+    , containers
+    , text
+  default-language: Haskell2010

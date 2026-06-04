@@ -1,25 +1,32 @@
+[help]
+url = "https://github.com/ORESoftware/flags-2-env"
+
 [flags.config]
 env = "FLAGS2ENV_CONFIG"
 aliases = ["config", "config-path", "cli-flags"]
 short = "c"
 type = "string"
+help = "Path to the .cli-flags.toml file."
 
 [flags.native_lib]
 env = "FLAGS2ENV_NATIVE_LIB"
 aliases = ["native-lib", "shared-lib", "library"]
 short = "l"
 type = "string"
+help = "Path to the native flags2env shared library."
 
 [flags.node_addon]
 env = "FLAGS2ENV_NODE_ADDON"
 aliases = ["node-addon", "node-native-addon"]
 type = "string"
+help = "Path to the Node native addon."
 
 [flags.runtime]
 env = "FLAGS2ENV_RUNTIME"
 aliases = ["runtime", "client", "target"]
 short = "r"
 type = "string"
+help = "Runtime client target."
 
 [flags.audit]
 env = "FLAGS2ENV_AUDIT"
@@ -28,3 +35,4 @@ short = "a"
 type = "bool"
 true_aliases = ["t", "1", "yes"]
 false_aliases = ["f", "0", "no"]
+help = "Enable client audit mode."

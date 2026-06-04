@@ -3,6 +3,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <limits.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -23,6 +24,54 @@
 
 static int f2e_cli_streq(const char *a, const char *b) {
   return strcmp(a, b) == 0;
+}
+
+static void f2e_cli_stderr_locked(const char *format, ...) {
+#if !defined(_WIN32)
+  flockfile(stderr);
+#endif
+  va_list args;
+  va_start(args, format);
+  vfprintf(stderr, format, args);
+  va_end(args);
+  fflush(stderr);
+#if !defined(_WIN32)
+  funlockfile(stderr);
+#endif
+}
+
+static int f2e_cli_stdout_write_locked(const char *value) {
+  if (!value) {
+    return 0;
+  }
+#if !defined(_WIN32)
+  flockfile(stdout);
+#endif
+  int ok = fputs(value, stdout) != EOF;
+  if (fflush(stdout) == EOF) {
+    ok = 0;
+  }
+#if !defined(_WIN32)
+  funlockfile(stdout);
+#endif
+  return ok;
+}
+
+static int f2e_cli_stdout_line_locked(const char *value) {
+#if !defined(_WIN32)
+  flockfile(stdout);
+#endif
+  int ok = fputs(value ? value : "", stdout) != EOF;
+  if (ok && fputc('\n', stdout) == EOF) {
+    ok = 0;
+  }
+  if (fflush(stdout) == EOF) {
+    ok = 0;
+  }
+#if !defined(_WIN32)
+  funlockfile(stdout);
+#endif
+  return ok;
 }
 
 static char *f2e_cli_strdup(const char *value) {
@@ -216,21 +265,48 @@ static char *f2e_cli_rc_path(const char *shell) {
   return NULL;
 }
 
-static char *f2e_cli_completion_file_name(const char *shell, const char *command) {
-  const char *base = command && command[0] != '\0' ? command : "flags2env";
-  const char *slash = strrchr(base, '/');
-#if defined(_WIN32)
-  const char *backslash = strrchr(base, '\\');
-  if (!slash || (backslash && backslash > slash)) {
-    slash = backslash;
+static int f2e_cli_command_basename(const char *command, const char **base_out, size_t *len_out) {
+  int used_default = !command || command[0] == '\0';
+  const char *path = used_default ? "flags2env" : command;
+  size_t len = strlen(path);
+  while (len > 0 && (path[len - 1] == '/' || path[len - 1] == '\\')) {
+    len--;
   }
-#endif
-  if (slash && slash[1] != '\0') {
-    base = slash + 1;
+  if (len == 0) {
+    if (!used_default) {
+      return 0;
+    }
+    path = "flags2env";
+    len = strlen(path);
+  }
+
+  size_t start = 0;
+  for (size_t i = len; i > 0; i--) {
+    if (path[i - 1] == '/' || path[i - 1] == '\\') {
+      start = i;
+      break;
+    }
+  }
+
+  if (!base_out || !len_out || len <= start) {
+    return 0;
+  }
+  *base_out = path + start;
+  *len_out = len - start;
+  return 1;
+}
+
+static char *f2e_cli_completion_file_name(const char *shell, const char *command) {
+  const char *base = NULL;
+  size_t len = 0;
+  if (!f2e_cli_command_basename(command, &base, &len)) {
+    return NULL;
   }
 
   size_t prefix = f2e_cli_streq(shell, "zsh") ? 1 : 0;
-  size_t len = strlen(base);
+  if (len > SIZE_MAX - prefix - 1) {
+    return NULL;
+  }
   char *name = (char *)malloc(prefix + len + 1);
   if (!name) {
     return NULL;
@@ -239,9 +315,10 @@ static char *f2e_cli_completion_file_name(const char *shell, const char *command
   if (prefix) {
     name[offset++] = '_';
   }
-  for (const unsigned char *cursor = (const unsigned char *)base; *cursor; cursor++) {
-    name[offset++] = isalnum(*cursor) || *cursor == '.' || *cursor == '_' || *cursor == '-'
-                         ? (char)*cursor
+  for (size_t i = 0; i < len; i++) {
+    unsigned char ch = (unsigned char)base[i];
+    name[offset++] = isalnum(ch) || ch == '.' || ch == '_' || ch == '-'
+                         ? (char)ch
                          : '_';
   }
   name[offset] = '\0';
@@ -254,31 +331,52 @@ static int f2e_cli_update_shell_rc(const char *shell, const char *command, const
     return 0;
   }
 
+  char *command_label = f2e_cli_completion_file_name("bash", command);
+  if (!command_label) {
+    free(rc_path);
+    return 0;
+  }
+
   char marker[256];
-  snprintf(marker, sizeof(marker), "# flags2env completion: %s %s", shell, command && command[0] != '\0' ? command : "flags2env");
+  int marker_len = snprintf(marker, sizeof(marker), "# flags2env completion: %s %s", shell, command_label);
+  if (marker_len <= 0 || (size_t)marker_len >= sizeof(marker)) {
+    free(rc_path);
+    free(command_label);
+    return 0;
+  }
 
   char *quoted_path = f2e_cli_shell_quote(completion_path);
   char *quoted_dir = f2e_cli_shell_quote(completion_dir);
   if (!quoted_path || !quoted_dir) {
     free(rc_path);
+    free(command_label);
     free(quoted_path);
     free(quoted_dir);
     return 0;
   }
 
   char block[PATH_MAX * 4];
+  int block_len = 0;
   if (f2e_cli_streq(shell, "bash")) {
-    snprintf(block, sizeof(block), "\n%s\n[ -f %s ] && . %s\n", marker, quoted_path, quoted_path);
+    block_len = snprintf(block, sizeof(block), "\n%s\n[ -f %s ] && . %s\n", marker, quoted_path, quoted_path);
   } else {
-    snprintf(block, sizeof(block),
-             "\n%s\nif [ -d %s ]; then\n  fpath=(%s $fpath)\n  autoload -Uz compinit\n  compinit\nfi\n",
-             marker,
-             quoted_dir,
-             quoted_dir);
+    block_len = snprintf(block, sizeof(block),
+                         "\n%s\nif [ -d %s ]; then\n  fpath=(%s $fpath)\n  autoload -Uz compinit\n  compinit\nfi\n",
+                         marker,
+                         quoted_dir,
+                         quoted_dir);
+  }
+  if (block_len <= 0 || (size_t)block_len >= sizeof(block)) {
+    free(rc_path);
+    free(command_label);
+    free(quoted_path);
+    free(quoted_dir);
+    return 0;
   }
 
   int ok = f2e_cli_append_once(rc_path, marker, block);
   free(rc_path);
+  free(command_label);
   free(quoted_path);
   free(quoted_dir);
   return ok;
@@ -286,66 +384,78 @@ static int f2e_cli_update_shell_rc(const char *shell, const char *command, const
 
 static int f2e_cli_print_owned(char *value, const char *fallback) {
   if (!value) {
-    fputs(fallback, stdout);
-    fputc('\n', stdout);
+    f2e_cli_stdout_line_locked(fallback);
     return 1;
   }
-  fputs(value, stdout);
-  fputc('\n', stdout);
+  int ok = f2e_cli_stdout_line_locked(value);
   f2e_free(value);
-  return 0;
+  return ok ? 0 : 1;
+}
+
+static const char *f2e_cli_help_command_name(int argc, const char *const argv[]) {
+  if (argc >= 2 && argv[1] && argv[1][0] != '-' &&
+      !f2e_cli_streq(argv[1], "audit") &&
+      !f2e_cli_streq(argv[1], "completion") &&
+      !f2e_cli_streq(argv[1], "completions") &&
+      !f2e_cli_streq(argv[1], "autocomplete") &&
+      !f2e_cli_streq(argv[1], "env-audit") &&
+      !f2e_cli_streq(argv[1], "audit-env") &&
+      !f2e_cli_streq(argv[1], "env-check") &&
+      !f2e_cli_streq(argv[1], "install-completion") &&
+      !f2e_cli_streq(argv[1], "install-autocomplete")) {
+    return argv[1];
+  }
+  return argc >= 1 && argv[0] ? argv[0] : "flags2env";
 }
 
 static int f2e_cli_run_audit(const char *config_path) {
   char *report = config_path ? f2e_audit_config_from_file(config_path) : f2e_audit_config();
   int status = config_path ? f2e_audit_config_status_from_file(config_path) : f2e_audit_config_status();
   if (!report) {
-    fputs("{\"ok\":false,\"errors\":[\"audit failed\"]}\n", stdout);
+    f2e_cli_stdout_line_locked("{\"ok\":false,\"errors\":[\"audit failed\"]}");
     return 1;
   }
-  fputs(report, stdout);
-  fputc('\n', stdout);
+  int ok = f2e_cli_stdout_line_locked(report);
   f2e_free(report);
-  return status;
+  return ok ? status : 1;
 }
 
 static int f2e_cli_run_env_audit(const char *config_path, const char *env_path) {
   char *report = config_path ? f2e_audit_env_file_from_file(config_path, env_path) : f2e_audit_env_file();
   int status = config_path ? f2e_audit_env_file_status_from_file(config_path, env_path) : f2e_audit_env_file_status();
   if (!report) {
-    fputs("{\"ok\":false,\"errors\":[\"env audit failed\"]}\n", stdout);
+    f2e_cli_stdout_line_locked("{\"ok\":false,\"errors\":[\"env audit failed\"]}");
     return 1;
   }
-  fputs(report, stdout);
-  fputc('\n', stdout);
+  int ok = f2e_cli_stdout_line_locked(report);
   f2e_free(report);
-  return status;
+  return ok ? status : 1;
 }
 
 static int f2e_cli_run_completion(const char *shell, const char *command, const char *config_path) {
   char *script = config_path ? f2e_completion_script_from_file(config_path, shell, command)
                              : f2e_completion_script(shell, command);
   if (!script) {
-    fprintf(stderr, "flags2env: could not generate %s completion for %s\n",
-            shell ? shell : "",
-            command ? command : "");
+    f2e_cli_stderr_locked("flags2env: could not generate %s completion for %s\n",
+                          shell ? shell : "",
+                          command ? command : "");
     return 1;
   }
-  fputs(script, stdout);
+  int ok = f2e_cli_stdout_write_locked(script);
   f2e_free(script);
-  return 0;
+  return ok ? 0 : 1;
 }
 
 static int f2e_cli_install_completion(const char *shell, const char *command, const char *config_path) {
   if (!f2e_cli_streq(shell, "bash") && !f2e_cli_streq(shell, "zsh")) {
-    fprintf(stderr, "flags2env: unsupported completion shell: %s\n", shell ? shell : "");
+    f2e_cli_stderr_locked("flags2env: unsupported completion shell: %s\n", shell ? shell : "");
     return 1;
   }
 
   char *script = config_path ? f2e_completion_script_from_file(config_path, shell, command)
                              : f2e_completion_script(shell, command);
   if (!script) {
-    fprintf(stderr, "flags2env: could not generate %s completion for %s\n", shell, command);
+    f2e_cli_stderr_locked("flags2env: could not generate %s completion for %s\n", shell, command);
     return 1;
   }
 
@@ -354,7 +464,7 @@ static int f2e_cli_install_completion(const char *shell, const char *command, co
   char *path = dir && file_name ? f2e_cli_join_path(dir, file_name) : NULL;
   if (!dir || !file_name || !path || !f2e_cli_mkdir_p(dir) || !f2e_cli_write_file(path, script) ||
       !f2e_cli_update_shell_rc(shell, command, path, dir)) {
-    fprintf(stderr, "flags2env: could not install %s completion for %s\n", shell, command);
+    f2e_cli_stderr_locked("flags2env: could not install %s completion for %s\n", shell, command);
     free(script);
     free(dir);
     free(file_name);
@@ -362,15 +472,32 @@ static int f2e_cli_install_completion(const char *shell, const char *command, co
     return 1;
   }
 
-  printf("Installed %s completion for %s to %s\n", shell, command, path);
+  char installed[PATH_MAX * 2];
+  int installed_len = snprintf(installed, sizeof(installed),
+                               "Installed %s completion for %s to %s",
+                               shell,
+                               command,
+                               path);
+  int printed = installed_len > 0 && (size_t)installed_len < sizeof(installed)
+                    ? f2e_cli_stdout_line_locked(installed)
+                    : 0;
   free(script);
   free(dir);
   free(file_name);
   free(path);
-  return 0;
+  return printed ? 0 : 1;
 }
 
 int main(int argc, const char *const argv[]) {
+  if (f2e_is_help_requested(argc, argv)) {
+    const char *command = f2e_cli_help_command_name(argc, argv);
+    if (f2e_print_table(command, 0) != 0) {
+      f2e_cli_stderr_locked("flags2env: could not generate help menu\n");
+      return 1;
+    }
+    return 0;
+  }
+
   if (argc >= 2 && (strcmp(argv[1], "audit") == 0 || strcmp(argv[1], "--audit") == 0)) {
     if (argc >= 3 && (f2e_cli_streq(argv[2], "env") || f2e_cli_streq(argv[2], "--env"))) {
       return f2e_cli_run_env_audit(argc >= 4 ? argv[3] : NULL, argc >= 5 ? argv[4] : NULL);
@@ -392,13 +519,13 @@ int main(int argc, const char *const argv[]) {
                     f2e_cli_streq(argv[1], "autocomplete"))) {
     if (argc >= 3 && f2e_cli_streq(argv[2], "install")) {
       if (argc < 5) {
-        fputs("usage: flags2env completion install <bash|zsh> <command> [config]\n", stderr);
+        f2e_cli_stderr_locked("%s", "usage: flags2env completion install <bash|zsh> <command> [config]\n");
         return 2;
       }
       return f2e_cli_install_completion(argv[3], argv[4], argc >= 6 ? argv[5] : NULL);
     }
     if (argc < 4) {
-      fputs("usage: flags2env completion <bash|zsh> <command> [config]\n", stderr);
+      f2e_cli_stderr_locked("%s", "usage: flags2env completion <bash|zsh> <command> [config]\n");
       return 2;
     }
     return f2e_cli_run_completion(argv[2], argv[3], argc >= 5 ? argv[4] : NULL);
@@ -407,7 +534,7 @@ int main(int argc, const char *const argv[]) {
   if (argc >= 2 && (f2e_cli_streq(argv[1], "install-completion") ||
                     f2e_cli_streq(argv[1], "install-autocomplete"))) {
     if (argc < 4) {
-      fputs("usage: flags2env install-completion <bash|zsh> <command> [config]\n", stderr);
+      f2e_cli_stderr_locked("%s", "usage: flags2env install-completion <bash|zsh> <command> [config]\n");
       return 2;
     }
     return f2e_cli_install_completion(argv[2], argv[3], argc >= 5 ? argv[4] : NULL);

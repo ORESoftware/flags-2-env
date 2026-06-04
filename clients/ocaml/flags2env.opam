@@ -1,0 +1,19 @@
+opam-version: "2.0"
+synopsis: "OCaml bindings for flags2env"
+description: "Thin OCaml bindings over the flags2env C ABI."
+maintainer: "ORESoftware"
+authors: "ORESoftware"
+license: "MIT"
+homepage: "https://github.com/ORESoftware/flags-2-env"
+bug-reports: "https://github.com/ORESoftware/flags-2-env/issues"
+dev-repo: "git+https://github.com/ORESoftware/flags-2-env.git"
+depends: [
+  "ocaml"
+  "dune" {>= "3.11"}
+  "ctypes"
+  "ctypes-foreign"
+  "yojson"
+]
+build: [
+  ["dune" "build" "-p" name "-j" jobs]
+]

@@ -1,0 +1,25 @@
+[parse]
+errors_env = "F2E_PARSE_ERRORS"
+
+[flags.port]
+env = "PORT"
+aliases = ["port"]
+short = "p"
+type = "integer"
+default = 3000
+
+[flags.debug]
+env = "DEBUG"
+aliases = ["debug"]
+short = "d"
+type = "bool"
+default = false
+true_aliases = ["1"]
+false_aliases = ["0"]
+
+[flags.payload]
+env = "PAYLOAD"
+aliases = ["payload"]
+short = "j"
+type = "json"
+default = 7

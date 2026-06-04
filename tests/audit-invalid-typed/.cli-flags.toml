@@ -1,7 +1,7 @@
 [flags.must_be_int]
 env = "MUST_BE_INT"
 aliases = ["must-be-int"]
-type = "int"
+type = "integer"
 default = "x"
 
 [flags.is_json]
@@ -9,3 +9,9 @@ env = "IS_JSON"
 aliases = ["is-json"]
 type = "json"
 default = "{bad"
+
+[flags.too_large]
+env = "TOO_LARGE"
+aliases = ["too-large"]
+type = "integer"
+default = 9223372036854775808

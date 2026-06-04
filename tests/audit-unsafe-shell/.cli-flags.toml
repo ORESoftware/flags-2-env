@@ -1,0 +1,10 @@
+[parse]
+positionals_env = "BAD-POSITIONALS"
+
+[flags.bad]
+env = "BAD-NAME"
+aliases = ["bad alias"]
+short = ";"
+type = "bool"
+true_aliases = ["good", "bad value"]
+false_aliases = ["no"]

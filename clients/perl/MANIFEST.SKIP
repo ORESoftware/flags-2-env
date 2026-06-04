@@ -1,0 +1,10 @@
+^\.git/
+^local/
+^blib/
+^Makefile$
+^pm_to_blib$
+\.o$
+\.so$
+\.dylib$
+\.dll$
+\.tar\.gz$

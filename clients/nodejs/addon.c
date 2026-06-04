@@ -43,6 +43,22 @@ static int f2e_node_read_optional_string(napi_env env, napi_value value, char **
   return f2e_node_read_string(env, value, out);
 }
 
+static int f2e_node_read_optional_int(napi_env env, napi_value value, int *out) {
+  *out = 0;
+  if (!value) {
+    return 1;
+  }
+
+  napi_valuetype type;
+  if (napi_typeof(env, value, &type) != napi_ok) {
+    return 0;
+  }
+  if (type == napi_undefined || type == napi_null) {
+    return 1;
+  }
+  return napi_get_value_int32(env, value, out) == napi_ok;
+}
+
 static napi_value f2e_node_string_result(napi_env env, char *result, const char *message) {
   if (!result) {
     return f2e_node_throw(env, message);
@@ -203,6 +219,55 @@ static napi_value f2e_node_completion_script(napi_env env, napi_callback_info in
   return f2e_node_string_result(env, result, "failed to generate completion script");
 }
 
+static napi_value f2e_node_is_help_json(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value args[1];
+  napi_get_cb_info(env, info, &argc, args, NULL, NULL);
+
+  if (argc < 1) {
+    return f2e_node_throw(env, "isHelpJson(argvJson) requires argvJson");
+  }
+
+  char *argv_json = NULL;
+  if (!f2e_node_read_string(env, args[0], &argv_json)) {
+    return f2e_node_throw(env, "argvJson must be a string");
+  }
+
+  int requested = f2e_is_help_requested_json_argv(argv_json);
+  free(argv_json);
+
+  napi_value out;
+  napi_get_boolean(env, requested != 0, &out);
+  return out;
+}
+
+static napi_value f2e_node_help_table(napi_env env, napi_callback_info info) {
+  size_t argc = 3;
+  napi_value args[3];
+  napi_get_cb_info(env, info, &argc, args, NULL, NULL);
+
+  char *command = NULL;
+  char *config_path = NULL;
+  int terminal_columns = 0;
+  if (argc >= 1 && !f2e_node_read_optional_string(env, args[0], &command)) {
+    return f2e_node_throw(env, "command must be a string");
+  }
+  if (argc >= 2 && !f2e_node_read_optional_int(env, args[1], &terminal_columns)) {
+    free(command);
+    return f2e_node_throw(env, "terminalColumns must be a number");
+  }
+  if (argc >= 3 && !f2e_node_read_optional_string(env, args[2], &config_path)) {
+    free(command);
+    return f2e_node_throw(env, "configPath must be a string");
+  }
+
+  char *result = config_path ? f2e_help_table_from_file(config_path, command, terminal_columns)
+                             : f2e_help_table(command, terminal_columns);
+  free(command);
+  free(config_path);
+  return f2e_node_string_result(env, result, "failed to generate help table");
+}
+
 static napi_value f2e_node_parse_process_json(napi_env env, napi_callback_info info) {
   size_t argc = 1;
   napi_value args[1];
@@ -259,6 +324,14 @@ static napi_value f2e_node_init(napi_env env, napi_value exports) {
   napi_value completion_script;
   napi_create_function(env, "completionScript", NAPI_AUTO_LENGTH, f2e_node_completion_script, NULL, &completion_script);
   napi_set_named_property(env, exports, "completionScript", completion_script);
+
+  napi_value is_help_json;
+  napi_create_function(env, "isHelpJson", NAPI_AUTO_LENGTH, f2e_node_is_help_json, NULL, &is_help_json);
+  napi_set_named_property(env, exports, "isHelpJson", is_help_json);
+
+  napi_value help_table;
+  napi_create_function(env, "helpTable", NAPI_AUTO_LENGTH, f2e_node_help_table, NULL, &help_table);
+  napi_set_named_property(env, exports, "helpTable", help_table);
   return exports;
 }
 

@@ -1,0 +1,8 @@
+name = "flags2env"
+version = "0.1.0"
+description = "Gleam bindings for flags2env"
+licences = ["MIT"]
+repository = { type = "github", user = "ORESoftware", repo = "flags-2-env" }
+
+[dependencies]
+gleam_stdlib = ">= 0.34.0 and < 2.0.0"

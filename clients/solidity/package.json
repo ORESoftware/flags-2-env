@@ -1,0 +1,13 @@
+{
+  "name": "@oresoftware/flags2env-solidity",
+  "version": "0.1.0",
+  "description": "Solidity helpers for consuming off-chain flags2env outputs.",
+  "license": "MIT",
+  "files": [
+    "contracts"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ORESoftware/flags-2-env.git"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "@oresoftware/flags2env",
+  "version": "0.1.0",
+  "exports": "./mod.ts",
+  "publish": {
+    "include": [
+      "mod.ts",
+      "lib.ts"
+    ],
+    "exclude": [
+      "Dockerfile",
+      "test.ts"
+    ]
+  }
+}

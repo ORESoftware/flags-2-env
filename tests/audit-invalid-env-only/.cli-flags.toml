@@ -1,0 +1,4 @@
+[flags.bad]
+env = "BAD-NAME"
+aliases = ["bad"]
+type = "string"

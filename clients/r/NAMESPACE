@@ -1,0 +1,4 @@
+useDynLib(flags2env, .registration = TRUE)
+export(parse_flags)
+export(parse_process)
+export(apply_flags)

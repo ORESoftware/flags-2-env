@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <PackageId>OreSoftware.Flags2Env.FSharp</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>ORESoftware</Authors>
+    <Description>F# bindings for flags2env.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/ORESoftware/flags-2-env</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ORESoftware/flags-2-env</RepositoryUrl>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+    <Compile Include="Flags2Env.fs" />
+    <None Include="../../src/parser.c" Pack="true" PackagePath="native/src/" />
+    <None Include="../../src/parser.h" Pack="true" PackagePath="native/include/" />
+  </ItemGroup>
+</Project>

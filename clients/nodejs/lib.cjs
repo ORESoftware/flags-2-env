@@ -9,18 +9,68 @@ function native() {
   return nativeModule;
 }
 
+function resolveTerminalColumns(target, requested) {
+  if (requested && Number.isFinite(requested) && requested > 0) {
+    return Math.floor(requested);
+  }
+  if (target?.columns && Number.isFinite(target.columns) && target.columns > 0) {
+    return Math.floor(target.columns);
+  }
+  if (process.stdout.columns && Number.isFinite(process.stdout.columns) && process.stdout.columns > 0) {
+    return Math.floor(process.stdout.columns);
+  }
+  const envColumns = Number(process.env.COLUMNS);
+  return Number.isFinite(envColumns) && envColumns > 0 ? Math.floor(envColumns) : 0;
+}
+
+function helpTable(command = "flags2env", options = {}) {
+  return options.configPath
+    ? native().helpTable(String(command), options.terminalColumns || 0, options.configPath)
+    : native().helpTable(String(command), options.terminalColumns || 0);
+}
+
+function withHelpMetadata(result, argvItems, argvJson, options) {
+  const command = argvItems[0] || "flags2env";
+  const isHelpMenu = native().isHelpJson(argvJson);
+  Object.defineProperties(result, {
+    isHelpMenu: {
+      enumerable: false,
+      value: isHelpMenu,
+    },
+    printTable: {
+      enumerable: false,
+      value(target = process.stdout) {
+        if (!target || typeof target.write !== "function") {
+          throw new TypeError("printTable target must expose write(chunk)");
+        }
+        const table = helpTable(command, {
+          configPath: options.configPath,
+          terminalColumns: resolveTerminalColumns(target),
+        });
+        const output = table.endsWith("\n") ? table : `${table}\n`;
+        target.write(output);
+        return table;
+      },
+    },
+  });
+  return result;
+}
+
 function parse(argv = process.argv, options = {}) {
   if (!Array.isArray(argv)) {
     throw new TypeError("argv must be an array of strings");
   }
-  const argvJson = JSON.stringify(argv.map(String));
+  const argvItems = argv.map(String);
+  const argvJson = JSON.stringify(argvItems);
   const raw = options.configPath ? native().parseJson(argvJson, options.configPath) : native().parseJson(argvJson);
-  return JSON.parse(raw);
+  return withHelpMetadata(JSON.parse(raw), argvItems, argvJson, options);
 }
 
 function parseProcess(options = {}) {
+  const argvItems = process.argv.map(String);
+  const argvJson = JSON.stringify(argvItems);
   const raw = options.configPath ? native().parseProcessJson(options.configPath) : native().parseProcessJson();
-  return JSON.parse(raw);
+  return withHelpMetadata(JSON.parse(raw), argvItems, argvJson, options);
 }
 
 function apply(target = process.env, argv = process.argv, options = {}) {
@@ -69,5 +119,6 @@ module.exports = {
   auditEnv,
   auditEnvStatus,
   completionScript,
+  helpTable,
 };
 module.exports.default = module.exports;
