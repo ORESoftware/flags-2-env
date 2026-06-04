@@ -5,7 +5,8 @@
   "publish": {
     "include": [
       "mod.ts",
-      "lib.ts"
+      "lib.ts",
+      "native"
     ],
     "exclude": [
       "Dockerfile",

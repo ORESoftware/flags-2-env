@@ -44,6 +44,78 @@ require_same_file() {
   fi
 }
 
+native_library_name() {
+  case "$(uname -s)" in
+    Darwin)
+      printf 'libflags2env.dylib'
+      ;;
+    MINGW*|MSYS*|CYGWIN*)
+      printf 'libflags2env.dll'
+      ;;
+    *)
+      printf 'libflags2env.so'
+      ;;
+  esac
+}
+
+audit_rendered_js_client() {
+  runtime="$1"
+  tmp_dir="${TMPDIR:-/tmp}/flags2env-render-audit-$runtime-$$"
+  rm -rf "$tmp_dir"
+  if ! node "$ROOT_DIR/scripts/render-client.mjs" "$runtime" "$tmp_dir" >/dev/null 2>&1; then
+    printf 'render failed for JS client: %s\n' "$runtime" >&2
+    status=1
+    return
+  fi
+
+  for path in "$@"; do
+    if [ "$path" = "$runtime" ]; then
+      continue
+    fi
+    if [ ! -e "$tmp_dir/$path" ]; then
+      printf 'rendered %s package is missing: %s\n' "$runtime" "$path" >&2
+      status=1
+    fi
+  done
+
+  if [ "$runtime" = "nodejs" ] &&
+     grep -Eq '\.\./\.\./src' "$tmp_dir/binding.gyp"; then
+    printf 'rendered nodejs binding.gyp points outside the package\n' >&2
+    status=1
+  fi
+  rm -rf "$tmp_dir"
+}
+
+audit_npm_pack_client() {
+  client="$1"
+  required="$2"
+  forbidden="$3"
+  tmp_cache="${TMPDIR:-/tmp}/flags2env-npm-audit-$client-$$"
+  output="$(
+    cd "$ROOT_DIR/clients/$client" &&
+      npm_config_cache="$tmp_cache" npm pack --dry-run --json 2>/dev/null
+  )" || {
+    printf 'npm pack dry-run failed for client: %s\n' "$client" >&2
+    status=1
+    rm -rf "$tmp_cache"
+    return
+  }
+
+  for path in $required; do
+    if ! printf '%s\n' "$output" | grep -Fq "\"path\": \"$path\""; then
+      printf 'npm package for %s is missing: %s\n' "$client" "$path" >&2
+      status=1
+    fi
+  done
+  for path in $forbidden; do
+    if printf '%s\n' "$output" | grep -Fq "\"path\": \"$path\""; then
+      printf 'npm package for %s includes forbidden file: %s\n' "$client" "$path" >&2
+      status=1
+    fi
+  done
+  rm -rf "$tmp_cache"
+}
+
 require_client() {
   client="$1"
   require_path "clients/$client"
@@ -107,7 +179,13 @@ for path in \
   clients/scala/build.sbt \
   clients/scala/project/plugins.sbt \
   clients/csharp/Flags2Env.nuspec \
+  clients/csharp/Flags2Env.csproj \
   clients/fsharp/Flags2Env.FSharp.nuspec \
+  clients/fsharp/Flags2Env.FSharp.fsproj \
+  clients/dart/CHANGELOG.md \
+  clients/dart/LICENSE \
+  clients/dart/README.md \
+  clients/dart/pubspec.yaml \
   clients/dart/.pubignore \
   clients/swift/Package.swift \
   clients/elixir/mix.exs \
@@ -168,6 +246,7 @@ forbid_contains clients/golang/lib.go '\.\./\.\./src|\.\./\.\./build|LDFLAGS'
 require_same_file src/parser.c clients/golang/parser.c
 require_same_file src/parser.h clients/golang/parser.h
 require_contains clients/ruby/flags2env.gemspec 'spec\.files'
+forbid_contains clients/ruby/flags2env.gemspec '"test\.rb"'
 require_contains clients/php/composer.json '"archive"'
 require_contains clients/java/pom.xml 'central-publishing-maven-plugin'
 require_contains clients/java/pom.xml '<publishingServerId>'
@@ -193,8 +272,16 @@ require_contains clients/clojure/build.clj 'CENTRAL_OSSRH_DEPLOY_URL'
 require_contains clients/clojure/build.clj 'flags2env-clojure'
 require_contains clients/csharp/Flags2Env.nuspec '<files>'
 require_contains clients/csharp/Flags2Env.nuspec 'exclude='
+require_contains clients/csharp/Flags2Env.csproj 'Pack="true"'
+require_contains clients/csharp/Flags2Env.csproj 'PackagePath="native/src/"'
+require_contains clients/csharp/Flags2Env.csproj 'PackagePath="native/include/"'
 require_contains clients/fsharp/Flags2Env.FSharp.nuspec '<files>'
 require_contains clients/fsharp/Flags2Env.FSharp.nuspec 'exclude='
+require_contains clients/fsharp/Flags2Env.FSharp.fsproj 'Pack="true"'
+require_contains clients/fsharp/Flags2Env.FSharp.fsproj 'PackagePath="native/src/"'
+require_contains clients/fsharp/Flags2Env.FSharp.fsproj 'PackagePath="native/include/"'
+require_contains clients/dart/pubspec.yaml '^description:'
+require_contains clients/dart/pubspec.yaml '^repository:'
 require_contains clients/dart/.pubignore '^Dockerfile$'
 require_contains clients/swift/Package.swift 'exclude:'
 require_contains clients/elixir/mix.exs 'files:'
@@ -210,8 +297,12 @@ require_contains clients/julia/Project.toml '^name = "Flags2Env"'
 require_contains clients/solidity/package.json '"files"'
 require_contains clients/solidity/package.json '"test"'
 require_contains clients/solidity/package.json '"solc"'
+require_contains clients/deno/deno.json '"native"'
+require_contains scripts/render-client.mjs 'src/parser\.c'
+require_contains scripts/render-client.mjs 'native'
 require_contains scripts/publish-client.sh 'cp src/parser\.c src/parser\.h dist/r/src/'
 require_contains scripts/publish-client.sh 'npm publish --access public'
+require_contains scripts/publish-client.sh 'node scripts/render-client\.mjs deno dist/deno'
 require_contains scripts/publish-client.sh 'twine upload'
 require_contains scripts/publish-client.sh 'clients/golang/v\$'
 require_contains scripts/publish-client.sh 'git tag "\$\{PACKAGE_VERSION:\?set PACKAGE_VERSION\}"'
@@ -269,6 +360,12 @@ for path in \
 do
   require_path "$path"
 done
+
+native_lib="$(native_library_name)"
+audit_rendered_js_client nodejs package.json binding.gyp addon.c src/parser.c src/parser.h lib.mjs lib.cjs lib.ts cli.mjs
+audit_rendered_js_client bun package.json "native/$native_lib" lib.mjs lib.cjs lib.ts
+audit_rendered_js_client deno deno.json "native/$native_lib" mod.ts lib.ts
+audit_npm_pack_client solidity "contracts/Flags2Env.sol package.json" "test.js test.ts Dockerfile"
 
 if [ "$status" -eq 0 ]; then
   printf 'client packaging audit passed\n'

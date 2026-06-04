@@ -86,7 +86,7 @@ case "$client" in
     run_root 'node scripts/render-client.mjs bun dist/bun && cd dist/bun && npm pack --dry-run && npm publish --access public'
     ;;
   deno)
-    run 'deno publish --dry-run && deno publish'
+    run_root 'node scripts/render-client.mjs deno dist/deno && cd dist/deno && deno publish --dry-run && deno publish'
     ;;
   python)
     run 'python -m build && twine check dist/* && twine upload dist/*'

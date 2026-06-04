@@ -118,10 +118,14 @@ const packageControls = {
   csharp: [
     ["clients/csharp/Flags2Env.nuspec", /<files>/, "NuGet files list"],
     ["clients/csharp/Flags2Env.nuspec", /exclude="[^"]*\.\.\/\.\.\/clients\/\*\*/, "NuGet excludes other clients"],
+    ["clients/csharp/Flags2Env.csproj", /Pack="true"[\s\S]*PackagePath="native\/src\/"/, "dotnet pack includes native parser source"],
+    ["clients/csharp/Flags2Env.csproj", /Pack="true"[\s\S]*PackagePath="native\/include\/"/, "dotnet pack includes native parser header"],
   ],
   fsharp: [
     ["clients/fsharp/Flags2Env.FSharp.nuspec", /<files>/, "NuGet files list"],
     ["clients/fsharp/Flags2Env.FSharp.nuspec", /exclude="[^"]*\.\.\/\.\.\/clients\/\*\*/, "NuGet excludes other clients"],
+    ["clients/fsharp/Flags2Env.FSharp.fsproj", /Pack="true"[\s\S]*PackagePath="native\/src\/"/, "dotnet pack includes native parser source"],
+    ["clients/fsharp/Flags2Env.FSharp.fsproj", /Pack="true"[\s\S]*PackagePath="native\/include\/"/, "dotnet pack includes native parser header"],
   ],
   php: [
     ["clients/php/composer.json", /"archive"\s*:\s*\{/, "Composer archive controls"],
@@ -131,8 +135,11 @@ const packageControls = {
   ruby: [
     ["clients/ruby/flags2env.gemspec", /spec\.files\s*=\s*\[/, "RubyGems files list"],
     ["clients/ruby/flags2env.gemspec", /"lib\.rb"/, "RubyGems includes runtime file"],
+    ["clients/ruby/flags2env.gemspec", /spec\.files\s*=\s*\[\s*"lib\.rb"\s*\]/, "RubyGems excludes smoke tests"],
   ],
   dart: [
+    ["clients/dart/pubspec.yaml", /^description:/m, "pub.dev package description"],
+    ["clients/dart/pubspec.yaml", /^repository:/m, "pub.dev repository metadata"],
     ["clients/dart/.pubignore", /^Dockerfile$/m, "pub.dev excludes Dockerfile"],
     ["clients/dart/.pubignore", /^test\.dart$/m, "pub.dev excludes test file"],
     ["clients/dart/.pubignore", /^publish\.sh$/m, "pub.dev excludes publish wrapper"],
@@ -361,7 +368,7 @@ const matrix = [
     language: "Dart",
     client: "dart",
     repository: "pub.dev",
-    controls: ["clients/dart/pubspec.yaml", "clients/dart/.pubignore"],
+    controls: ["clients/dart/pubspec.yaml", "clients/dart/.pubignore", "clients/dart/LICENSE", "clients/dart/README.md", "clients/dart/CHANGELOG.md"],
     sources: ["clients/dart/lib.dart", "clients/dart/lib/flags2env.dart"],
     tests: ["clients/dart/test.dart"],
     publishIncludes: ["dart pub publish"],
