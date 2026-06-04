@@ -226,8 +226,11 @@ const packageControls = {
   ],
   matlab: [
     ["clients/matlab/README.md", /MATLAB bindings use `loadlibrary`/, "MATLAB source-archive usage docs"],
+    ["clients/matlab/README.md", /native\/parser\.h/, "MATLAB docs mention package-local loadlibrary header"],
+    ["clients/matlab/+flags2env/defaultHeaderPath.m", /native/, "MATLAB default header path is package-local"],
+    ["clients/matlab/+flags2env/ensureLoaded.m", /flags2env\.defaultHeaderPath\(\)/, "MATLAB loader uses package-local default header"],
     ["clients/matlab/test.m", /flags2env\.parse/, "MATLAB smoke test"],
-    ["scripts/publish-client.sh", /zip -r flags2env-matlab\.zip \+flags2env README\.md/, "MATLAB publish command archives only MATLAB source"],
+    ["scripts/publish-client.sh", /zip -r flags2env-matlab\.zip \+flags2env native README\.md/, "MATLAB publish command archives MATLAB source and native header/source"],
   ],
   julia: [
     ["clients/julia/Project.toml", /^name = "Flags2Env"$/m, "Julia package name"],
@@ -321,6 +324,13 @@ const forbiddenPackageContent = {
   ],
   reasonml: [
     ["clients/reasonml/src/Test.re", /tests\/fixtures|\.\.\/\.\.\/tests/, "ReasonML smoke test depends on repo fixture tree"],
+  ],
+  matlab: [
+    ["clients/matlab/+flags2env/apply.m", /fullfile\(pwd, "src", "parser\.h"\)/, "MATLAB apply uses repo-root parser header default"],
+    ["clients/matlab/+flags2env/ensureLoaded.m", /fullfile\(pwd, "src", "parser\.h"\)/, "MATLAB loader uses repo-root parser header default"],
+    ["clients/matlab/+flags2env/parse.m", /fullfile\(pwd, "src", "parser\.h"\)/, "MATLAB parse uses repo-root parser header default"],
+    ["clients/matlab/+flags2env/parseProcess.m", /fullfile\(pwd, "src", "parser\.h"\)/, "MATLAB parseProcess uses repo-root parser header default"],
+    ["clients/matlab/README.md", /tests\/fixtures/, "MATLAB README example depends on repo fixture tree"],
   ],
   zig: [
     ["clients/zig/test.zig", /tests\/fixtures|\.\.\/\.\.\/tests/, "Zig smoke test depends on repo fixture tree"],
@@ -575,8 +585,14 @@ const matrix = [
     language: "MATLAB",
     client: "matlab",
     repository: "Source archive / Git repository",
-    controls: ["clients/matlab/README.md"],
-    sources: ["clients/matlab/+flags2env/parse.m", "clients/matlab/+flags2env/apply.m"],
+    controls: ["clients/matlab/README.md", "scripts/publish-client.sh"],
+    sources: [
+      "clients/matlab/+flags2env/parse.m",
+      "clients/matlab/+flags2env/apply.m",
+      "clients/matlab/+flags2env/defaultHeaderPath.m",
+      "clients/matlab/native/parser.c",
+      "clients/matlab/native/parser.h",
+    ],
     tests: ["clients/matlab/test.m"],
     publishIncludes: ["zip -r flags2env-matlab.zip"],
   },

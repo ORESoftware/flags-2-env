@@ -272,6 +272,9 @@ for path in \
   clients/r/.Rbuildignore \
   clients/r/DESCRIPTION \
   clients/r/tests/smoke.R \
+  clients/matlab/+flags2env/defaultHeaderPath.m \
+  clients/matlab/native/parser.c \
+  clients/matlab/native/parser.h \
   clients/julia/LICENSE \
   clients/julia/Project.toml \
   clients/julia/README.md \
@@ -456,6 +459,14 @@ require_contains clients/r/src/flags2env_r.c '#include "parser\.h"'
 forbid_contains clients/r/src/flags2env_r.c '\.\./\.\./\.\./src/parser\.h'
 require_contains clients/r/tests/smoke.R 'parse_flags'
 require_contains clients/matlab/test.m 'flags2env\.parse'
+require_contains clients/matlab/+flags2env/defaultHeaderPath.m 'native'
+require_contains clients/matlab/+flags2env/ensureLoaded.m 'flags2env\.defaultHeaderPath\(\)'
+forbid_contains clients/matlab/+flags2env/apply.m 'fullfile\(pwd, "src", "parser\.h"\)'
+forbid_contains clients/matlab/+flags2env/ensureLoaded.m 'fullfile\(pwd, "src", "parser\.h"\)'
+forbid_contains clients/matlab/+flags2env/parse.m 'fullfile\(pwd, "src", "parser\.h"\)'
+forbid_contains clients/matlab/+flags2env/parseProcess.m 'fullfile\(pwd, "src", "parser\.h"\)'
+require_same_file src/parser.c clients/matlab/native/parser.c
+require_same_file src/parser.h clients/matlab/native/parser.h
 require_contains clients/julia/Project.toml '^name = "Flags2Env"'
 require_contains clients/julia/Project.toml '^uuid = "[0-9a-f-]{36}"'
 require_contains clients/julia/Project.toml '^version = "0\.1\.0"'
@@ -492,6 +503,7 @@ require_contains scripts/publish-client.sh 'cpan-upload'
 require_contains scripts/publish-client.sh 'luarocks upload flags2env-0\.1\.0-1\.rockspec'
 require_contains scripts/publish-client.sh 'nimble publish'
 require_contains scripts/publish-client.sh 'submit_cran'
+require_contains scripts/publish-client.sh 'zip -r flags2env-matlab\.zip \+flags2env native README\.md'
 require_contains scripts/publish-client.sh '@JuliaRegistrator register subdir=clients/julia'
 require_contains scripts/docker-check-new-clients.sh 'dotnet run'
 require_contains scripts/docker-check-new-clients.sh 'dotnet run --project /tmp/f2e-csharp-test/f2e-csharp-test\.csproj'
@@ -523,6 +535,7 @@ for path in \
   clients/gleam/test.gleam \
   clients/r/R/flags2env.R \
   clients/r/tests/smoke.R \
+  clients/matlab/+flags2env/defaultHeaderPath.m \
   clients/matlab/test.m \
   clients/fortran/src/flags2env.f90 \
   clients/fortran/test.f90 \

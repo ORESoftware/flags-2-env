@@ -120,6 +120,11 @@ fixture when `FLAGS2ENV_FIXTURE` is absent. The F# smoke program registers a
 `DllImportResolver` before the first native call so `DllImport("flags2env")`
 loads that temporary library.
 
+The MATLAB source archive includes `+flags2env`, `native/parser.h`, and
+`native/parser.c`. The loader defaults to that package-local header for
+`loadlibrary`, while callers can still pass an explicit shared library or
+header path when embedding flags2env elsewhere.
+
 The native C CLI has a Homebrew formula at
 `packaging/homebrew/Formula/flags2env.rb`. It builds the CLI and C library,
 installs bash/zsh helper files under `pkgshare`, and includes a formula test for
