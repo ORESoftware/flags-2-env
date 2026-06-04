@@ -1,0 +1,32 @@
+[flags.port]
+env = "PORT"
+aliases = ["port"]
+type = "string"
+default = "3000"
+
+[flags.host]
+env = "HOST"
+aliases = ["host"]
+type = "string"
+
+[flags.debug]
+env = "DEBUG"
+aliases = ["debug"]
+type = "bool"
+default = "false"
+
+[flags.verbose]
+env = "VERBOSE"
+aliases = ["verbose"]
+type = "bool"
+
+[flags.color]
+env = "COLOR"
+aliases = ["color"]
+type = "bool"
+default = "true"
+
+[flags.mode]
+env = "NODE_ENV"
+aliases = ["mode"]
+type = "string"

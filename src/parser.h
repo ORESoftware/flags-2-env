@@ -75,6 +75,24 @@ char *f2e_audit_config_from_file(const char *config_path) F2E_OWNED_RESULT;
 int f2e_audit_config_status(void) F2E_WARN_UNUSED_RESULT;
 int f2e_audit_config_status_from_file(const char *config_path) F2E_WARN_UNUSED_RESULT;
 
+/*
+ * Generates static shell completion scripts from .cli-flags.toml. The generated
+ * scripts are optimized for shell startup/completion speed: they do not invoke
+ * flags2env or read TOML at completion time.
+ */
+char *f2e_completion_script(const char *shell, const char *command_name) F2E_OWNED_RESULT;
+char *f2e_completion_script_from_file(const char *config_path, const char *shell, const char *command_name) F2E_OWNED_RESULT;
+
+/*
+ * Audits a .env file against the env keys declared by .cli-flags.toml.
+ * Unknown .env keys are errors; declared TOML env keys missing from .env are
+ * warnings because they may be optional or supplied elsewhere.
+ */
+char *f2e_audit_env_file(void) F2E_OWNED_RESULT;
+char *f2e_audit_env_file_from_file(const char *config_path, const char *env_path) F2E_OWNED_RESULT;
+int f2e_audit_env_file_status(void) F2E_WARN_UNUSED_RESULT;
+int f2e_audit_env_file_status_from_file(const char *config_path, const char *env_path) F2E_WARN_UNUSED_RESULT;
+
 void f2e_free(char *value) F2E_TAKES_OWNED_ARG_1;
 
 #ifdef __cplusplus

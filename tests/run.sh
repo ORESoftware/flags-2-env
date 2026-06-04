@@ -4,6 +4,10 @@ set -eu
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 CLI="$ROOT_DIR/build/flags2env"
 FIXTURE_DIR="$ROOT_DIR/tests/fixtures"
+TMP_TEST_DIR="${TMPDIR:-/tmp}/flags2env-tests-$$"
+rm -rf "$TMP_TEST_DIR"
+mkdir -p "$TMP_TEST_DIR"
+trap 'rm -rf "$TMP_TEST_DIR"' EXIT
 
 run_case() {
   expected="$1"
@@ -65,6 +69,63 @@ if [ "$actual" != "$expected" ]; then
   exit 1
 fi
 
+actual="$("$CLI" audit env "$ROOT_DIR/tests/env-audit-clean/.cli-flags.toml" "$ROOT_DIR/tests/env-audit-clean/.env")"
+expected='{"ok":true,"errorCount":0,"warningCount":0,"errors":[],"warnings":[]}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected clean env audit: %s\nActual:                   %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+
+set +e
+actual="$("$CLI" audit env "$ROOT_DIR/tests/env-audit-drift/.cli-flags.toml" "$ROOT_DIR/tests/env-audit-drift/.env")"
+status=$?
+set -e
+expected='{"ok":false,"errorCount":1,"warningCount":4,"errors":[".env key \"EXTRA\" is not declared by .cli-flags.toml"],"warnings":[".env key \"DEBUG\" appears more than once",".env line 5 has invalid key \"BAD-KEY\"",".cli-flags.toml env \"HOST\" is not present in .env",".cli-flags.toml env \"VERBOSE\" is not present in .env"]}'
+if [ "$status" -eq 0 ] || [ "$actual" != "$expected" ]; then
+  printf 'Expected failing env audit status and report:\n%s\nActual status: %s\nActual: %s\n' "$expected" "$status" "$actual" >&2
+  exit 1
+fi
+
+completion_bash="$("$CLI" completion bash mycli "$FIXTURE_DIR/.cli-flags.toml")"
+case "$completion_bash" in
+  *'_flags2env_complete_mycli()'*'--port --port= --listen-port --listen-port= -p'*'--no-debug'*'complete -o default -F _flags2env_complete_mycli -- '\''mycli'\'''*)
+    ;;
+  *)
+    printf 'Unexpected bash completion script:\n%s\n' "$completion_bash" >&2
+    exit 1
+    ;;
+esac
+
+completion_zsh="$("$CLI" completion zsh mycli "$FIXTURE_DIR/.cli-flags.toml")"
+case "$completion_zsh" in
+  *'#compdef mycli'*'_arguments -s'*"'--port[PORT]:value:'"*"'--debug[DEBUG]::value:(true false t 1 f 0)'"*"'--no-debug[DEBUG]'"*)
+    ;;
+  *)
+    printf 'Unexpected zsh completion script:\n%s\n' "$completion_zsh" >&2
+    exit 1
+    ;;
+esac
+
+F2E_COMPLETION_DIR="$TMP_TEST_DIR/bash-completions" \
+F2E_BASHRC="$TMP_TEST_DIR/bashrc" \
+  "$CLI" completion install bash mycli "$FIXTURE_DIR/.cli-flags.toml" >/dev/null
+if [ ! -f "$TMP_TEST_DIR/bash-completions/mycli" ] ||
+   ! grep -q '_flags2env_complete_mycli' "$TMP_TEST_DIR/bash-completions/mycli" ||
+   ! grep -q 'flags2env completion: bash mycli' "$TMP_TEST_DIR/bashrc"; then
+  printf 'Bash completion install did not write expected files under %s\n' "$TMP_TEST_DIR" >&2
+  exit 1
+fi
+
+F2E_COMPLETION_DIR="$TMP_TEST_DIR/zsh-completions" \
+F2E_ZSHRC="$TMP_TEST_DIR/zshrc" \
+  "$CLI" completion install zsh mycli "$FIXTURE_DIR/.cli-flags.toml" >/dev/null
+if [ ! -f "$TMP_TEST_DIR/zsh-completions/_mycli" ] ||
+   ! grep -q '#compdef mycli' "$TMP_TEST_DIR/zsh-completions/_mycli" ||
+   ! grep -q 'flags2env completion: zsh mycli' "$TMP_TEST_DIR/zshrc"; then
+  printf 'Zsh completion install did not write expected files under %s\n' "$TMP_TEST_DIR" >&2
+  exit 1
+fi
+
 INVALID_CONFIG="$ROOT_DIR/tests/audit-invalid/.cli-flags.toml"
 set +e
 actual="$("$CLI" audit "$INVALID_CONFIG")"
@@ -88,6 +149,65 @@ actual="$(cd "$HOME_FIXTURE" && HOME="$HOME_FIXTURE" "$CLI" app --bad)"
 expected='{}'
 if [ "$actual" != "$expected" ]; then
   printf 'Expected HOME refusal: %s\nActual:                %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+
+completion="$("$CLI" completion bash mycli "$FIXTURE_DIR/.cli-flags.toml")"
+printf '%s\n' "$completion" | grep -F "complete -o default -F _flags2env_complete_mycli -- 'mycli'" >/dev/null ||
+  { printf 'Bash completion missing command binding:\n%s\n' "$completion" >&2; exit 1; }
+printf '%s\n' "$completion" | grep -F -- "--listen-port=" >/dev/null ||
+  { printf 'Bash completion missing listen-port alias:\n%s\n' "$completion" >&2; exit 1; }
+printf '%s\n' "$completion" | grep -F -- "--no-debug" >/dev/null ||
+  { printf 'Bash completion missing negated bool:\n%s\n' "$completion" >&2; exit 1; }
+
+completion="$("$CLI" completion zsh mycli "$FIXTURE_DIR/.cli-flags.toml")"
+printf '%s\n' "$completion" | grep -F "#compdef mycli" >/dev/null ||
+  { printf 'Zsh completion missing compdef:\n%s\n' "$completion" >&2; exit 1; }
+printf '%s\n' "$completion" | grep -F -- "--port[PORT]:value:" >/dev/null ||
+  { printf 'Zsh completion missing port spec:\n%s\n' "$completion" >&2; exit 1; }
+printf '%s\n' "$completion" | grep -F -- "--no-debug[DEBUG]" >/dev/null ||
+  { printf 'Zsh completion missing negated bool:\n%s\n' "$completion" >&2; exit 1; }
+
+actual="$("$CLI" env-audit "$ROOT_DIR/tests/env-audit-clean/.cli-flags.toml")"
+expected='{"ok":true,"errorCount":0,"warningCount":0,"errors":[],"warnings":[]}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected clean env audit: %s\nActual:                   %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+
+set +e
+actual="$("$CLI" env-audit "$ROOT_DIR/tests/env-audit/.cli-flags.toml" "$ROOT_DIR/tests/env-audit/.env")"
+status=$?
+set -e
+expected='{"ok":false,"errorCount":1,"warningCount":3,"errors":[".env key \"FLAGS2ENV_EXTRA\" is not declared by .cli-flags.toml"],"warnings":[".env key \"FLAGS2ENV_DEBUG\" appears more than once",".env line 5 is not KEY=value",".cli-flags.toml env \"FLAGS2ENV_RUNTIME\" is not present in .env"]}'
+if [ "$status" -eq 0 ] || [ "$actual" != "$expected" ]; then
+  printf 'Expected failing env audit status and report:\n%s\nActual status: %s\nActual: %s\n' "$expected" "$status" "$actual" >&2
+  exit 1
+fi
+
+INSTALL_HOME="$(mktemp -d)"
+trap 'rm -rf "$INSTALL_HOME"' EXIT
+HOME="$INSTALL_HOME" \
+F2E_BASH_COMPLETION_DIR="$INSTALL_HOME/bash-completions" \
+F2E_BASHRC="$INSTALL_HOME/.bashrc" \
+  "$CLI" install-completion bash mycli "$FIXTURE_DIR/.cli-flags.toml" >/dev/null
+
+if [ ! -f "$INSTALL_HOME/bash-completions/mycli" ] ||
+   ! grep -q "_flags2env_complete_mycli" "$INSTALL_HOME/bash-completions/mycli" ||
+   ! grep -q "flags2env completion: bash mycli" "$INSTALL_HOME/.bashrc"; then
+  printf 'Bash completion install did not write expected files under %s\n' "$INSTALL_HOME" >&2
+  exit 1
+fi
+
+HOME="$INSTALL_HOME" \
+F2E_ZSH_COMPLETION_DIR="$INSTALL_HOME/zfunc" \
+F2E_ZSHRC="$INSTALL_HOME/.zshrc" \
+  "$CLI" completion install zsh mycli "$FIXTURE_DIR/.cli-flags.toml" >/dev/null
+
+if [ ! -f "$INSTALL_HOME/zfunc/_mycli" ] ||
+   ! grep -q "#compdef mycli" "$INSTALL_HOME/zfunc/_mycli" ||
+   ! grep -q "flags2env completion: zsh mycli" "$INSTALL_HOME/.zshrc"; then
+  printf 'Zsh completion install did not write expected files under %s\n' "$INSTALL_HOME" >&2
   exit 1
 fi
 

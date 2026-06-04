@@ -27,6 +27,39 @@ static int f2e_node_read_string(napi_env env, napi_value value, char **out) {
   return 1;
 }
 
+static int f2e_node_read_optional_string(napi_env env, napi_value value, char **out) {
+  *out = NULL;
+  if (!value) {
+    return 1;
+  }
+
+  napi_valuetype type;
+  if (napi_typeof(env, value, &type) != napi_ok) {
+    return 0;
+  }
+  if (type == napi_undefined || type == napi_null) {
+    return 1;
+  }
+  return f2e_node_read_string(env, value, out);
+}
+
+static napi_value f2e_node_string_result(napi_env env, char *result, const char *message) {
+  if (!result) {
+    return f2e_node_throw(env, message);
+  }
+
+  napi_value out;
+  napi_create_string_utf8(env, result, NAPI_AUTO_LENGTH, &out);
+  f2e_free(result);
+  return out;
+}
+
+static napi_value f2e_node_int_result(napi_env env, int value) {
+  napi_value out;
+  napi_create_int32(env, value, &out);
+  return out;
+}
+
 static napi_value f2e_node_parse_json(napi_env env, napi_callback_info info) {
   size_t argc = 2;
   napi_value args[2];
@@ -66,6 +99,110 @@ static napi_value f2e_node_parse_json(napi_env env, napi_callback_info info) {
   return out;
 }
 
+static napi_value f2e_node_audit_config_json(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value args[1];
+  napi_get_cb_info(env, info, &argc, args, NULL, NULL);
+
+  char *config_path = NULL;
+  if (argc >= 1 && !f2e_node_read_optional_string(env, args[0], &config_path)) {
+    return f2e_node_throw(env, "configPath must be a string");
+  }
+
+  char *result = config_path ? f2e_audit_config_from_file(config_path) : f2e_audit_config();
+  free(config_path);
+  return f2e_node_string_result(env, result, "failed to audit config");
+}
+
+static napi_value f2e_node_audit_config_status(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value args[1];
+  napi_get_cb_info(env, info, &argc, args, NULL, NULL);
+
+  char *config_path = NULL;
+  if (argc >= 1 && !f2e_node_read_optional_string(env, args[0], &config_path)) {
+    return f2e_node_throw(env, "configPath must be a string");
+  }
+
+  int status = config_path ? f2e_audit_config_status_from_file(config_path) : f2e_audit_config_status();
+  free(config_path);
+  return f2e_node_int_result(env, status);
+}
+
+static napi_value f2e_node_audit_env_json(napi_env env, napi_callback_info info) {
+  size_t argc = 2;
+  napi_value args[2];
+  napi_get_cb_info(env, info, &argc, args, NULL, NULL);
+
+  char *config_path = NULL;
+  char *env_path = NULL;
+  if (argc >= 1 && !f2e_node_read_optional_string(env, args[0], &config_path)) {
+    return f2e_node_throw(env, "configPath must be a string");
+  }
+  if (argc >= 2 && !f2e_node_read_optional_string(env, args[1], &env_path)) {
+    free(config_path);
+    return f2e_node_throw(env, "envPath must be a string");
+  }
+
+  char *result = config_path ? f2e_audit_env_file_from_file(config_path, env_path) : f2e_audit_env_file();
+  free(config_path);
+  free(env_path);
+  return f2e_node_string_result(env, result, "failed to audit env file");
+}
+
+static napi_value f2e_node_audit_env_status(napi_env env, napi_callback_info info) {
+  size_t argc = 2;
+  napi_value args[2];
+  napi_get_cb_info(env, info, &argc, args, NULL, NULL);
+
+  char *config_path = NULL;
+  char *env_path = NULL;
+  if (argc >= 1 && !f2e_node_read_optional_string(env, args[0], &config_path)) {
+    return f2e_node_throw(env, "configPath must be a string");
+  }
+  if (argc >= 2 && !f2e_node_read_optional_string(env, args[1], &env_path)) {
+    free(config_path);
+    return f2e_node_throw(env, "envPath must be a string");
+  }
+
+  int status = config_path ? f2e_audit_env_file_status_from_file(config_path, env_path) : f2e_audit_env_file_status();
+  free(config_path);
+  free(env_path);
+  return f2e_node_int_result(env, status);
+}
+
+static napi_value f2e_node_completion_script(napi_env env, napi_callback_info info) {
+  size_t argc = 3;
+  napi_value args[3];
+  napi_get_cb_info(env, info, &argc, args, NULL, NULL);
+
+  if (argc < 1) {
+    return f2e_node_throw(env, "completionScript(shell, command?, configPath?) requires shell");
+  }
+
+  char *shell = NULL;
+  char *command = NULL;
+  char *config_path = NULL;
+  if (!f2e_node_read_string(env, args[0], &shell)) {
+    return f2e_node_throw(env, "shell must be a string");
+  }
+  if (argc >= 2 && !f2e_node_read_optional_string(env, args[1], &command)) {
+    free(shell);
+    return f2e_node_throw(env, "command must be a string");
+  }
+  if (argc >= 3 && !f2e_node_read_optional_string(env, args[2], &config_path)) {
+    free(shell);
+    free(command);
+    return f2e_node_throw(env, "configPath must be a string");
+  }
+
+  char *result = config_path ? f2e_completion_script_from_file(config_path, shell, command) : f2e_completion_script(shell, command);
+  free(shell);
+  free(command);
+  free(config_path);
+  return f2e_node_string_result(env, result, "failed to generate completion script");
+}
+
 static napi_value f2e_node_parse_process_json(napi_env env, napi_callback_info info) {
   size_t argc = 1;
   napi_value args[1];
@@ -102,6 +239,26 @@ static napi_value f2e_node_init(napi_env env, napi_value exports) {
   napi_value parse_process_json;
   napi_create_function(env, "parseProcessJson", NAPI_AUTO_LENGTH, f2e_node_parse_process_json, NULL, &parse_process_json);
   napi_set_named_property(env, exports, "parseProcessJson", parse_process_json);
+
+  napi_value audit_config_json;
+  napi_create_function(env, "auditConfigJson", NAPI_AUTO_LENGTH, f2e_node_audit_config_json, NULL, &audit_config_json);
+  napi_set_named_property(env, exports, "auditConfigJson", audit_config_json);
+
+  napi_value audit_config_status;
+  napi_create_function(env, "auditConfigStatus", NAPI_AUTO_LENGTH, f2e_node_audit_config_status, NULL, &audit_config_status);
+  napi_set_named_property(env, exports, "auditConfigStatus", audit_config_status);
+
+  napi_value audit_env_json;
+  napi_create_function(env, "auditEnvJson", NAPI_AUTO_LENGTH, f2e_node_audit_env_json, NULL, &audit_env_json);
+  napi_set_named_property(env, exports, "auditEnvJson", audit_env_json);
+
+  napi_value audit_env_status;
+  napi_create_function(env, "auditEnvStatus", NAPI_AUTO_LENGTH, f2e_node_audit_env_status, NULL, &audit_env_status);
+  napi_set_named_property(env, exports, "auditEnvStatus", audit_env_status);
+
+  napi_value completion_script;
+  napi_create_function(env, "completionScript", NAPI_AUTO_LENGTH, f2e_node_completion_script, NULL, &completion_script);
+  napi_set_named_property(env, exports, "completionScript", completion_script);
   return exports;
 }
 

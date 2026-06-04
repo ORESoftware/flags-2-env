@@ -31,6 +31,7 @@
 #define F2E_MAX_LINE 4096
 #define F2E_MAX_META_PAIRS 3
 #define F2E_MAX_PAIRS (F2E_MAX_FLAGS + F2E_MAX_META_PAIRS)
+#define F2E_MAX_ENV_FILE_KEYS 512
 
 typedef enum {
   F2E_TYPE_STRING = 0,
@@ -107,6 +108,19 @@ static size_t f2e_strlcpy(char *dst, const char *src, size_t dst_size) {
     dst[copy_len] = '\0';
   }
   return src_len;
+}
+
+static char *f2e_strdup(const char *value) {
+  size_t len = value ? strlen(value) : 0;
+  char *copy = (char *)malloc(len + 1);
+  if (!copy) {
+    return NULL;
+  }
+  if (len > 0 && value) {
+    memcpy(copy, value, len);
+  }
+  copy[len] = '\0';
+  return copy;
 }
 
 static int f2e_streq(const char *a, const char *b) {
@@ -939,6 +953,22 @@ static int f2e_buffer_append_json_string(F2EBuffer *buffer, const char *value) {
   return f2e_buffer_append_char(buffer, '"');
 }
 
+static int f2e_buffer_append_shell_single_quoted(F2EBuffer *buffer, const char *value) {
+  if (!f2e_buffer_append_char(buffer, '\'')) {
+    return 0;
+  }
+  for (const char *cursor = value ? value : ""; *cursor; cursor++) {
+    if (*cursor == '\'') {
+      if (!f2e_buffer_append(buffer, "'\\''")) {
+        return 0;
+      }
+    } else if (!f2e_buffer_append_char(buffer, *cursor)) {
+      return 0;
+    }
+  }
+  return f2e_buffer_append_char(buffer, '\'');
+}
+
 static int f2e_json_list_init(F2EJsonList *list) {
   memset(list, 0, sizeof(*list));
   if (!f2e_buffer_init(&list->buffer)) {
@@ -1688,6 +1718,574 @@ int f2e_audit_config_status(void) {
   free(report);
   free(path);
   return status;
+}
+
+typedef struct {
+  char keys[F2E_MAX_ENV_FILE_KEYS][F2E_MAX_ENV];
+  size_t count;
+} F2EEnvKeySet;
+
+static char *f2e_sibling_path(const char *path, const char *file_name) {
+  if (!path || !file_name || file_name[0] == '\0') {
+    return NULL;
+  }
+
+  const char *slash = strrchr(path, '/');
+#if defined(_WIN32)
+  const char *backslash = strrchr(path, '\\');
+  if (!slash || (backslash && backslash > slash)) {
+    slash = backslash;
+  }
+#endif
+
+  if (!slash) {
+    return f2e_strdup(file_name);
+  }
+
+  size_t dir_len = (size_t)(slash - path);
+  char separator = *slash;
+  if (dir_len == 0) {
+    dir_len = 1;
+  }
+
+  size_t file_len = strlen(file_name);
+  size_t needs_separator = path[dir_len - 1] == '/' || path[dir_len - 1] == '\\' ? 0 : 1;
+  if (dir_len > SIZE_MAX - needs_separator - file_len - 1) {
+    return NULL;
+  }
+
+  char *joined = (char *)malloc(dir_len + needs_separator + file_len + 1);
+  if (!joined) {
+    return NULL;
+  }
+  memcpy(joined, path, dir_len);
+  size_t offset = dir_len;
+  if (needs_separator) {
+    joined[offset++] = separator;
+  }
+  memcpy(joined + offset, file_name, file_len);
+  joined[offset + file_len] = '\0';
+  return joined;
+}
+
+static int f2e_env_key_is_valid(const char *key) {
+  if (!key || key[0] == '\0') {
+    return 0;
+  }
+  if (!(isalpha((unsigned char)key[0]) || key[0] == '_')) {
+    return 0;
+  }
+  for (const char *cursor = key + 1; *cursor; cursor++) {
+    if (!(isalnum((unsigned char)*cursor) || *cursor == '_')) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static int f2e_env_keyset_contains(const F2EEnvKeySet *set, const char *key) {
+  if (!set || !key) {
+    return 0;
+  }
+  for (size_t i = 0; i < set->count; i++) {
+    if (f2e_streq(set->keys[i], key)) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int f2e_env_keyset_add(F2EEnvKeySet *set, const char *key, int *duplicate_out) {
+  if (duplicate_out) {
+    *duplicate_out = 0;
+  }
+  if (!set || !key || key[0] == '\0') {
+    return 1;
+  }
+  if (f2e_env_keyset_contains(set, key)) {
+    if (duplicate_out) {
+      *duplicate_out = 1;
+    }
+    return 1;
+  }
+  if (set->count >= F2E_MAX_ENV_FILE_KEYS) {
+    return 0;
+  }
+  f2e_strlcpy(set->keys[set->count++], key, sizeof(set->keys[0]));
+  return 1;
+}
+
+static void f2e_collect_config_env_keys(const F2EConfig *config, F2EEnvKeySet *declared) {
+  memset(declared, 0, sizeof(*declared));
+  if (!config) {
+    return;
+  }
+
+  for (size_t i = 0; i < config->flag_count; i++) {
+    int duplicate = 0;
+    f2e_env_keyset_add(declared, config->flags[i].env, &duplicate);
+  }
+  int duplicate = 0;
+  f2e_env_keyset_add(declared, config->positionals_env, &duplicate);
+  f2e_env_keyset_add(declared, config->unknown_options_env, &duplicate);
+  f2e_env_keyset_add(declared, config->errors_env, &duplicate);
+}
+
+static void f2e_audit_env_file_semantics(const F2EConfig *config, const char *env_path, F2EAudit *audit) {
+  F2EEnvKeySet declared;
+  F2EEnvKeySet seen;
+  f2e_collect_config_env_keys(config, &declared);
+  memset(&seen, 0, sizeof(seen));
+
+  if (declared.count == 0) {
+    f2e_audit_add(audit, 1, ".cli-flags.toml declares no env keys");
+    return;
+  }
+
+  FILE *file = fopen(env_path, "r");
+  if (!file) {
+    f2e_audit_add(audit, 1, "could not read env file \"%s\"", env_path ? env_path : "");
+    return;
+  }
+
+  char line[F2E_MAX_LINE];
+  unsigned long line_no = 0;
+  while (fgets(line, sizeof(line), file)) {
+    line_no++;
+    char *trimmed = f2e_trim(line);
+    if (trimmed[0] == '\0' || trimmed[0] == '#') {
+      continue;
+    }
+    if (strncmp(trimmed, "export", 6) == 0 && isspace((unsigned char)trimmed[6])) {
+      trimmed = f2e_trim_left(trimmed + 6);
+    }
+
+    char *eq = strchr(trimmed, '=');
+    if (!eq) {
+      f2e_audit_add(audit, 0, ".env line %lu is not KEY=value", line_no);
+      continue;
+    }
+    *eq = '\0';
+    char *key = f2e_trim(trimmed);
+    if (!f2e_env_key_is_valid(key)) {
+      f2e_audit_add(audit, 0, ".env line %lu has invalid key \"%s\"", line_no, key);
+      continue;
+    }
+
+    int duplicate = 0;
+    if (!f2e_env_keyset_add(&seen, key, &duplicate)) {
+      f2e_audit_add(audit, 1, ".env declares too many keys");
+      break;
+    }
+    if (duplicate) {
+      f2e_audit_add(audit, 0, ".env key \"%s\" appears more than once", key);
+      continue;
+    }
+    if (!f2e_env_keyset_contains(&declared, key)) {
+      f2e_audit_add(audit, 1, ".env key \"%s\" is not declared by .cli-flags.toml", key);
+    }
+  }
+
+  fclose(file);
+
+  for (size_t i = 0; i < declared.count; i++) {
+    if (!f2e_env_keyset_contains(&seen, declared.keys[i])) {
+      f2e_audit_add(audit, 0, ".cli-flags.toml env \"%s\" is not present in .env", declared.keys[i]);
+    }
+  }
+}
+
+static char *f2e_audit_env_file_from_file_impl(const char *config_path, const char *env_path, int *status_out) {
+  F2EAudit audit;
+  if (!f2e_audit_init(&audit)) {
+    if (status_out) {
+      *status_out = 1;
+    }
+    return f2e_empty_json_object();
+  }
+
+  F2EConfig *config = (F2EConfig *)malloc(sizeof(F2EConfig));
+  if (!config) {
+    f2e_audit_add(&audit, 1, "audit allocation failed");
+    return f2e_audit_report(&audit, status_out);
+  }
+
+  char *resolved_env_path = NULL;
+  if (!config_path || config_path[0] == '\0') {
+    f2e_audit_add(&audit, 1, "config path is empty");
+  } else if (!f2e_load_config(config_path, config)) {
+    f2e_audit_add(&audit, 1, "could not read config \"%s\"", config_path);
+  } else {
+    f2e_audit_config_semantics(config, &audit);
+    resolved_env_path = env_path && env_path[0] != '\0' ? f2e_strdup(env_path) : f2e_sibling_path(config_path, ".env");
+    if (!resolved_env_path) {
+      f2e_audit_add(&audit, 1, "env path allocation failed");
+    } else {
+      f2e_audit_env_file_semantics(config, resolved_env_path, &audit);
+    }
+  }
+
+  free(resolved_env_path);
+  free(config);
+  return f2e_audit_report(&audit, status_out);
+}
+
+char *f2e_audit_env_file_from_file(const char *config_path, const char *env_path) {
+  return f2e_audit_env_file_from_file_impl(config_path, env_path, NULL);
+}
+
+char *f2e_audit_env_file(void) {
+  char *path = f2e_default_config_path();
+  if (!path) {
+    return f2e_audit_error_report("no usable .cli-flags.toml found before HOME", NULL);
+  }
+  char *result = f2e_audit_env_file_from_file(path, NULL);
+  free(path);
+  return result;
+}
+
+int f2e_audit_env_file_status_from_file(const char *config_path, const char *env_path) {
+  int status = 1;
+  char *report = f2e_audit_env_file_from_file_impl(config_path, env_path, &status);
+  free(report);
+  return status;
+}
+
+int f2e_audit_env_file_status(void) {
+  int status = 1;
+  char *path = f2e_default_config_path();
+  if (!path) {
+    return 1;
+  }
+  char *report = f2e_audit_env_file_from_file_impl(path, NULL, &status);
+  free(report);
+  free(path);
+  return status;
+}
+
+static int f2e_completion_append_word(F2EBuffer *words, const char *word) {
+  if (!word || word[0] == '\0') {
+    return 1;
+  }
+  if (words->len > 0 && !f2e_buffer_append_char(words, ' ')) {
+    return 0;
+  }
+  return f2e_buffer_append(words, word);
+}
+
+static void f2e_completion_function_name(const char *command_name, char *out, size_t out_size) {
+  const char *command = command_name && command_name[0] != '\0' ? command_name : "flags2env";
+  const char prefix[] = "_flags2env_complete_";
+  if (out_size == 0) {
+    return;
+  }
+  f2e_strlcpy(out, prefix, out_size);
+  size_t len = strlen(out);
+  for (const unsigned char *cursor = (const unsigned char *)command; *cursor && len + 1 < out_size; cursor++) {
+    out[len++] = isalnum(*cursor) ? (char)*cursor : '_';
+  }
+  out[len] = '\0';
+  if (len == sizeof(prefix) - 1 && len + 7 < out_size) {
+    f2e_strlcpy(out + len, "command", out_size - len);
+  }
+}
+
+static int f2e_completion_add_option_word(F2EBuffer *all_options, const char *prefix, const char *name, const char *suffix) {
+  char option[F2E_MAX_NAME + 8];
+  snprintf(option, sizeof(option), "%s%s%s", prefix, name, suffix ? suffix : "");
+  return f2e_completion_append_word(all_options, option);
+}
+
+static int f2e_completion_add_bool_values(F2EBuffer *bool_values, const F2EFlag *flag) {
+  if (!f2e_completion_append_word(bool_values, "true") ||
+      !f2e_completion_append_word(bool_values, "false")) {
+    return 0;
+  }
+  for (size_t i = 0; i < flag->true_alias_count; i++) {
+    if (!f2e_completion_append_word(bool_values, flag->true_aliases[i])) {
+      return 0;
+    }
+  }
+  for (size_t i = 0; i < flag->false_alias_count; i++) {
+    if (!f2e_completion_append_word(bool_values, flag->false_aliases[i])) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static int f2e_completion_collect_bash_words(const F2EConfig *config,
+                                             F2EBuffer *all_options,
+                                             F2EBuffer *value_options,
+                                             F2EBuffer *bool_value_options,
+                                             F2EBuffer *bool_values) {
+  if (!f2e_buffer_init(all_options) ||
+      !f2e_buffer_init(value_options) ||
+      !f2e_buffer_init(bool_value_options) ||
+      !f2e_buffer_init(bool_values)) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < config->flag_count; i++) {
+    const F2EFlag *flag = &config->flags[i];
+    if (flag->env[0] == '\0') {
+      continue;
+    }
+    for (size_t j = 0; j < flag->alias_count; j++) {
+      char option[F2E_MAX_NAME + 4];
+      snprintf(option, sizeof(option), "--%s", flag->aliases[j]);
+      if (!f2e_completion_append_word(all_options, option)) {
+        return 0;
+      }
+      if (flag->type == F2E_TYPE_BOOL) {
+        if (!f2e_completion_append_word(bool_value_options, option) ||
+            !f2e_completion_add_option_word(all_options, "--no-", flag->aliases[j], NULL)) {
+          return 0;
+        }
+      } else {
+        if (!f2e_completion_append_word(value_options, option) ||
+            !f2e_completion_add_option_word(all_options, "--", flag->aliases[j], "=")) {
+          return 0;
+        }
+      }
+    }
+
+    if (flag->short_name != '\0') {
+      char short_option[4] = {'-', flag->short_name, '\0', '\0'};
+      if (!f2e_completion_append_word(all_options, short_option)) {
+        return 0;
+      }
+      if (flag->type == F2E_TYPE_BOOL) {
+        if (!f2e_completion_append_word(bool_value_options, short_option)) {
+          return 0;
+        }
+      } else if (!f2e_completion_append_word(value_options, short_option)) {
+        return 0;
+      }
+    }
+
+    if (flag->type == F2E_TYPE_BOOL && !f2e_completion_add_bool_values(bool_values, flag)) {
+      return 0;
+    }
+  }
+
+  return 1;
+}
+
+static void f2e_completion_free_words(F2EBuffer *a, F2EBuffer *b, F2EBuffer *c, F2EBuffer *d) {
+  free(a->data);
+  free(b->data);
+  free(c->data);
+  free(d->data);
+}
+
+static char *f2e_completion_script_bash(const F2EConfig *config, const char *command_name) {
+  F2EBuffer options;
+  F2EBuffer value_options;
+  F2EBuffer bool_value_options;
+  F2EBuffer bool_values;
+  memset(&options, 0, sizeof(options));
+  memset(&value_options, 0, sizeof(value_options));
+  memset(&bool_value_options, 0, sizeof(bool_value_options));
+  memset(&bool_values, 0, sizeof(bool_values));
+  if (!f2e_completion_collect_bash_words(config, &options, &value_options, &bool_value_options, &bool_values)) {
+    f2e_completion_free_words(&options, &value_options, &bool_value_options, &bool_values);
+    return NULL;
+  }
+
+  F2EBuffer script;
+  if (!f2e_buffer_init(&script)) {
+    f2e_completion_free_words(&options, &value_options, &bool_value_options, &bool_values);
+    return NULL;
+  }
+
+  const char *command = command_name && command_name[0] != '\0' ? command_name : "flags2env";
+  char function_name[F2E_MAX_NAME * 2];
+  f2e_completion_function_name(command, function_name, sizeof(function_name));
+
+  if (!f2e_buffer_append(&script, "# flags2env bash completion\n") ||
+      !f2e_buffer_append(&script, function_name) ||
+      !f2e_buffer_append(&script, "() {\n"
+                                  "  local cur prev opt opts value_opts bool_value_opts bool_values\n"
+                                  "  COMPREPLY=()\n"
+                                  "  cur=\"${COMP_WORDS[COMP_CWORD]}\"\n"
+                                  "  prev=\"${COMP_WORDS[COMP_CWORD-1]}\"\n"
+                                  "  opts=") ||
+      !f2e_buffer_append_shell_single_quoted(&script, options.data) ||
+      !f2e_buffer_append(&script, "\n  value_opts=") ||
+      !f2e_buffer_append_shell_single_quoted(&script, value_options.data) ||
+      !f2e_buffer_append(&script, "\n  bool_value_opts=") ||
+      !f2e_buffer_append_shell_single_quoted(&script, bool_value_options.data) ||
+      !f2e_buffer_append(&script, "\n  bool_values=") ||
+      !f2e_buffer_append_shell_single_quoted(&script, bool_values.data) ||
+      !f2e_buffer_append(&script, "\n"
+                                  "  for opt in $bool_value_opts; do\n"
+                                  "    if [ \"$prev\" = \"$opt\" ]; then\n"
+                                  "      COMPREPLY=( $(compgen -W \"$bool_values\" -- \"$cur\") )\n"
+                                  "      return 0\n"
+                                  "    fi\n"
+                                  "  done\n"
+                                  "  for opt in $value_opts; do\n"
+                                  "    if [ \"$prev\" = \"$opt\" ]; then\n"
+                                  "      return 0\n"
+                                  "    fi\n"
+                                  "  done\n"
+                                  "  case \"$cur\" in\n"
+                                  "    -*) COMPREPLY=( $(compgen -W \"$opts\" -- \"$cur\") ) ;;\n"
+                                  "  esac\n"
+                                  "  return 0\n"
+                                  "}\n"
+                                  "complete -o default -F ") ||
+      !f2e_buffer_append(&script, function_name) ||
+      !f2e_buffer_append(&script, " -- ") ||
+      !f2e_buffer_append_shell_single_quoted(&script, command) ||
+      !f2e_buffer_append_char(&script, '\n')) {
+    free(script.data);
+    f2e_completion_free_words(&options, &value_options, &bool_value_options, &bool_values);
+    return NULL;
+  }
+
+  f2e_completion_free_words(&options, &value_options, &bool_value_options, &bool_values);
+  return script.data;
+}
+
+static int f2e_completion_zsh_append_spec(F2EBuffer *script, const F2EBuffer *spec) {
+  return f2e_buffer_append(script, "    ") &&
+         f2e_buffer_append_shell_single_quoted(script, spec->data) &&
+         f2e_buffer_append(script, " \\\n");
+}
+
+static int f2e_completion_zsh_option_spec(F2EBuffer *script, const char *option, const F2EFlag *flag, int bool_negated) {
+  F2EBuffer spec;
+  F2EBuffer values;
+  if (!f2e_buffer_init(&spec)) {
+    return 0;
+  }
+  memset(&values, 0, sizeof(values));
+  if (!f2e_buffer_append(&spec, option) ||
+      !f2e_buffer_append_char(&spec, '[') ||
+      !f2e_buffer_append(&spec, flag->env[0] != '\0' ? flag->env : f2e_audit_flag_name(flag)) ||
+      !f2e_buffer_append_char(&spec, ']')) {
+    free(spec.data);
+    return 0;
+  }
+
+  if (flag->type == F2E_TYPE_BOOL && !bool_negated) {
+    if (!f2e_buffer_init(&values) ||
+        !f2e_completion_add_bool_values(&values, flag) ||
+        !f2e_buffer_append(&spec, "::value:(") ||
+        !f2e_buffer_append(&spec, values.data) ||
+        !f2e_buffer_append_char(&spec, ')')) {
+      free(values.data);
+      free(spec.data);
+      return 0;
+    }
+    free(values.data);
+  } else if (flag->type != F2E_TYPE_BOOL) {
+    if (!f2e_buffer_append(&spec, ":value:")) {
+      free(spec.data);
+      return 0;
+    }
+  }
+
+  int ok = f2e_completion_zsh_append_spec(script, &spec);
+  free(spec.data);
+  return ok;
+}
+
+static char *f2e_completion_script_zsh(const F2EConfig *config, const char *command_name) {
+  F2EBuffer script;
+  if (!f2e_buffer_init(&script)) {
+    return NULL;
+  }
+
+  const char *command = command_name && command_name[0] != '\0' ? command_name : "flags2env";
+  char function_name[F2E_MAX_NAME * 2];
+  f2e_completion_function_name(command, function_name, sizeof(function_name));
+
+  if (!f2e_buffer_append(&script, "#compdef ") ||
+      !f2e_buffer_append(&script, command) ||
+      !f2e_buffer_append_char(&script, '\n') ||
+      !f2e_buffer_append(&script, function_name) ||
+      !f2e_buffer_append(&script, "() {\n  _arguments -s \\\n")) {
+    free(script.data);
+    return NULL;
+  }
+
+  for (size_t i = 0; i < config->flag_count; i++) {
+    const F2EFlag *flag = &config->flags[i];
+    if (flag->env[0] == '\0') {
+      continue;
+    }
+    for (size_t j = 0; j < flag->alias_count; j++) {
+      char option[F2E_MAX_NAME + 8];
+      snprintf(option, sizeof(option), "--%s", flag->aliases[j]);
+      if (!f2e_completion_zsh_option_spec(&script, option, flag, 0)) {
+        free(script.data);
+        return NULL;
+      }
+      if (flag->type == F2E_TYPE_BOOL) {
+        snprintf(option, sizeof(option), "--no-%s", flag->aliases[j]);
+        if (!f2e_completion_zsh_option_spec(&script, option, flag, 1)) {
+          free(script.data);
+          return NULL;
+        }
+      }
+    }
+    if (flag->short_name != '\0') {
+      char option[4] = {'-', flag->short_name, '\0', '\0'};
+      if (!f2e_completion_zsh_option_spec(&script, option, flag, 0)) {
+        free(script.data);
+        return NULL;
+      }
+    }
+  }
+
+  if (!f2e_buffer_append(&script, "    '*::arg:->args'\n}\n") ||
+      !f2e_buffer_append(&script, function_name) ||
+      !f2e_buffer_append(&script, " \"$@\"\n")) {
+    free(script.data);
+    return NULL;
+  }
+
+  return script.data;
+}
+
+static char *f2e_completion_script_from_config(const F2EConfig *config, const char *shell, const char *command_name) {
+  if (!config || !shell || shell[0] == '\0') {
+    return NULL;
+  }
+  if (f2e_streq(shell, "bash")) {
+    return f2e_completion_script_bash(config, command_name);
+  }
+  if (f2e_streq(shell, "zsh")) {
+    return f2e_completion_script_zsh(config, command_name);
+  }
+  return NULL;
+}
+
+char *f2e_completion_script_from_file(const char *config_path, const char *shell, const char *command_name) {
+  F2EConfig *config = (F2EConfig *)malloc(sizeof(F2EConfig));
+  if (!config) {
+    return NULL;
+  }
+  if (!config_path || !f2e_load_config(config_path, config)) {
+    free(config);
+    return NULL;
+  }
+  char *script = f2e_completion_script_from_config(config, shell, command_name);
+  free(config);
+  return script;
+}
+
+char *f2e_completion_script(const char *shell, const char *command_name) {
+  char *path = f2e_default_config_path();
+  if (!path) {
+    return NULL;
+  }
+  char *script = f2e_completion_script_from_file(path, shell, command_name);
+  free(path);
+  return script;
 }
 
 char *f2e_parse_from_file(const char *config_path, int argc, const char *const argv[]) {

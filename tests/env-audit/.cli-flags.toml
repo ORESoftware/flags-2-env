@@ -1,0 +1,17 @@
+[flags.config]
+env = "FLAGS2ENV_CONFIG"
+aliases = ["config"]
+short = "c"
+type = "string"
+
+[flags.debug]
+env = "FLAGS2ENV_DEBUG"
+aliases = ["debug"]
+short = "d"
+type = "bool"
+
+[flags.runtime]
+env = "FLAGS2ENV_RUNTIME"
+aliases = ["runtime"]
+short = "r"
+type = "string"

@@ -31,10 +31,43 @@ function applyProcess(target = process.env, options = {}) {
   return Object.assign(target, parseProcess(options));
 }
 
+function auditConfig(options = {}) {
+  const raw = options.configPath ? native().auditConfigJson(options.configPath) : native().auditConfigJson();
+  return JSON.parse(raw);
+}
+
+function auditConfigStatus(options = {}) {
+  return options.configPath ? native().auditConfigStatus(options.configPath) : native().auditConfigStatus();
+}
+
+function auditEnv(options = {}) {
+  const raw = options.configPath
+    ? native().auditEnvJson(options.configPath, options.envPath)
+    : native().auditEnvJson();
+  return JSON.parse(raw);
+}
+
+function auditEnvStatus(options = {}) {
+  return options.configPath
+    ? native().auditEnvStatus(options.configPath, options.envPath)
+    : native().auditEnvStatus();
+}
+
+function completionScript(shell, command = "flags2env", options = {}) {
+  return options.configPath
+    ? native().completionScript(String(shell), String(command), options.configPath)
+    : native().completionScript(String(shell), String(command));
+}
+
 module.exports = {
   parse,
   parseProcess,
   apply,
   applyProcess,
+  auditConfig,
+  auditConfigStatus,
+  auditEnv,
+  auditEnvStatus,
+  completionScript,
 };
 module.exports.default = module.exports;

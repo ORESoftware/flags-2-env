@@ -10,6 +10,9 @@
 #define INVALID_PARSE_CONFIG "tests/audit-invalid-parse/.cli-flags.toml"
 #define TYPED_CONFIG "tests/typed/.cli-flags.toml"
 #define INVALID_TYPED_CONFIG "tests/audit-invalid-typed/.cli-flags.toml"
+#define ENV_AUDIT_CONFIG "tests/env-audit/.cli-flags.toml"
+#define ENV_AUDIT_ENV "tests/env-audit/.env"
+#define ENV_AUDIT_CLEAN_CONFIG "tests/env-audit-clean/.cli-flags.toml"
 #define DEFAULT_JSON "{\"PORT\":\"3000\",\"DEBUG\":\"false\",\"COLOR\":\"true\"}"
 
 static void expect_json(const char *label, char *actual, const char *expected) {
@@ -28,6 +31,17 @@ static void expect_json(const char *label, char *actual, const char *expected) {
 static void expect_status(const char *label, int actual, int expected) {
   if (actual != expected) {
     fprintf(stderr, "%s expected status %d, got %d\n", label, expected, actual);
+    exit(1);
+  }
+}
+
+static void expect_contains(const char *label, const char *actual, const char *needle) {
+  if (!actual) {
+    fprintf(stderr, "%s returned NULL\n", label);
+    exit(1);
+  }
+  if (!strstr(actual, needle)) {
+    fprintf(stderr, "%s expected to contain:\n%s\nactual:\n%s\n", label, needle, actual);
     exit(1);
   }
 }
@@ -121,6 +135,37 @@ int main(void) {
   expect_json("invalid typed defaults audit report",
               f2e_audit_config_from_file(INVALID_TYPED_CONFIG),
               "{\"ok\":false,\"errorCount\":2,\"warningCount\":0,\"errors\":[\"flags.must_be_int default \\\"x\\\" is not a valid int\",\"flags.is_json default \\\"{bad\\\" is not valid JSON\"],\"warnings\":[]}");
+
+  char *bash_completion = f2e_completion_script_from_file(FIXTURE_CONFIG, "bash", "mycli");
+  expect_contains("bash completion command binding", bash_completion,
+                  "complete -o default -F _flags2env_complete_mycli -- 'mycli'");
+  expect_contains("bash completion long aliases", bash_completion, "--listen-port=");
+  expect_contains("bash completion bool aliases", bash_completion,
+                  "bool_value_opts='--debug -d --verbose -v --color -c'");
+  f2e_free(bash_completion);
+
+  char *zsh_completion = f2e_completion_script_from_file(FIXTURE_CONFIG, "zsh", "mycli");
+  expect_contains("zsh completion compdef", zsh_completion, "#compdef mycli");
+  expect_contains("zsh completion value spec", zsh_completion, "'--port[PORT]:value:'");
+  expect_contains("zsh completion negated bool", zsh_completion, "'--no-debug[DEBUG]'");
+  f2e_free(zsh_completion);
+
+  char *unsupported_completion = f2e_completion_script_from_file(FIXTURE_CONFIG, "fish", "mycli");
+  if (unsupported_completion) {
+    fprintf(stderr, "unsupported completion shell should return NULL\n");
+    f2e_free(unsupported_completion);
+    exit(1);
+  }
+
+  expect_status("clean env audit", f2e_audit_env_file_status_from_file(ENV_AUDIT_CLEAN_CONFIG, NULL), 0);
+  expect_json("clean env audit report",
+              f2e_audit_env_file_from_file(ENV_AUDIT_CLEAN_CONFIG, NULL),
+              "{\"ok\":true,\"errorCount\":0,\"warningCount\":0,\"errors\":[],\"warnings\":[]}");
+
+  expect_status("env mismatch audit", f2e_audit_env_file_status_from_file(ENV_AUDIT_CONFIG, ENV_AUDIT_ENV), 1);
+  expect_json("env mismatch audit report",
+              f2e_audit_env_file_from_file(ENV_AUDIT_CONFIG, ENV_AUDIT_ENV),
+              "{\"ok\":false,\"errorCount\":1,\"warningCount\":3,\"errors\":[\".env key \\\"FLAGS2ENV_EXTRA\\\" is not declared by .cli-flags.toml\"],\"warnings\":[\".env key \\\"FLAGS2ENV_DEBUG\\\" appears more than once\",\".env line 5 is not KEY=value\",\".cli-flags.toml env \\\"FLAGS2ENV_RUNTIME\\\" is not present in .env\"]}");
 
   return 0;
 }

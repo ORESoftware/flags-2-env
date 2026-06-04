@@ -1,0 +1,71 @@
+{
+  "name": "@oresoftware/f2e",
+  "version": "0.1.0",
+  "description": "Parse project-declared CLI flags into environment override maps.",
+  "type": "module",
+  "main": "./clients/nodejs/lib.cjs",
+  "types": "./clients/nodejs/lib.ts",
+  "bin": {
+    "f2e": "./clients/nodejs/cli.mjs",
+    "flags2env": "./clients/nodejs/cli.mjs"
+  },
+  "exports": {
+    ".": {
+      "types": "./clients/nodejs/lib.ts",
+      "import": "./clients/nodejs/lib.mjs",
+      "require": "./clients/nodejs/lib.cjs",
+      "default": "./clients/nodejs/lib.mjs"
+    },
+    "./bun": {
+      "types": "./clients/bun/lib.ts",
+      "bun": "./clients/bun/lib.mjs",
+      "import": "./clients/bun/lib.mjs",
+      "require": "./clients/bun/lib.cjs",
+      "default": "./clients/bun/lib.mjs"
+    },
+    "./deno": "./clients/deno/mod.ts",
+    "./deno/lib.ts": "./clients/deno/lib.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "install": "cd clients/nodejs && node-gyp rebuild",
+    "pack:dry-run": "npm pack --dry-run",
+    "test:readme": "node scripts/test-readme-snippets.mjs"
+  },
+  "files": [
+    "README.md",
+    "clients/nodejs/addon.c",
+    "clients/nodejs/binding.gyp",
+    "clients/nodejs/cli.mjs",
+    "clients/nodejs/lib.cjs",
+    "clients/nodejs/lib.mjs",
+    "clients/nodejs/lib.ts",
+    "clients/bun/lib.cjs",
+    "clients/bun/lib.mjs",
+    "clients/bun/lib.ts",
+    "clients/deno/lib.ts",
+    "clients/deno/mod.ts",
+    "src/parser.c",
+    "src/parser.h"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ORESoftware/flags-2-env.git"
+  },
+  "keywords": [
+    "cli",
+    "env",
+    "flags",
+    "configuration"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "node-gyp": "^10.0.0"
+  }
+}

@@ -1,9 +1,13 @@
 {
-  "name": "<%= packageName || '@oresoftware/cli' %>",
+  "name": "<%= packageName || '@oresoftware/f2e' %>",
   "version": "<%= version || '0.1.0' %>",
   "type": "module",
   "main": "./lib.cjs",
   "types": "./lib.ts",
+  "bin": {
+    "f2e": "./cli.mjs",
+    "flags2env": "./cli.mjs"
+  },
   "exports": {
     ".": {
       "types": "./lib.ts",
@@ -20,6 +24,7 @@
     "lib.mjs",
     "lib.cjs",
     "lib.ts",
+    "cli.mjs",
     "addon.c",
     "binding.gyp",
     "src"

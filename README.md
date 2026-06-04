@@ -108,6 +108,8 @@ The shared library exposes:
 char *f2e_parse_process_from_file(const char *config_path);
 char *f2e_parse_json_argv_from_file(const char *config_path, const char *argv_json);
 char *f2e_audit_config_from_file(const char *config_path);
+char *f2e_completion_script_from_file(const char *config_path, const char *shell, const char *command_name);
+char *f2e_audit_env_file_from_file(const char *config_path, const char *env_path);
 void f2e_free(char *value);
 ```
 
@@ -122,6 +124,61 @@ scripts/audit-changed-cli-flags.sh
 
 The audit fails on ambiguous long aliases, duplicate short flags, duplicate env targets, `--no-*` namespace clashes, and conflicting boolean value aliases.
 
+Generate shell completions from the same `.cli-flags.toml` file:
+
+```sh
+build/flags2env completion bash mycli .cli-flags.toml > mycli.bash
+build/flags2env completion zsh mycli .cli-flags.toml > _mycli
+```
+
+The generated completion scripts are static. They do not invoke `flags2env`, read TOML, or do filesystem lookup while the shell is completing, so tab completion stays fast.
+
+Install completions into user-level shell locations:
+
+```sh
+build/flags2env completion install bash mycli .cli-flags.toml
+build/flags2env completion install zsh mycli .cli-flags.toml
+```
+
+Bash installs to `${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions`. Zsh installs to `${ZDOTDIR:-$HOME}/.zfunc` and adds an idempotent `fpath`/`compinit` block to `.zshrc`. For tests or custom installs, set `F2E_COMPLETION_DIR`, `F2E_BASH_COMPLETION_DIR`, `F2E_ZSH_COMPLETION_DIR`, `F2E_BASHRC`, or `F2E_ZSHRC`.
+
+Audit a `.env` file against the env keys declared in `.cli-flags.toml`:
+
+```sh
+build/flags2env audit env .cli-flags.toml .env
+build/flags2env env-audit .cli-flags.toml .env
+```
+
+Unknown `.env` keys are errors. Duplicate keys, invalid `.env` lines, and TOML env keys missing from `.env` are warnings.
+
+Check a local `.env` file against the env keys declared by `.cli-flags.toml`:
+
+```sh
+build/flags2env env-audit .cli-flags.toml .env
+```
+
+When the `.env` path is omitted, `flags2env` checks the `.env` file next to the selected `.cli-flags.toml`. Unknown `.env` keys are errors; TOML-declared env keys missing from `.env` are warnings because they may be optional, defaulted, or supplied by deployment infrastructure.
+
+## Shell Completion
+
+Generate static bash or zsh completions for an end-product CLI:
+
+```sh
+build/flags2env completion bash mycli .cli-flags.toml > completions/mycli.bash
+build/flags2env completion zsh mycli .cli-flags.toml > completions/_mycli
+```
+
+The generated scripts are intentionally static and fast: shell completion does not run `flags2env`, read TOML, or load the native library at tab-completion time.
+
+Install completions locally:
+
+```sh
+build/flags2env install-completion bash mycli .cli-flags.toml
+build/flags2env install-completion zsh mycli .cli-flags.toml
+```
+
+Bash installs to `${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions/<command>` and adds an idempotent source block to `~/.bashrc`. Zsh installs to `${ZDOTDIR:-$HOME}/.zfunc/_<command>` and adds an idempotent `fpath`/`compinit` block to `~/.zshrc`. Tests and package scripts can override these paths with `F2E_COMPLETION_DIR`, `F2E_BASH_COMPLETION_DIR`, `F2E_ZSH_COMPLETION_DIR`, `F2E_BASHRC`, and `F2E_ZSHRC`.
+
 ## Runtime Clients
 
 Client sources live under `clients/<runtime>/`. For package publishing, render or copy only the target runtime client plus the C source or a platform-specific native artifact.
@@ -129,6 +186,23 @@ Client sources live under `clients/<runtime>/`. For package publishing, render o
 ```sh
 node scripts/render-client.mjs nodejs dist/nodejs
 node scripts/render-client.mjs bun dist/bun
+npm pack --dry-run
+```
+
+The root npm package is scaffolded as `@oresoftware/f2e`. It exports the Node client at `@oresoftware/f2e`, the Bun client at `@oresoftware/f2e/bun`, the Deno source at `@oresoftware/f2e/deno`, and `f2e` / `flags2env` CLI bins for completion generation, completion install, config audit, and `.env` audit. The package allowlist keeps npm focused on the JS/TS clients plus the C parser source needed for native builds.
+
+Other language clients should be published through their own package ecosystems instead of being bundled into npm:
+
+```text
+Java: Maven Central, for example com.oresoftware:flags2env
+Ruby: RubyGems, for example flags2env
+Rust: crates.io, for example flags2env
+Go: Go modules from github.com/oresoftware/flags-2-env/clients/golang
+Python: PyPI, for example flags2env
+PHP: Packagist, for example oresoftware/flags2env
+Dart: pub.dev, for example flags2env
+BEAM/Gleam: Hex packages for the Erlang, Elixir, and Gleam clients
+Swift: SwiftPM through git tags
 ```
 
 BEAM clients share the Erlang NIF in `clients/erlang/flags2env_nif.c`; compile it with Erlang headers plus `src/parser.c` into `priv/flags2env_nif.so`. Gleam uses `clients/gleam/flags2env_native.erl` as a native shim so its public module can be named `flags2env` without colliding with the NIF module. The Java client uses `clients/java/native/flags2env_jni.c`; compile it with JNI headers plus `src/parser.c` into `libflags2env_jni`.
@@ -178,10 +252,13 @@ parseProcess()  # read the current process argv through the C library
 parse(argv)     # explicitly pass argv after slicing, popping, or rewriting
 ```
 
-### Node.js
+The examples below keep the raw combined map as strings first, then show a typed end-values module. Boolean flags already return canonical `"true"` or `"false"`, so typed boolean conversion is a direct comparison to `"true"`.
+
+<details>
+<summary>Node.js</summary>
 
 ```js
-import * as f2e from "@oresoftware/cli";
+import * as f2e from "@oresoftware/f2e";
 
 function getEnvMap(argv = process.argv) {
   const envMap = process.env;
@@ -192,10 +269,42 @@ function getEnvMap(argv = process.argv) {
 const combined = getEnvMap();
 ```
 
-### Bun
+```ts
+import * as f2e from "@oresoftware/f2e";
+
+type AppEnv = {
+  nodeEnv: string;
+  port: number;
+  isDebug: boolean;
+};
+
+function getEnvMap(argv = process.argv): Record<string, string> {
+  return { ...process.env, ...f2e.parse(argv) };
+}
+
+const combined = getEnvMap();
+
+const toInt = (value: string | undefined, fallback: number) => {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const appEnv: AppEnv = {
+  nodeEnv: combined.NODE_ENV ?? "development",
+  port: toInt(combined.PORT, 3000),
+  isDebug: combined.DEBUG === "true",
+};
+
+export default appEnv;
+```
+
+</details>
+
+<details>
+<summary>Bun</summary>
 
 ```js
-import * as f2e from "@oresoftware/cli/bun";
+import * as f2e from "@oresoftware/f2e/bun";
 
 function getEnvMap(argv = Bun.argv) {
   const envMap = process.env;
@@ -206,7 +315,34 @@ function getEnvMap(argv = Bun.argv) {
 const combined = getEnvMap();
 ```
 
-### Deno
+```ts
+import * as f2e from "@oresoftware/f2e/bun";
+
+type AppEnv = {
+  nodeEnv: string;
+  port: number;
+  isDebug: boolean;
+};
+
+function getEnvMap(argv = Bun.argv): Record<string, string> {
+  return { ...process.env, ...f2e.parse(argv) };
+}
+
+const combined = getEnvMap();
+
+const appEnv: AppEnv = {
+  nodeEnv: combined.NODE_ENV ?? "development",
+  port: Number.parseInt(combined.PORT ?? "3000", 10),
+  isDebug: combined.DEBUG === "true",
+};
+
+export default appEnv;
+```
+
+</details>
+
+<details>
+<summary>Deno</summary>
 
 ```ts
 import * as f2e from "./clients/deno/mod.ts";
@@ -220,7 +356,34 @@ function getEnvMap(argv: string[] = Deno.args): Record<string, string> {
 const combined = getEnvMap();
 ```
 
-### C
+```ts
+import * as f2e from "./clients/deno/mod.ts";
+
+export type AppEnv = {
+  nodeEnv: string;
+  port: number;
+  isDebug: boolean;
+};
+
+export function getEnvMap(argv: string[] = Deno.args): Record<string, string> {
+  return { ...f2e.envMap(), ...f2e.parse(argv) };
+}
+
+const combined = getEnvMap();
+
+const appEnv: AppEnv = {
+  nodeEnv: combined.NODE_ENV ?? "development",
+  port: Number.parseInt(combined.PORT ?? "3000", 10),
+  isDebug: combined.DEBUG === "true",
+};
+
+export default appEnv;
+```
+
+</details>
+
+<details>
+<summary>C</summary>
 
 ```c
 #include "clients/c/lib.h"
@@ -270,7 +433,37 @@ int main(int argc, const char *const argv[], char *envp[]) {
 }
 ```
 
-### Dart
+```c
+#include "clients/c/lib.h"
+#include <stdlib.h>
+#include <string.h>
+
+typedef struct {
+  const char *node_env;
+  int port;
+  int is_debug;
+} AppEnv;
+
+static const char *map_or_default(const F2EMap *map, const char *key, const char *fallback) {
+  const char *value = f2e_map_get(map, key);
+  return value ? value : fallback;
+}
+
+AppEnv app_env_from_map(const F2EMap *combined) {
+  const char *debug = map_or_default(combined, "DEBUG", "false");
+
+  return (AppEnv){
+    .node_env = map_or_default(combined, "NODE_ENV", "development"),
+    .port = atoi(map_or_default(combined, "PORT", "3000")),
+    .is_debug = strcmp(debug, "true") == 0,
+  };
+}
+```
+
+</details>
+
+<details>
+<summary>Dart</summary>
 
 ```dart
 import 'dart:io';
@@ -287,7 +480,45 @@ void main(List<String> args) {
 }
 ```
 
-### Go
+```dart
+import 'dart:io';
+import 'package:flags2env/flags2env.dart';
+
+class AppEnv {
+  const AppEnv({
+    required this.nodeEnv,
+    required this.port,
+    required this.isDebug,
+  });
+
+  final String nodeEnv;
+  final int port;
+  final bool isDebug;
+
+  factory AppEnv.fromMap(Map<String, String> combined) {
+    return AppEnv(
+      nodeEnv: combined['NODE_ENV'] ?? 'development',
+      port: int.tryParse(combined['PORT'] ?? '') ?? 3000,
+      isDebug: combined['DEBUG'] == 'true',
+    );
+  }
+}
+
+AppEnv loadAppEnv(List<String> args) {
+  final f2e = Flags2Env.load('./build/libflags2env.dylib');
+  final combined = <String, String>{
+    ...Platform.environment,
+    ...f2e.parse(args),
+  };
+
+  return AppEnv.fromMap(combined);
+}
+```
+
+</details>
+
+<details>
+<summary>Go</summary>
 
 ```go
 package main
@@ -338,7 +569,71 @@ func main() {
 }
 ```
 
-### Erlang
+```go
+package config
+
+import (
+	"os"
+	"strconv"
+	"strings"
+
+	flags2env "github.com/oresoftware/flags-2-env/clients/golang"
+)
+
+type AppEnv struct {
+	NodeEnv string
+	Port    int
+	Debug   bool
+}
+
+func Load(args []string) (AppEnv, error) {
+	cli, err := flags2env.Parse(args)
+	if err != nil {
+		return AppEnv{}, err
+	}
+
+	combined := map[string]string{}
+	for key, value := range envMap() {
+		combined[key] = value
+	}
+	for key, value := range cli {
+		combined[key] = value
+	}
+
+	port, err := strconv.Atoi(valueOr(combined, "PORT", "3000"))
+	if err != nil {
+		return AppEnv{}, err
+	}
+
+	return AppEnv{
+		NodeEnv: valueOr(combined, "NODE_ENV", "development"),
+		Port:    port,
+		Debug:   combined["DEBUG"] == "true",
+	}, nil
+}
+
+func envMap() map[string]string {
+	env := map[string]string{}
+	for _, entry := range os.Environ() {
+		if key, value, ok := strings.Cut(entry, "="); ok {
+			env[key] = value
+		}
+	}
+	return env
+}
+
+func valueOr(mapValue map[string]string, key string, fallback string) string {
+	if value, ok := mapValue[key]; ok {
+		return value
+	}
+	return fallback
+}
+```
+
+</details>
+
+<details>
+<summary>Erlang</summary>
 
 ```erlang
 -module(my_app).
@@ -354,7 +649,29 @@ main(_Args) ->
   Combined.
 ```
 
-### Gleam
+```erlang
+-module(my_app_config).
+-export([load/0]).
+
+-record(app_env, {
+  node_env :: binary(),
+  port :: integer(),
+  is_debug :: boolean()
+}).
+
+load() ->
+  Combined = maps:merge(flags2env:env_map(), flags2env:parse(init:get_plain_arguments())),
+  #app_env{
+    node_env = maps:get(<<"NODE_ENV">>, Combined, <<"development">>),
+    port = binary_to_integer(maps:get(<<"PORT">>, Combined, <<"3000">>)),
+    is_debug = maps:get(<<"DEBUG">>, Combined, <<"false">>) =:= <<"true">>
+  }.
+```
+
+</details>
+
+<details>
+<summary>Gleam</summary>
 
 ```gleam
 import gleam/dict.{type Dict}
@@ -375,7 +692,41 @@ pub fn main() {
 }
 ```
 
-### Elixir
+```gleam
+import gleam/dict.{type Dict}
+import gleam/int
+import gleam/result
+import flags2env
+
+pub type AppEnv {
+  AppEnv(node_env: String, port: Int, is_debug: Bool)
+}
+
+pub fn load(argv: List(String)) -> AppEnv {
+  let combined =
+    dict.fold(flags2env.parse(argv), flags2env.env_map(), fn(map, key, value) {
+      dict.insert(map, key, value)
+    })
+
+  let node_env = dict.get(combined, "NODE_ENV") |> result.unwrap("development")
+  let port =
+    dict.get(combined, "PORT")
+    |> result.unwrap("3000")
+    |> int.parse
+    |> result.unwrap(3000)
+
+  AppEnv(
+    node_env: node_env,
+    port: port,
+    is_debug: dict.get(combined, "DEBUG") == Ok("true"),
+  )
+}
+```
+
+</details>
+
+<details>
+<summary>Elixir</summary>
 
 ```elixir
 defmodule MyApp do
@@ -393,7 +744,33 @@ defmodule MyApp do
 end
 ```
 
-### Java
+```elixir
+defmodule MyApp.Config do
+  defstruct node_env: "development", port: 3000, debug?: false
+
+  def load(args) do
+    combined = Map.merge(System.get_env(), Flags2Env.parse(args))
+
+    %__MODULE__{
+      node_env: Map.get(combined, "NODE_ENV", "development"),
+      port: parse_int(Map.get(combined, "PORT"), 3000),
+      debug?: Map.get(combined, "DEBUG") == "true"
+    }
+  end
+
+  defp parse_int(value, fallback) do
+    case Integer.parse(to_string(value || "")) do
+      {number, ""} -> number
+      _ -> fallback
+    end
+  end
+end
+```
+
+</details>
+
+<details>
+<summary>Java</summary>
 
 ```java
 import com.oresoftware.flags2env.Flags2Env;
@@ -420,7 +797,28 @@ public final class Main {
 }
 ```
 
-### Python
+```java
+import com.oresoftware.flags2env.Flags2Env;
+import java.util.Map;
+
+public record AppEnv(String nodeEnv, int port, boolean debug) {
+  public static AppEnv load(String[] args) {
+    Map<String, String> combined = new java.util.HashMap<>(System.getenv());
+    combined.putAll(Flags2Env.parse(args));
+
+    return new AppEnv(
+        combined.getOrDefault("NODE_ENV", "development"),
+        Integer.parseInt(combined.getOrDefault("PORT", "3000")),
+        "true".equals(combined.get("DEBUG"))
+    );
+  }
+}
+```
+
+</details>
+
+<details>
+<summary>Python</summary>
 
 ```python
 import os
@@ -437,7 +835,35 @@ def get_env_map(argv=None):
 combined = get_env_map()
 ```
 
-### Ruby
+```python
+from dataclasses import dataclass
+import os
+import sys
+from flags2env import Flags2Env
+
+@dataclass(frozen=True)
+class AppEnv:
+    node_env: str
+    port: int
+    is_debug: bool
+
+def load_app_env(argv=None):
+    sdk = Flags2Env("./build/libflags2env.dylib")
+    combined = {**os.environ, **sdk.parse(sys.argv if argv is None else argv)}
+
+    return AppEnv(
+        node_env=combined.get("NODE_ENV", "development"),
+        port=int(combined.get("PORT", "3000")),
+        is_debug=combined.get("DEBUG") == "true",
+    )
+
+app_env = load_app_env()
+```
+
+</details>
+
+<details>
+<summary>Ruby</summary>
 
 ```ruby
 require_relative "clients/ruby/lib"
@@ -452,7 +878,28 @@ end
 combined = get_env_map
 ```
 
-### PHP
+```ruby
+require_relative "clients/ruby/lib"
+
+AppEnv = Struct.new(:node_env, :port, :is_debug, keyword_init: true)
+
+def load_app_env(argv = ARGV)
+  combined = ENV.to_h.merge(Flags2Env.parse(argv))
+
+  AppEnv.new(
+    node_env: combined.fetch("NODE_ENV", "development"),
+    port: Integer(combined.fetch("PORT", "3000")),
+    is_debug: combined["DEBUG"] == "true"
+  )
+end
+
+app_env = load_app_env
+```
+
+</details>
+
+<details>
+<summary>PHP</summary>
 
 ```php
 <?php
@@ -470,7 +917,32 @@ function get_env_map(Flags2Env $f2e, array $argv): array {
 $combined = get_env_map($f2e, $argv);
 ```
 
-### Rust
+```php
+<?php
+require __DIR__ . '/clients/php/lib.php';
+
+final class AppEnv {
+    public function __construct(
+        public string $nodeEnv,
+        public int $port,
+        public bool $isDebug,
+    ) {}
+}
+
+$f2e = new Flags2Env(__DIR__ . '/build/libflags2env.dylib');
+$combined = array_replace($_ENV, $f2e->parse($argv));
+
+$appEnv = new AppEnv(
+    $combined['NODE_ENV'] ?? 'development',
+    (int)($combined['PORT'] ?? '3000'),
+    ($combined['DEBUG'] ?? 'false') === 'true',
+);
+```
+
+</details>
+
+<details>
+<summary>Rust</summary>
 
 ```rust
 use flags2env::Flags2Env;
@@ -494,7 +966,42 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-### Swift
+```rust
+use flags2env::Flags2Env;
+use std::collections::HashMap;
+use std::env;
+
+pub struct AppEnv {
+    pub node_env: String,
+    pub port: u16,
+    pub is_debug: bool,
+}
+
+pub fn load_app_env() -> Result<AppEnv, Box<dyn std::error::Error>> {
+    let sdk = unsafe { Flags2Env::load(Some("./build/libflags2env.dylib"))? };
+    let mut combined: HashMap<String, String> = env::vars().collect();
+    let argv: Vec<String> = env::args().collect();
+    combined.extend(sdk.parse(&argv, None)?);
+
+    Ok(AppEnv {
+        node_env: combined
+            .get("NODE_ENV")
+            .cloned()
+            .unwrap_or_else(|| "development".to_owned()),
+        port: combined
+            .get("PORT")
+            .map(String::as_str)
+            .unwrap_or("3000")
+            .parse()?,
+        is_debug: combined.get("DEBUG").map(String::as_str) == Some("true"),
+    })
+}
+```
+
+</details>
+
+<details>
+<summary>Swift</summary>
 
 ```swift
 import Foundation
@@ -509,6 +1016,33 @@ func getEnvMap(args: [String] = CommandLine.arguments) throws -> [String: String
 
 let combined = try getEnvMap()
 ```
+
+```swift
+import Foundation
+
+struct AppEnv {
+    let nodeEnv: String
+    let port: Int
+    let isDebug: Bool
+
+    init(_ combined: [String: String]) {
+        nodeEnv = combined["NODE_ENV"] ?? "development"
+        port = Int(combined["PORT"] ?? "") ?? 3000
+        isDebug = combined["DEBUG"] == "true"
+    }
+}
+
+func loadAppEnv(args: [String] = CommandLine.arguments) throws -> AppEnv {
+    let f2e = try Flags2Env(libraryPath: "./build/libflags2env.dylib")
+    let combined = ProcessInfo.processInfo.environment.merging(try f2e.parse(args)) { _, cli in cli }
+
+    return AppEnv(combined)
+}
+
+let appEnv = try loadAppEnv()
+```
+
+</details>
 
 ## Parser Notes
 

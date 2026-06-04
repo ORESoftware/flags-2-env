@@ -54,7 +54,7 @@ function extractUsageSnippets(markdown) {
   let buffer = [];
 
   for (const line of usage.split("\n")) {
-    const headingMatch = line.match(/^### (.+)$/);
+    const headingMatch = line.match(/^### (.+)$/) ?? line.match(/^<summary>(.+)<\/summary>$/);
     if (!inFence && headingMatch) {
       heading = headingMatch[1];
       continue;
@@ -67,7 +67,7 @@ function extractUsageSnippets(markdown) {
         buffer = [];
       } else {
         inFence = false;
-        if (heading) {
+        if (heading && !out.has(heading)) {
           out.set(heading, { lang: fenceLang, code: buffer.join("\n") });
         }
       }
@@ -167,7 +167,7 @@ function testNode() {
   }
 
   const dir = makeSnippetProject("nodejs");
-  const pkg = join(dir, "node_modules", "@oresoftware", "cli");
+  const pkg = join(dir, "node_modules", "@oresoftware", "f2e");
   write(join(pkg, "package.json"), JSON.stringify({ type: "module", exports: { ".": "./lib.mjs" } }));
   write(join(pkg, "lib.mjs"), reexportModule(join(root, "clients", "nodejs", "lib.mjs")));
   write(join(dir, "snippet.mjs"), `${snippet("Node.js")}\n${jsAssert()}`);
@@ -184,7 +184,7 @@ function testBun() {
   }
 
   const dir = makeSnippetProject("bun");
-  const pkg = join(dir, "node_modules", "@oresoftware", "cli");
+  const pkg = join(dir, "node_modules", "@oresoftware", "f2e");
   write(join(pkg, "package.json"), JSON.stringify({ type: "module", exports: { "./bun": "./bun.mjs" } }));
   write(join(pkg, "bun.mjs"), reexportModule(join(root, "clients", "bun", "lib.mjs")));
   write(join(dir, "snippet.mjs"), `${snippet("Bun")}\n${jsAssert()}`);

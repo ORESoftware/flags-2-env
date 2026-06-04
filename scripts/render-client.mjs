@@ -46,7 +46,7 @@ for (const file of ["package.json.ejs", "binding.gyp.ejs"]) {
 }
 
 for (const file of await readdir(clientDir)) {
-  if (["lib.mjs", "lib.cjs", "lib.js", "lib.ts", "mod.ts"].includes(file)) {
+  if (["lib.mjs", "lib.cjs", "lib.js", "lib.ts", "mod.ts", "cli.mjs"].includes(file)) {
     await copyFile(join(clientDir, file), join(outDir, file));
   }
 }
