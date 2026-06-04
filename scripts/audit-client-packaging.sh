@@ -32,14 +32,47 @@ forbid_contains() {
   fi
 }
 
+require_same_file() {
+  left="$1"
+  right="$2"
+  require_path "$left"
+  require_path "$right"
+  if [ -e "$ROOT_DIR/$left" ] && [ -e "$ROOT_DIR/$right" ] &&
+     ! cmp -s "$ROOT_DIR/$left" "$ROOT_DIR/$right"; then
+    printf 'file copies differ: %s %s\n' "$left" "$right" >&2
+    status=1
+  fi
+}
+
 require_client() {
   client="$1"
   require_path "clients/$client"
   require_path "clients/$client/publish.sh"
+  if [ -L "$ROOT_DIR/clients/$client/publish.sh" ]; then
+    target="$(readlink "$ROOT_DIR/clients/$client/publish.sh" || true)"
+    if [ "$target" != "../../scripts/publish-client.sh" ]; then
+      printf 'unexpected publish wrapper target for clients/%s/publish.sh: %s\n' "$client" "$target" >&2
+      status=1
+    fi
+  elif [ -e "$ROOT_DIR/clients/$client/publish.sh" ] &&
+       ! grep -Eq 'publish-client\.sh' "$ROOT_DIR/clients/$client/publish.sh"; then
+    printf 'publish wrapper does not delegate for client: %s\n' "$client" >&2
+    status=1
+  fi
+  if ! grep -Eq "^  $client\\)|\\|$client\\)|$client\\|" "$ROOT_DIR/scripts/publish-client.sh"; then
+    printf 'missing publish dispatcher case for client: %s\n' "$client" >&2
+    status=1
+  fi
+  if [ -e "$ROOT_DIR/clients/$client/publish.sh" ] &&
+     ! "$ROOT_DIR/clients/$client/publish.sh" --dry-run >/dev/null 2>&1; then
+    printf 'publish dry-run failed for client: %s\n' "$client" >&2
+    status=1
+  fi
 }
 
 for client in \
   nodejs bun deno python java kotlin scala groovy clojure rust golang c cpp \
+  bash zsh \
   csharp fsharp php ruby dart swift elixir erlang gleam haskell ocaml \
   reasonml perl lua nim r matlab julia fortran zig crystal solidity
 do
@@ -48,9 +81,23 @@ done
 
 for path in \
   .npmignore \
+  Package.swift \
   package.json \
+  packaging/homebrew/README.md \
+  packaging/homebrew/Formula/flags2env.rb \
+  scripts/audit-npm-package.mjs \
+  scripts/audit-release-matrix.mjs \
+  scripts/docker-check-new-clients.sh \
+  scripts/publish-central-ossrh-compat.sh \
+  scripts/publish-homebrew.sh \
+  clients/bash/flags2env.bash \
+  clients/bash/test.bash \
+  clients/zsh/flags2env.zsh \
+  clients/zsh/test.zsh \
   clients/python/MANIFEST.in \
   clients/python/pyproject.toml \
+  clients/golang/parser.c \
+  clients/golang/parser.h \
   clients/rust/Cargo.toml \
   clients/ruby/flags2env.gemspec \
   clients/php/composer.json \
@@ -66,6 +113,8 @@ for path in \
   clients/elixir/mix.exs \
   clients/erlang/rebar.config \
   clients/gleam/gleam.toml \
+  clients/gleam/src/flags2env.gleam \
+  clients/gleam/src/flags2env_native.erl \
   clients/haskell/flags2env.cabal \
   clients/ocaml/flags2env.opam \
   clients/reasonml/flags2env.opam \
@@ -76,29 +125,76 @@ for path in \
   clients/r/DESCRIPTION \
   clients/julia/Project.toml \
   clients/solidity/package.json \
+  .github/workflows/client-packaging.yml \
   .github/workflows/cli-flags-audit.yml
 do
   require_path "$path"
 done
 
 require_contains .npmignore '^!clients/nodejs/'
+require_contains Package.swift 'path: "clients/swift"'
+require_contains Package.swift 'exclude: \["Dockerfile", "Package\.swift", "test\.swift", "publish\.sh"\]'
+require_contains Makefile '@rpath/lib\$\(LIB_NAME\)\.dylib'
 require_contains package.json '"files"'
+require_contains package.json '"pack:audit"'
+require_contains package.json '"release:audit"'
+require_contains scripts/audit-npm-package.mjs 'non-JS clients'
+require_contains scripts/audit-release-matrix.mjs 'release matrix audit passed'
+require_contains scripts/audit-release-matrix.mjs 'requiredClients'
+require_contains scripts/audit-release-matrix.mjs 'expectedRepositories'
+require_contains scripts/audit-release-matrix.mjs 'packageControls'
+require_contains scripts/audit-release-matrix.mjs 'missing package-control assertions'
+require_contains scripts/publish-central-ossrh-compat.sh 'manual/upload/defaultRepository'
+require_contains scripts/publish-central-ossrh-compat.sh 'CENTRAL_NAMESPACE'
+require_contains scripts/publish-central-ossrh-compat.sh 'ossrh-staging-api\.central\.sonatype\.com'
+require_contains scripts/docker-check-new-clients.sh 'clojure:temurin-21-tools-deps'
+require_contains scripts/docker-check-new-clients.sh 'sbtscala/scala-sbt'
+require_contains scripts/docker-check-new-clients.sh 'zig build test'
+require_contains scripts/docker-check-new-clients.sh 'npm test && npm pack'
+require_contains packaging/homebrew/Formula/flags2env.rb 'class Flags2env < Formula'
+require_contains packaging/homebrew/Formula/flags2env.rb 'shell-env'
+require_contains packaging/homebrew/README.md 'scripts/publish-homebrew\.sh --release'
+require_contains scripts/publish-homebrew.sh 'brew audit --strict --new --online'
+require_contains scripts/publish-homebrew.sh 'FLAGS2ENV_HOMEBREW_AUDIT_TARGET'
+require_contains scripts/publish-homebrew.sh 'rev-parse "v\$VERSION'
+require_contains src/main.c 'shell-env'
+require_contains clients/bash/flags2env.bash 'flags2env_apply'
+require_contains clients/zsh/flags2env.zsh 'flags2env_apply'
 require_contains clients/python/MANIFEST.in '^include lib\.py$'
 require_contains clients/rust/Cargo.toml '^include = \['
+require_contains clients/golang/lib.go '#cgo CFLAGS: -I\.'
+require_contains clients/golang/lib.go '#include "parser\.h"'
+forbid_contains clients/golang/lib.go '\.\./\.\./src|\.\./\.\./build|LDFLAGS'
+require_same_file src/parser.c clients/golang/parser.c
+require_same_file src/parser.h clients/golang/parser.h
 require_contains clients/ruby/flags2env.gemspec 'spec\.files'
 require_contains clients/php/composer.json '"archive"'
 require_contains clients/java/pom.xml 'central-publishing-maven-plugin'
 require_contains clients/java/pom.xml '<publishingServerId>'
+require_contains clients/java/pom.xml '<excludes>'
+require_contains clients/java/pom.xml '<include>parser\.c</include>'
+require_contains clients/java/pom.xml '<include>parser\.h</include>'
 forbid_contains clients/java/pom.xml 'nexus-staging-maven-plugin'
 require_contains clients/kotlin/build.gradle.kts 'maven-publish'
 require_contains clients/kotlin/build.gradle.kts 'java-library'
+require_contains clients/kotlin/build.gradle.kts 'artifactId = "flags2env-kotlin"'
+require_contains clients/kotlin/build.gradle.kts 'exclude\("publish\.sh"\)'
+require_contains clients/kotlin/build.gradle.kts 'ossrh-staging-api\.central\.sonatype\.com'
 require_contains clients/groovy/build.gradle "maven-publish"
 require_contains clients/groovy/build.gradle "java-library"
+require_contains clients/groovy/build.gradle "artifactId = 'flags2env-groovy'"
+require_contains clients/groovy/build.gradle "exclude 'publish\\.sh'"
+require_contains clients/groovy/build.gradle 'ossrh-staging-api\.central\.sonatype\.com'
 require_contains clients/scala/build.sbt 'sonatype'
+require_contains clients/scala/build.sbt 'sonatypeCentralHost'
+require_contains clients/scala/build.sbt 'flags2env-scala'
 require_contains clients/clojure/build.clj 'sign-and-deploy-file'
-require_contains clients/clojure/build.clj 'SONATYPE_RELEASE_URL'
+require_contains clients/clojure/build.clj 'CENTRAL_OSSRH_DEPLOY_URL'
+require_contains clients/clojure/build.clj 'flags2env-clojure'
 require_contains clients/csharp/Flags2Env.nuspec '<files>'
+require_contains clients/csharp/Flags2Env.nuspec 'exclude='
 require_contains clients/fsharp/Flags2Env.FSharp.nuspec '<files>'
+require_contains clients/fsharp/Flags2Env.FSharp.nuspec 'exclude='
 require_contains clients/dart/.pubignore '^Dockerfile$'
 require_contains clients/swift/Package.swift 'exclude:'
 require_contains clients/elixir/mix.exs 'files:'
@@ -112,11 +208,16 @@ require_contains clients/nim/flags2env.nimble '^installFiles'
 require_contains clients/r/.Rbuildignore '\^Dockerfile\$'
 require_contains clients/julia/Project.toml '^name = "Flags2Env"'
 require_contains clients/solidity/package.json '"files"'
+require_contains clients/solidity/package.json '"test"'
+require_contains clients/solidity/package.json '"solc"'
 require_contains scripts/publish-client.sh 'cp src/parser\.c src/parser\.h dist/r/src/'
 require_contains scripts/publish-client.sh 'npm publish --access public'
 require_contains scripts/publish-client.sh 'twine upload'
+require_contains scripts/publish-client.sh 'clients/golang/v\$'
+require_contains scripts/publish-client.sh 'git tag "\$\{PACKAGE_VERSION:\?set PACKAGE_VERSION\}"'
 require_contains scripts/publish-client.sh 'mvn -P release deploy'
 require_contains scripts/publish-client.sh 'sbt publishSigned sonatypeBundleRelease'
+require_contains scripts/publish-client.sh 'publish-central-ossrh-compat\.sh'
 require_contains scripts/publish-client.sh 'dotnet nuget push'
 require_contains scripts/publish-client.sh 'gem push'
 require_contains scripts/publish-client.sh 'dart pub publish'
@@ -131,13 +232,32 @@ require_contains scripts/publish-client.sh 'submit_cran'
 require_contains scripts/publish-client.sh 'Registrator'
 require_contains scripts/docker-check-new-clients.sh 'dotnet run'
 require_contains scripts/docker-check-new-clients.sh 'FLAGS2ENV_FIXTURE'
+require_contains README.md 'undefined dynamic_lookup'
+require_contains .github/workflows/client-packaging.yml 'scripts/audit-client-packaging\.sh'
+require_contains .github/workflows/client-packaging.yml 'npm run release:audit'
+require_contains .github/workflows/client-packaging.yml 'scripts/docker-check-new-clients\.sh'
+require_contains .github/workflows/client-packaging.yml 'full_docker_checks'
+require_contains .github/workflows/client-packaging.yml 'tests/run\.sh'
 require_contains .github/workflows/cli-flags-audit.yml 'scripts/audit-changed-cli-flags\.sh'
 require_contains .github/workflows/cli-flags-audit.yml '\*\*/\.cli-flags\.toml'
+require_contains .github/workflows/cli-flags-audit.yml '\*\*/\.env'
+require_contains scripts/audit-changed-cli-flags.sh 'audit env'
 
 for path in \
   clients/cpp/test.cpp \
+  clients/scala/src/main/scala/com/oresoftware/flags2env/Flags2Env.scala \
+  clients/groovy/src/main/groovy/com/oresoftware/flags2env/Flags2Env.groovy \
+  clients/kotlin/src/main/kotlin/com/oresoftware/flags2env/Flags2Env.kt \
+  clients/clojure/src/com/oresoftware/flags2env.clj \
   clients/csharp/Flags2EnvTest.cs \
   clients/fsharp/Flags2EnvTest.fs \
+  clients/r/R/flags2env.R \
+  clients/fortran/src/flags2env.f90 \
+  clients/fortran/test.f90 \
+  clients/zig/src/flags2env.zig \
+  clients/zig/test.zig \
+  clients/crystal/src/flags2env.cr \
+  clients/solidity/contracts/Flags2Env.sol \
   clients/perl/test.pl \
   clients/lua/test.lua \
   clients/nim/test.nim \

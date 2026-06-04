@@ -1,0 +1,21 @@
+[help]
+columns = ["options", "env", "description"]
+exclude = ["env"]
+
+[flags.port]
+env = "PORT"
+aliases = ["port"]
+short = "p"
+type = "integer"
+default = 3000
+help = "TCP port for the app listener."
+
+[flags.debug]
+env = "DEBUG"
+aliases = ["debug"]
+short = "d"
+type = "bool"
+default = "false"
+true_aliases = ["t"]
+false_aliases = ["f"]
+help = "Enable debug logging."

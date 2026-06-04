@@ -30,7 +30,21 @@ changed_files() {
   git -C "$ROOT_DIR" ls-files
 }
 
-files="$(changed_files "$@" | awk '/(^|\/)\.cli-flags\.toml$/')"
+files="$(changed_files "$@" | awk '
+  /(^|\/)\.cli-flags\.toml$/ {
+    print
+    next
+  }
+  $0 == ".env" {
+    print ".cli-flags.toml"
+    next
+  }
+  /\/\.env$/ {
+    file = $0
+    sub(/\/\.env$/, "/.cli-flags.toml", file)
+    print file
+  }
+' | sort -u)"
 if [ -z "$files" ]; then
   printf 'cli-flags audit: no changed .cli-flags.toml files\n'
   exit 0
@@ -61,6 +75,31 @@ printf '%s\n' "$files" | while IFS= read -r file; do
     printf '1\n' >"$status_file"
     if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
       printf '::error file=%s::flags2env config audit failed\n' "$file"
+    fi
+  fi
+
+  env_path="$(dirname -- "$path")/.env"
+  case "$file" in
+    .cli-flags.toml) env_file=".env" ;;
+    */.cli-flags.toml) env_file="${file%/.cli-flags.toml}/.env" ;;
+    *) env_file="$(dirname -- "$file")/.env" ;;
+  esac
+  if [ ! -f "$env_path" ]; then
+    printf 'cli-flags env audit: no adjacent .env for %s\n' "$file"
+    continue
+  fi
+
+  printf 'cli-flags env audit: %s\n' "$env_file"
+  set +e
+  env_report="$("$CLI" audit env "$path" "$env_path")"
+  env_audit_status=$?
+  set -e
+  printf '%s\n' "$env_report"
+
+  if [ "$env_audit_status" -ne 0 ]; then
+    printf '1\n' >"$status_file"
+    if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+      printf '::error file=%s::flags2env env audit failed\n' "$env_file"
     fi
   fi
 done

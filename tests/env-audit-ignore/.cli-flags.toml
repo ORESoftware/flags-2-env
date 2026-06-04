@@ -1,0 +1,22 @@
+[env]
+ignore = ["EXTRA", "HOST", "VERBOSE"]
+
+[flags.port]
+env = "PORT"
+aliases = ["port"]
+type = "integer"
+
+[flags.host]
+env = "HOST"
+aliases = ["host"]
+type = "string"
+
+[flags.debug]
+env = "DEBUG"
+aliases = ["debug"]
+type = "bool"
+
+[flags.verbose]
+env = "VERBOSE"
+aliases = ["verbose"]
+type = "bool"

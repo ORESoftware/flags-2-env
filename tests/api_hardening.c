@@ -16,8 +16,10 @@
 #define ENV_AUDIT_CONFIG "tests/env-audit/.cli-flags.toml"
 #define ENV_AUDIT_ENV "tests/env-audit/.env"
 #define ENV_AUDIT_CLEAN_CONFIG "tests/env-audit-clean/.cli-flags.toml"
+#define ENV_AUDIT_IGNORE_CONFIG "tests/env-audit-ignore/.cli-flags.toml"
 #define UNSAFE_SHELL_CONFIG "tests/audit-unsafe-shell/.cli-flags.toml"
 #define HELP_HARDENING_CONFIG "tests/help-hardening/.cli-flags.toml"
+#define TABLE_OPTIONS_CONFIG "tests/table-options/.cli-flags.toml"
 #define DEFAULT_JSON "{\"PORT\":\"3000\",\"DEBUG\":\"false\",\"COLOR\":\"true\"}"
 
 static void expect_json(const char *label, char *actual, const char *expected) {
@@ -114,6 +116,16 @@ int main(void) {
               f2e_parse_from_file(EQUALS_ONLY_CONFIG, 2, strict_negated_non_bool),
               "{\"PORT\":\"3000\",\"DEBUG\":\"false\",\"F2E_POSITIONALS\":\"[\\\"app\\\"]\",\"F2E_UNKNOWN_OPTIONS\":\"[\\\"--no-port=8181\\\"]\"}");
 
+  const char *allow_unknown[] = {"app", "--allow-unknown", "--future", "value", "--debug=true"};
+  expect_json("allow unknown suppresses unknown option collection",
+              f2e_parse_from_file(EQUALS_ONLY_CONFIG, 5, allow_unknown),
+              "{\"PORT\":\"3000\",\"DEBUG\":\"true\",\"F2E_POSITIONALS\":\"[\\\"app\\\",\\\"value\\\"]\"}");
+
+  const char *allow_unknown_false[] = {"app", "--allow-unknown=false", "--future"};
+  expect_json("allow unknown false keeps unknown option collection",
+              f2e_parse_from_file(EQUALS_ONLY_CONFIG, 3, allow_unknown_false),
+              "{\"PORT\":\"3000\",\"DEBUG\":\"false\",\"F2E_POSITIONALS\":\"[\\\"app\\\"]\",\"F2E_UNKNOWN_OPTIONS\":\"[\\\"--future\\\"]\"}");
+
   const char *stop_positionals[] = {"exec", "--debug=true"};
   expect_json("stop at first positional",
               f2e_parse_from_file(STOP_POSITIONALS_CONFIG, 2, stop_positionals),
@@ -209,6 +221,9 @@ int main(void) {
   const char *help_argv[] = {"app", "--help"};
   expect_status("exact help token is detected", f2e_is_help_requested(2, help_argv), 1);
   expect_status("json argv help token is detected", f2e_is_help_requested_json_argv("[\"app\",\"--help\"]"), 1);
+  const char *help_after_double_dash[] = {"app", "--", "--help"};
+  expect_status("help after double dash is positional", f2e_is_help_requested(3, help_after_double_dash), 0);
+  expect_status("json argv help after double dash is positional", f2e_is_help_requested_json_argv("[\"app\",\"--\",\"--help\"]"), 0);
   const char *short_help_argv[] = {"app", "-h"};
   expect_status("short h remains a normal flag", f2e_is_help_requested(2, short_help_argv), 0);
   expect_status("invalid json argv is not help", f2e_is_help_requested_json_argv("[\"app\",]"), 0);
@@ -239,6 +254,17 @@ int main(void) {
   char *huge_help = f2e_help_table_from_file(FIXTURE_CONFIG, "app", 5000);
   expect_contains("huge terminal help clamps to wide table", huge_help, "| Description");
   f2e_free(huge_help);
+
+  char *custom_help = f2e_help_table_from_file(TABLE_OPTIONS_CONFIG, "app", 132);
+  expect_contains("custom help keeps options column", custom_help, "| Option(s)");
+  expect_contains("custom help keeps description column", custom_help, "| Description");
+  expect_contains("custom help keeps flag help text", custom_help, "TCP port for the app listener.");
+  if (strstr(custom_help, "| Env") || strstr(custom_help, "| Type") || strstr(custom_help, "| Default")) {
+    fprintf(stderr, "custom help should omit excluded/unselected columns:\n%s\n", custom_help);
+    f2e_free(custom_help);
+    exit(1);
+  }
+  f2e_free(custom_help);
 
   char *missing_help = f2e_help_table_from_file(NULL, "app", 80);
   if (missing_help) {
@@ -319,6 +345,11 @@ int main(void) {
   expect_status("clean env audit", f2e_audit_env_file_status_from_file(ENV_AUDIT_CLEAN_CONFIG, NULL), 0);
   expect_json("clean env audit report",
               f2e_audit_env_file_from_file(ENV_AUDIT_CLEAN_CONFIG, NULL),
+              "{\"ok\":true,\"errorCount\":0,\"warningCount\":0,\"errors\":[],\"warnings\":[]}");
+
+  expect_status("ignored env audit", f2e_audit_env_file_status_from_file(ENV_AUDIT_IGNORE_CONFIG, NULL), 0);
+  expect_json("ignored env audit report",
+              f2e_audit_env_file_from_file(ENV_AUDIT_IGNORE_CONFIG, NULL),
               "{\"ok\":true,\"errorCount\":0,\"warningCount\":0,\"errors\":[],\"warnings\":[]}");
 
   expect_status("invalid config env audit", f2e_audit_env_file_status_from_file(INVALID_ENV_ONLY_CONFIG, ENV_AUDIT_ENV), 1);

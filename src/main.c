@@ -135,6 +135,190 @@ static char *f2e_cli_shell_quote(const char *value) {
   return quoted;
 }
 
+static void f2e_cli_json_skip_ws(const char **cursor) {
+  while (cursor && *cursor && (**cursor == ' ' || **cursor == '\n' || **cursor == '\r' || **cursor == '\t')) {
+    (*cursor)++;
+  }
+}
+
+static int f2e_cli_hex_value(char ch) {
+  if (ch >= '0' && ch <= '9') {
+    return ch - '0';
+  }
+  if (ch >= 'a' && ch <= 'f') {
+    return ch - 'a' + 10;
+  }
+  if (ch >= 'A' && ch <= 'F') {
+    return ch - 'A' + 10;
+  }
+  return -1;
+}
+
+static int f2e_cli_append_char(char **buffer, size_t *len, size_t *cap, char ch) {
+  if (*len + 1 >= *cap) {
+    size_t next = *cap > 0 ? *cap * 2 : 32;
+    char *grown = (char *)realloc(*buffer, next);
+    if (!grown) {
+      return 0;
+    }
+    *buffer = grown;
+    *cap = next;
+  }
+  (*buffer)[(*len)++] = ch;
+  (*buffer)[*len] = '\0';
+  return 1;
+}
+
+static char *f2e_cli_parse_json_string(const char **cursor) {
+  if (!cursor || !*cursor) {
+    return NULL;
+  }
+  f2e_cli_json_skip_ws(cursor);
+  if (**cursor != '"') {
+    return NULL;
+  }
+  (*cursor)++;
+
+  char *out = NULL;
+  size_t len = 0;
+  size_t cap = 0;
+  if (!f2e_cli_append_char(&out, &len, &cap, '\0')) {
+    return NULL;
+  }
+  len = 0;
+  out[0] = '\0';
+
+  while (**cursor) {
+    char ch = *(*cursor)++;
+    if (ch == '"') {
+      return out;
+    }
+    if (ch == '\\' && **cursor) {
+      char escaped = *(*cursor)++;
+      switch (escaped) {
+        case 'b':
+          ch = '\b';
+          break;
+        case 'f':
+          ch = '\f';
+          break;
+        case 'n':
+          ch = '\n';
+          break;
+        case 'r':
+          ch = '\r';
+          break;
+        case 't':
+          ch = '\t';
+          break;
+        case 'u': {
+          int code = 0;
+          for (int i = 0; i < 4; i++) {
+            int hex = f2e_cli_hex_value((*cursor)[i]);
+            if (hex < 0) {
+              free(out);
+              return NULL;
+            }
+            code = code * 16 + hex;
+          }
+          *cursor += 4;
+          ch = code > 0 && code < 128 ? (char)code : '?';
+          break;
+        }
+        default:
+          ch = escaped;
+          break;
+      }
+    }
+    if (!f2e_cli_append_char(&out, &len, &cap, ch)) {
+      free(out);
+      return NULL;
+    }
+  }
+
+  free(out);
+  return NULL;
+}
+
+static int f2e_cli_env_key_is_valid(const char *key) {
+  if (!key || !(isalpha((unsigned char)key[0]) || key[0] == '_')) {
+    return 0;
+  }
+  for (const char *cursor = key + 1; *cursor; cursor++) {
+    if (!(isalnum((unsigned char)*cursor) || *cursor == '_')) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static int f2e_cli_emit_shell_exports(const char *json) {
+  const char *cursor = json ? json : "{}";
+  f2e_cli_json_skip_ws(&cursor);
+  if (*cursor != '{') {
+    return 0;
+  }
+  cursor++;
+
+  while (*cursor) {
+    f2e_cli_json_skip_ws(&cursor);
+    if (*cursor == '}') {
+      return 1;
+    }
+
+    char *key = f2e_cli_parse_json_string(&cursor);
+    if (!key) {
+      return 0;
+    }
+    f2e_cli_json_skip_ws(&cursor);
+    if (*cursor != ':') {
+      free(key);
+      return 0;
+    }
+    cursor++;
+    char *value = f2e_cli_parse_json_string(&cursor);
+    if (!value) {
+      free(key);
+      return 0;
+    }
+
+    int ok = 1;
+    if (f2e_cli_env_key_is_valid(key)) {
+      char *quoted = f2e_cli_shell_quote(value);
+      if (!quoted) {
+        ok = 0;
+      } else {
+        size_t line_len = strlen("export ") + strlen(key) + 1 + strlen(quoted) + 1;
+        char *line = (char *)malloc(line_len + 1);
+        if (!line) {
+          ok = 0;
+        } else {
+          snprintf(line, line_len + 1, "export %s=%s", key, quoted);
+          ok = f2e_cli_stdout_line_locked(line);
+          free(line);
+        }
+        free(quoted);
+      }
+    }
+    free(key);
+    free(value);
+    if (!ok) {
+      return 0;
+    }
+
+    f2e_cli_json_skip_ws(&cursor);
+    if (*cursor == ',') {
+      cursor++;
+      continue;
+    }
+    if (*cursor == '}') {
+      return 1;
+    }
+    return 0;
+  }
+  return 0;
+}
+
 static int f2e_cli_mkdir_p(const char *path) {
   if (!path || path[0] == '\0') {
     return 0;
@@ -401,6 +585,8 @@ static const char *f2e_cli_help_command_name(int argc, const char *const argv[])
       !f2e_cli_streq(argv[1], "env-audit") &&
       !f2e_cli_streq(argv[1], "audit-env") &&
       !f2e_cli_streq(argv[1], "env-check") &&
+      !f2e_cli_streq(argv[1], "shell-env") &&
+      !f2e_cli_streq(argv[1], "export") &&
       !f2e_cli_streq(argv[1], "install-completion") &&
       !f2e_cli_streq(argv[1], "install-autocomplete")) {
     return argv[1];
@@ -488,6 +674,48 @@ static int f2e_cli_install_completion(const char *shell, const char *command, co
   return printed ? 0 : 1;
 }
 
+static int f2e_cli_run_shell_env(int argc, const char *const argv[]) {
+  const char *config_path = NULL;
+  int arg_start = 2;
+  for (int i = 2; i < argc; i++) {
+    const char *token = argv[i];
+    if (!token) {
+      continue;
+    }
+    if (f2e_cli_streq(token, "--")) {
+      arg_start = i + 1;
+      break;
+    }
+    if (f2e_cli_streq(token, "--config") || f2e_cli_streq(token, "-c")) {
+      if (i + 1 >= argc) {
+        f2e_cli_stderr_locked("%s", "usage: flags2env shell-env [--config path] [--] [argv...]\n");
+        return 2;
+      }
+      config_path = argv[++i];
+      arg_start = i + 1;
+      continue;
+    }
+    const char config_prefix[] = "--config=";
+    if (strncmp(token, config_prefix, sizeof(config_prefix) - 1) == 0) {
+      config_path = token + sizeof(config_prefix) - 1;
+      arg_start = i + 1;
+      continue;
+    }
+    arg_start = i;
+    break;
+  }
+
+  char *json = config_path ? f2e_parse_from_file(config_path, argc - arg_start, argv + arg_start)
+                           : f2e_parse(argc - arg_start, argv + arg_start);
+  int ok = f2e_cli_emit_shell_exports(json);
+  f2e_free(json);
+  if (!ok) {
+    f2e_cli_stderr_locked("%s", "flags2env: could not render shell exports\n");
+    return 1;
+  }
+  return 0;
+}
+
 int main(int argc, const char *const argv[]) {
   if (f2e_is_help_requested(argc, argv)) {
     const char *command = f2e_cli_help_command_name(argc, argv);
@@ -538,6 +766,11 @@ int main(int argc, const char *const argv[]) {
       return 2;
     }
     return f2e_cli_install_completion(argv[2], argv[3], argc >= 5 ? argv[4] : NULL);
+  }
+
+  if (argc >= 2 && (f2e_cli_streq(argv[1], "shell-env") ||
+                    f2e_cli_streq(argv[1], "export"))) {
+    return f2e_cli_run_shell_env(argc, argv);
   }
 
   char *json = f2e_parse(argc, argv);

@@ -36,3 +36,11 @@ type = "bool"
 true_aliases = ["t", "1", "yes"]
 false_aliases = ["f", "0", "no"]
 help = "Enable client audit mode."
+
+[flags.allow_unknown]
+env = "FLAGS2ENV_ALLOW_UNKNOWN"
+aliases = ["allow-unknown"]
+type = "bool"
+true_aliases = ["t", "1", "yes"]
+false_aliases = ["f", "0", "no"]
+help = "Allow unrecognized flags to pass through to downstream code."

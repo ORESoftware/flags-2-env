@@ -43,6 +43,19 @@
         <includes>
           <include>**/*.c</include>
         </includes>
+        <excludes>
+          <exclude>**/*Test*</exclude>
+          <exclude>**/Dockerfile</exclude>
+          <exclude>**/publish.sh</exclude>
+        </excludes>
+      </resource>
+      <resource>
+        <directory>../../src</directory>
+        <targetPath>native/src</targetPath>
+        <includes>
+          <include>parser.c</include>
+          <include>parser.h</include>
+        </includes>
       </resource>
     </resources>
     <plugins>

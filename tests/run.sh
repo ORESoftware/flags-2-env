@@ -45,6 +45,38 @@ run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true"}' app --debug=t --debug=
 run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true"}' app --color=1
 run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true"}' app -v0
 run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true"}' app -- --port 9999 --debug
+run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true"}' app -- --help
+
+actual="$(cd "$ROOT_DIR/tests/equals-only" && FLAGS2ENV_ALLOW_UNKNOWN=1 "$CLI" app --future value)"
+expected="{\"PORT\":\"3000\",\"DEBUG\":\"false\",\"F2E_POSITIONALS\":\"[\\\"$CLI\\\",\\\"app\\\",\\\"value\\\"]\"}"
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected env allow-unknown parse: %s\nActual:                           %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+
+actual="$(cd "$ROOT_DIR" && "$CLI" app --allow-unknown --future)"
+expected='{"FLAGS2ENV_ALLOW_UNKNOWN":"true"}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected root allow-unknown parse: %s\nActual:                           %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+
+actual="$("$CLI" shell-env --config "$FIXTURE_DIR/.cli-flags.toml" -- app --debug=t --port 8181 --host "it's-local")"
+for expected_export in "export PORT='8181'" "export DEBUG='true'" "export COLOR='true'" "export HOST='it'\\''s-local'"; do
+  case "$actual" in
+    *"$expected_export"*)
+      ;;
+    *)
+      printf 'Unexpected shell env output; missing %s:\n%s\n' "$expected_export" "$actual" >&2
+      exit 1
+      ;;
+  esac
+done
+
+FLAGS2ENV_BIN="$CLI" FLAGS2ENV_CONFIG="$FIXTURE_DIR/.cli-flags.toml" bash "$ROOT_DIR/clients/bash/test.bash"
+if command -v zsh >/dev/null 2>&1; then
+  FLAGS2ENV_BIN="$CLI" FLAGS2ENV_CONFIG="$FIXTURE_DIR/.cli-flags.toml" zsh "$ROOT_DIR/clients/zsh/test.zsh"
+fi
 
 wide_help="$(cd "$FIXTURE_DIR" && COLUMNS=132 "$CLI" app --help)"
 case "$wide_help" in
@@ -74,6 +106,22 @@ esac
 case "$narrow_help" in
   *'| Env'*|*'| Description'*)
     printf 'Narrow help should use fewer columns:\n%s\n' "$narrow_help" >&2
+    exit 1
+    ;;
+esac
+
+custom_help="$(cd "$ROOT_DIR/tests/table-options" && COLUMNS=132 "$CLI" app --help)"
+case "$custom_help" in
+  *'| Option(s)'*'| Description'*'TCP port for the app listener.'*)
+    ;;
+  *)
+    printf 'Unexpected custom help table:\n%s\n' "$custom_help" >&2
+    exit 1
+    ;;
+esac
+case "$custom_help" in
+  *'| Env'*|*'| Type'*|*'| Default'*)
+    printf 'Custom help should omit unselected/excluded columns:\n%s\n' "$custom_help" >&2
     exit 1
     ;;
 esac
@@ -127,6 +175,33 @@ if [ "$actual" != "$expected" ]; then
   printf 'Expected clean env audit: %s\nActual:                   %s\n' "$expected" "$actual" >&2
   exit 1
 fi
+
+actual="$("$CLI" audit env "$ROOT_DIR/tests/env-audit-ignore/.cli-flags.toml" "$ROOT_DIR/tests/env-audit-ignore/.env")"
+expected='{"ok":true,"errorCount":0,"warningCount":0,"errors":[],"warnings":[]}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected ignored env audit: %s\nActual:                     %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+
+actual="$("$ROOT_DIR/scripts/audit-changed-cli-flags.sh" "tests/env-audit-ignore/.cli-flags.toml")"
+case "$actual" in
+  *'cli-flags audit: tests/env-audit-ignore/.cli-flags.toml'*'cli-flags env audit: tests/env-audit-ignore/.env'*'{"ok":true,"errorCount":0,"warningCount":0,"errors":[],"warnings":[]}'*)
+    ;;
+  *)
+    printf 'Expected changed-config helper to run ignored env audit:\n%s\n' "$actual" >&2
+    exit 1
+    ;;
+esac
+
+actual="$("$ROOT_DIR/scripts/audit-changed-cli-flags.sh" "tests/env-audit-ignore/.env")"
+case "$actual" in
+  *'cli-flags audit: tests/env-audit-ignore/.cli-flags.toml'*'cli-flags env audit: tests/env-audit-ignore/.env'*'{"ok":true,"errorCount":0,"warningCount":0,"errors":[],"warnings":[]}'*)
+    ;;
+  *)
+    printf 'Expected changed-env helper to run adjacent config audit:\n%s\n' "$actual" >&2
+    exit 1
+    ;;
+esac
 
 set +e
 actual="$("$CLI" audit env "$ROOT_DIR/tests/env-audit-drift/.cli-flags.toml" "$ROOT_DIR/tests/env-audit-drift/.env")"

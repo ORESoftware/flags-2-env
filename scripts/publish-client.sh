@@ -95,18 +95,24 @@ case "$client" in
     run 'mvn -P release deploy'
     ;;
   kotlin|groovy)
-    run 'gradle publish'
+    run 'gradle publish && ../../scripts/publish-central-ossrh-compat.sh "${CENTRAL_NAMESPACE:?set CENTRAL_NAMESPACE}"'
     ;;
   scala)
     run 'sbt publishSigned sonatypeBundleRelease'
     ;;
   clojure)
-    run 'clojure -T:build jar && clojure -T:build deploy'
+    run 'clojure -T:build jar && clojure -T:build deploy && ../../scripts/publish-central-ossrh-compat.sh "${CENTRAL_NAMESPACE:?set CENTRAL_NAMESPACE}"'
     ;;
   rust)
     run 'cargo package && cargo publish'
     ;;
-  golang|swift|c|cpp|fortran|zig|crystal)
+  golang)
+    run_root 'git status --short && git tag "clients/golang/v${PACKAGE_VERSION:?set PACKAGE_VERSION}" && git push origin "clients/golang/v${PACKAGE_VERSION}"'
+    ;;
+  swift)
+    run_root 'git status --short && git tag "${PACKAGE_VERSION:?set PACKAGE_VERSION}" && git push origin "${PACKAGE_VERSION}"'
+    ;;
+  c|cpp|fortran|zig|crystal|bash|zsh)
     run 'git status --short && git tag "v${PACKAGE_VERSION:?set PACKAGE_VERSION}" && git push --tags'
     ;;
   solidity)

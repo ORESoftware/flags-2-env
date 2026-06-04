@@ -11,6 +11,8 @@ Create `.cli-flags.toml` in the project root:
 ```toml
 [help]
 url = "https://example.com/my-cli/help"
+columns = ["options", "env", "type", "default", "description"]
+exclude = []
 
 [flags.port]
 env = "PORT"
@@ -59,11 +61,23 @@ stop_at_first_positional = true
 positionals_env = "FLAGS2ENV_POSITIONALS"
 unknown_options_env = "FLAGS2ENV_UNKNOWN_OPTIONS"
 errors_env = "FLAGS2ENV_PARSE_ERRORS"
+allow_unknown = false
 ```
 
 `require_equals = true` means non-boolean values must be inline (`--port=8080`, `-p8080`, or `-p=8080`) instead of separated (`--port 8080`). `stop_at_first_positional = true` stops scanning once a non-flag token such as `exec` or `run` is found. `positionals_env`, `unknown_options_env`, and `errors_env` store JSON-array strings in the returned map; omit them if you want those tokens ignored.
 
-Add `help` or `description` on any flag to populate the generated help table. Add `[help] url = "https://..."` to print a support or docs URL under the `--help` menu.
+Set `[parse] allow_unknown = true`, pass `--allow-unknown`, or set `FLAGS2ENV_ALLOW_UNKNOWN=1` to suppress unknown-option collection for flags that belong to downstream code. The older `allow_hidden`, `--allow-hidden`, and `FLAGS2ENV_ALLOW_HIDDEN` spellings are accepted as aliases. A bare `--` always stops flags2env parsing; later tokens are treated as positionals when `positionals_env` is configured.
+
+Add `help` or `description` on any flag to populate the generated help table. Add `[help] url = "https://..."` to print a support or docs URL under the `--help` menu. Use `[help] columns = ["options", "env", "description"]` to choose table columns, or `[help] exclude = ["default"]` to remove columns from the default set. `options` is always kept so every row still identifies the flag.
+
+Ignore project-specific env keys during `.env` audits with an `[env]` table:
+
+```toml
+[env]
+ignore = ["DATABASE_URL", "CI", "VERCEL_ENV"]
+```
+
+Ignored keys are neither required from `.cli-flags.toml` nor rejected from `.env`.
 
 This repository's own root `.cli-flags.toml` is intentionally library-shaped for CLI smoke tests and maps to `FLAGS2ENV_*` variables. App-shaped examples like `PORT` and `NODE_ENV` live under `tests/fixtures/`.
 
@@ -113,6 +127,27 @@ build/flags2env.dll       # Windows
 build/libflags2env.a
 build/flags2env
 ```
+
+Export parsed flags directly into a shell function or script:
+
+```bash
+source ./clients/bash/flags2env.bash
+
+my_program() {
+  FLAGS2ENV_CONFIG=.cli-flags.toml flags2env_apply "$@"
+  command my_program_impl "$@"
+}
+```
+
+```zsh
+#!/usr/bin/env zsh
+source ./clients/zsh/flags2env.zsh
+FLAGS2ENV_CONFIG=.cli-flags.toml flags2env_apply "$@"
+```
+
+Both shell clients call the native `flags2env shell-env` command and `eval`
+shell-quoted `export KEY='value'` lines in the current shell. Set
+`FLAGS2ENV_BIN` when the CLI is not on `PATH`.
 
 The shared library exposes:
 
@@ -166,7 +201,7 @@ build/flags2env audit env .cli-flags.toml .env
 build/flags2env env-audit .cli-flags.toml .env
 ```
 
-Unknown `.env` keys are errors. Duplicate keys, invalid `.env` lines, and TOML env keys missing from `.env` are warnings.
+Unknown `.env` keys are errors unless they are listed in `[env] ignore`. Duplicate keys, invalid `.env` lines, and non-ignored TOML env keys missing from `.env` are warnings.
 
 Check a local `.env` file against the env keys declared by `.cli-flags.toml`:
 
@@ -174,7 +209,7 @@ Check a local `.env` file against the env keys declared by `.cli-flags.toml`:
 build/flags2env env-audit .cli-flags.toml .env
 ```
 
-When the `.env` path is omitted, `flags2env` checks the `.env` file next to the selected `.cli-flags.toml`. Unknown `.env` keys are errors; TOML-declared env keys missing from `.env` are warnings because they may be optional, defaulted, or supplied by deployment infrastructure.
+When the `.env` path is omitted, `flags2env` checks the `.env` file next to the selected `.cli-flags.toml`. Unknown `.env` keys are errors unless they are listed in `[env] ignore`; non-ignored TOML-declared env keys missing from `.env` are warnings because they may be optional, defaulted, or supplied by deployment infrastructure.
 
 ## Shell Completion
 
@@ -245,11 +280,14 @@ Julia: Julia General Registry
 R: CRAN or R-universe
 .NET C#/F#: NuGet Gallery
 C/C++/Fortran/Zig/Crystal/MATLAB/Solidity: source packages or git-tagged releases
+Bash/Zsh: source packages, Homebrew-installed shell helpers, or git-tagged releases
 ```
 
-Every client folder has a `publish.sh` wrapper. It defaults to a dry-run command printout and only publishes when passed `--release`. See `clients/PUBLISHING.md` for package manifest controls such as `.npmignore`, `MANIFEST.in`, `.gemspec` file lists, Composer archive excludes, NuGet `.nuspec` files, `.pubignore`, `Package.swift` excludes, Mix package files, Cabal manifests, opam metadata, CPAN `MANIFEST.SKIP`, LuaRocks rockspecs, Nimble manifests, and Julia `Project.toml`.
+Every client folder has a `publish.sh` wrapper. It defaults to a dry-run command printout and only publishes when passed `--release`. See `clients/PUBLISHING.md` for package manifest controls such as `.npmignore`, `MANIFEST.in`, `.gemspec` file lists, Composer archive excludes, NuGet `.nuspec` files, `.pubignore`, `Package.swift` excludes, Mix package files, Cabal manifests, opam metadata, CPAN `MANIFEST.SKIP`, LuaRocks rockspecs, Nimble manifests, Julia `Project.toml`, and the Homebrew formula under `packaging/homebrew/Formula/`.
 
-BEAM clients share the Erlang NIF in `clients/erlang/flags2env_nif.c`; compile it with Erlang headers plus `src/parser.c` into `priv/flags2env_nif.so`. Gleam uses `clients/gleam/flags2env_native.erl` as a native shim so its public module can still be named `flags2env` without colliding with the NIF module. Java uses `clients/java/native/flags2env_jni.c`; Kotlin, Scala, Groovy, and Clojure build facade packages over that Java bridge.
+The native CLI can be distributed through Homebrew with `packaging/homebrew/Formula/flags2env.rb`. Run `scripts/publish-homebrew.sh --dry-run` to see the local Homebrew install, test, and audit commands; use `--release` on a machine with Homebrew configured.
+
+BEAM clients share the Erlang NIF in `clients/erlang/flags2env_nif.c`; compile it with Erlang headers plus `src/parser.c` into `priv/flags2env_nif.so`. On macOS, add `-undefined dynamic_lookup` when linking the NIF. Gleam uses `clients/gleam/flags2env_native.erl` as a native shim so its public module can still be named `flags2env` without colliding with the NIF module. Java uses `clients/java/native/flags2env_jni.c`; Kotlin, Scala, Groovy, and Clojure build facade packages over that Java bridge.
 
 Node, Bun, and Deno use syntax-highlighted source files instead of `.ejs` templates:
 
@@ -287,7 +325,7 @@ scripts/docker-check-new-clients.sh --full
 The default set checks practical local coverage. `--full` adds heavier Haskell,
 OCaml/opam, Julia, and JVM facade checks intended for CI runners.
 
-The repository also includes `.github/workflows/cli-flags-audit.yml`, a GitHub Actions bot that runs when any `.cli-flags.toml` changes and reports audit failures as PR annotations.
+The repository also includes `.github/workflows/cli-flags-audit.yml`, a GitHub Actions bot that runs when any `.cli-flags.toml` or adjacent `.env` changes and reports audit failures as PR annotations. When a config has an adjacent `.env`, the bot also runs `flags2env audit env` so the same `[env] ignore` list controls CI drift checks.
 
 ## Usage
 
@@ -1102,4 +1140,4 @@ let appEnv = try loadAppEnv()
 
 The C parser owns config discovery. By default, it walks upward from the current working directory to find the nearest `.cli-flags.toml`, but refuses to use `$HOME/.cli-flags.toml` because that is likely accidental. Runtime clients should not reimplement this lookup; they should pass an explicit `configPath` only when the user asks for one.
 
-Unknown flags and positional tokens are ignored unless `[parse]` declares `unknown_options_env` or `positionals_env`. Defaults from `.cli-flags.toml` are included in the parsed map, so they also override environment values when merged.
+Unknown flags and positional tokens are ignored unless `[parse]` declares `unknown_options_env` or `positionals_env`; `allow_unknown` suppresses unknown-option collection when downstream flags are expected. Defaults from `.cli-flags.toml` are included in the parsed map, so they also override environment values when merged.

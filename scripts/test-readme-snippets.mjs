@@ -21,6 +21,14 @@ const suffix = process.platform === "darwin" ? "dylib" : process.platform === "w
 const sharedLib = join(root, "build", process.platform === "win32" ? "flags2env.dll" : `libflags2env.${suffix}`);
 const fixtureConfig = join(root, "tests", "fixtures", ".cli-flags.toml");
 const fixtureCwd = join(root, "tests", "fixtures", "nested", "deeper");
+const toolCacheEnv = {
+  PUB_CACHE: join(tmp, "pub-cache"),
+  GOCACHE: join(tmp, "go-build-cache"),
+  GOMODCACHE: join(tmp, "go-mod-cache"),
+};
+for (const cacheDir of Object.values(toolCacheEnv)) {
+  mkdirSync(cacheDir, { recursive: true });
+}
 
 try {
   run("build core", "make", ["all"], { cwd: root });
@@ -92,7 +100,7 @@ function run(label, command, args, options = {}) {
   console.log(`readme-snippet: ${label}`);
   const result = spawnSync(command, args, {
     cwd: options.cwd ?? root,
-    env: { ...process.env, ...(options.env ?? {}) },
+    env: { ...process.env, ...toolCacheEnv, ...(options.env ?? {}) },
     encoding: "utf8",
     stdio: options.stdio ?? "pipe",
   });
@@ -280,14 +288,8 @@ func TestReadmeGetEnvMap(t *testing.T) {
 	}
 }
 `);
-  run("Go README snippet", "go", ["run", ".", "--debug=t", "--port", "8181"], {
-    cwd: dir,
-    env: dynamicLibraryEnv(),
-  });
-  run("Go README snippet assertion", "go", ["test", "."], {
-    cwd: dir,
-    env: dynamicLibraryEnv(),
-  });
+  run("Go README snippet", "go", ["run", ".", "--debug=t", "--port", "8181"], { cwd: dir });
+  run("Go README snippet assertion", "go", ["test", "."], { cwd: dir });
 }
 
 function testErlang() {
@@ -309,7 +311,7 @@ function testGleam() {
 
   const dir = makeSnippetProject("gleam");
   write(join(dir, "gleam.toml"), `name = "readme_snippet"\nversion = "1.0.0"\n\n[dependencies]\ngleam_stdlib = ">= 0.34.0 and < 2.0.0"\n`);
-  write(join(dir, "src", "flags2env.gleam"), readFileSync(join(root, "clients", "gleam", "lib.gleam"), "utf8"));
+  write(join(dir, "src", "flags2env.gleam"), readFileSync(join(root, "clients", "gleam", "src", "flags2env.gleam"), "utf8"));
   write(join(dir, "src", "main.gleam"), snippet("Gleam"));
   run("Gleam README snippet compile", "gleam", ["build"], { cwd: dir });
 }

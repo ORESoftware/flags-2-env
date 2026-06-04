@@ -13,7 +13,7 @@ STATIC_LIB := $(BUILD_DIR)/lib$(LIB_NAME).a
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
 SHARED_LIB := $(BUILD_DIR)/lib$(LIB_NAME).dylib
-SHARED_FLAGS := -dynamiclib
+SHARED_FLAGS := -dynamiclib -Wl,-install_name,@rpath/lib$(LIB_NAME).dylib
 else ifeq ($(OS),Windows_NT)
 SHARED_LIB := $(BUILD_DIR)/$(LIB_NAME).dll
 SHARED_FLAGS := -shared

@@ -5,10 +5,14 @@ on:
     paths:
       - ".cli-flags.toml"
       - "**/.cli-flags.toml"
+      - ".env"
+      - "**/.env"
   push:
     paths:
       - ".cli-flags.toml"
       - "**/.cli-flags.toml"
+      - ".env"
+      - "**/.env"
 
 permissions:
   contents: read

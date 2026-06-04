@@ -1,0 +1,85 @@
+name: Client Packaging
+
+on:
+  workflow_dispatch:
+    inputs:
+      full_docker_checks:
+        description: "Run heavyweight Docker client checks"
+        required: false
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - ".github/workflows/client-packaging.yml"
+      - ".npmignore"
+      - "Makefile"
+      - "package.json"
+      - "clients/**"
+      - "packaging/**"
+      - "scripts/audit-client-packaging.sh"
+      - "scripts/audit-release-matrix.mjs"
+      - "scripts/docker-check-new-clients.sh"
+      - "scripts/publish-client.sh"
+      - "scripts/publish-homebrew.sh"
+      - "src/**"
+      - "tests/**"
+  push:
+    paths:
+      - ".github/workflows/client-packaging.yml"
+      - ".npmignore"
+      - "Makefile"
+      - "package.json"
+      - "clients/**"
+      - "packaging/**"
+      - "scripts/audit-client-packaging.sh"
+      - "scripts/audit-release-matrix.mjs"
+      - "scripts/docker-check-new-clients.sh"
+      - "scripts/publish-client.sh"
+      - "scripts/publish-homebrew.sh"
+      - "src/**"
+      - "tests/**"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install practical smoke-test toolchains
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential zsh ruby
+
+      - name: Build native CLI
+        run: make clean && make all
+
+      - name: Run package-control audit
+        run: scripts/audit-client-packaging.sh
+
+      - name: Run release matrix audit
+        run: npm run release:audit
+
+      - name: Audit npm package contents
+        run: node scripts/audit-npm-package.mjs
+
+      - name: Run core and shell integration tests
+        run: tests/run.sh
+
+  docker-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Docker client checks
+        env:
+          FULL_DOCKER_CHECKS: ${{ github.event_name == 'workflow_dispatch' && inputs.full_docker_checks || false }}
+        run: |
+          if [ "$FULL_DOCKER_CHECKS" = "true" ]; then
+            scripts/docker-check-new-clients.sh --full
+          else
+            scripts/docker-check-new-clients.sh
+          fi

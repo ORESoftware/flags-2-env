@@ -9,7 +9,8 @@
 (def basis (b/create-basis {:project "deps.edn"}))
 (def sonatype-url
   (or (System/getenv "SONATYPE_RELEASE_URL")
-      "https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/"))
+      (System/getenv "CENTRAL_OSSRH_DEPLOY_URL")
+      "https://ossrh-staging-api.central.sonatype.com/service/local/staging/deploy/maven2/"))
 (def sonatype-repository-id
   (or (System/getenv "SONATYPE_REPOSITORY_ID")
       "ossrh"))

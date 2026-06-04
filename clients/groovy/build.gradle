@@ -21,16 +21,22 @@ java {
   withJavadocJar()
 }
 
+tasks.withType(Jar).configureEach {
+  exclude '**/*Test*'
+  exclude 'Dockerfile'
+  exclude 'publish.sh'
+}
+
 publishing {
   repositories {
     maven {
-      name = 'sonatype'
-      def releasesRepo = uri(System.getenv('SONATYPE_RELEASE_URL') ?: 'https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/')
-      def snapshotsRepo = uri(System.getenv('SONATYPE_SNAPSHOT_URL') ?: 'https://s01.oss.sonatype.org/content/repositories/snapshots/')
+      name = 'ossrhStagingApi'
+      def releasesRepo = uri(System.getenv('CENTRAL_OSSRH_DEPLOY_URL') ?: 'https://ossrh-staging-api.central.sonatype.com/service/local/staging/deploy/maven2/')
+      def snapshotsRepo = uri(System.getenv('CENTRAL_SNAPSHOT_URL') ?: 'https://central.sonatype.com/repository/maven-snapshots/')
       url = version.toString().endsWith('SNAPSHOT') ? snapshotsRepo : releasesRepo
       credentials {
-        username = System.getenv('SONATYPE_USERNAME') ?: ''
-        password = System.getenv('SONATYPE_PASSWORD') ?: ''
+        username = System.getenv('CENTRAL_TOKEN_USERNAME') ?: System.getenv('SONATYPE_USERNAME') ?: ''
+        password = System.getenv('CENTRAL_TOKEN_PASSWORD') ?: System.getenv('SONATYPE_PASSWORD') ?: ''
       }
     }
   }

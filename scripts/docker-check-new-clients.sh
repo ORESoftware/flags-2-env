@@ -35,7 +35,10 @@ int main() {
 EOF'
 
 run fortran gcc:13-bookworm \
-  'apt-get update && apt-get install -y --no-install-recommends gfortran && gfortran -c clients/fortran/src/flags2env.f90 -o /tmp/flags2env-fortran.o'
+  'apt-get update && apt-get install -y --no-install-recommends gfortran && cc -std=c99 -Wall -Wextra -Wpedantic -O2 -fPIC -c src/parser.c -o /tmp/flags2env-parser.o && gfortran -c clients/fortran/src/flags2env.f90 -J /tmp -o /tmp/flags2env-fortran.o && gfortran -I /tmp clients/fortran/test.f90 /tmp/flags2env-fortran.o /tmp/flags2env-parser.o -o /tmp/flags2env-fortran-test && /tmp/flags2env-fortran-test'
+
+run zig kassany/bookworm-ziglang:0.13.0 \
+  'zig version && cd clients/zig && zig build test'
 
 run lua debian:bookworm \
   'apt-get update && apt-get install -y --no-install-recommends build-essential make luajit && make clean && make all && FLAGS2ENV_NATIVE_LIB=build/libflags2env.so luajit clients/lua/test.lua'
@@ -49,12 +52,21 @@ run crystal crystallang/crystal:1.13.3 \
 run r r-base:4.4.2 \
   'apt-get update && apt-get install -y --no-install-recommends build-essential make && Rscript -e "install.packages(\"jsonlite\", repos=\"https://cloud.r-project.org\")" && R CMD INSTALL clients/r && cd tests/fixtures && Rscript -e "library(flags2env); parsed <- parse_flags(c(\"app\", \"--debug=t\", \"--port\", \"8181\")); stopifnot(parsed[[\"DEBUG\"]] == \"true\", parsed[[\"PORT\"]] == \"8181\")"'
 
+run clojure clojure:temurin-21-tools-deps \
+  'apt-get update && apt-get install -y --no-install-recommends maven && mvn -q -f clients/java/pom.xml -DskipTests install && cd clients/clojure && clojure -T:build jar'
+
+run solidity node:22-bookworm \
+  'cd clients/solidity && npm install --no-package-lock --ignore-scripts && npm test && npm pack --dry-run --json'
+
 run packaging debian:bookworm \
   'sh scripts/audit-client-packaging.sh'
 
 if [ "$FULL" -eq 1 ]; then
   run jvm gradle:8.10-jdk21 \
     'apt-get update && apt-get install -y --no-install-recommends maven && mvn -q -f clients/java/pom.xml -DskipTests install && gradle -p clients/kotlin compileKotlin --no-daemon && gradle -p clients/groovy compileGroovy --no-daemon'
+
+  run scala sbtscala/scala-sbt:eclipse-temurin-21.0.8_9_1.11.7_2.13.17 \
+    'apt-get update && apt-get install -y --no-install-recommends maven && mvn -q -f clients/java/pom.xml -DskipTests install && cd clients/scala && sbt -batch -Dsbt.supershell=false compile'
 
   run haskell haskell:latest \
     'cd clients/haskell && cabal check'

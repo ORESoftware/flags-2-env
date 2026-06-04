@@ -3,9 +3,15 @@
   "version": "0.1.0",
   "description": "Solidity helpers for consuming off-chain flags2env outputs.",
   "license": "MIT",
+  "scripts": {
+    "test": "solcjs --bin contracts/Flags2Env.sol --output-dir /tmp/flags2env-solidity"
+  },
   "files": [
     "contracts"
   ],
+  "devDependencies": {
+    "solc": "^0.8.20"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ORESoftware/flags-2-env.git"

@@ -29,7 +29,9 @@
   },
   "scripts": {
     "install": "cd clients/nodejs && node-gyp rebuild",
+    "pack:audit": "node scripts/audit-npm-package.mjs",
     "pack:dry-run": "npm pack --dry-run",
+    "release:audit": "node scripts/audit-release-matrix.mjs",
     "test:readme": "node scripts/test-readme-snippets.mjs"
   },
   "files": [

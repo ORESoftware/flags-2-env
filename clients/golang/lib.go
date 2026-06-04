@@ -1,10 +1,7 @@
 package flags2env
 
 /*
-#cgo CFLAGS: -I../../src
-#cgo darwin LDFLAGS: -L../../build -lflags2env
-#cgo linux LDFLAGS: -L../../build -lflags2env
-#cgo windows LDFLAGS: -L../../build -lflags2env
+#cgo CFLAGS: -I.
 #include "parser.h"
 #include <stdlib.h>
 */
