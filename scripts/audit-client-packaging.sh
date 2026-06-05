@@ -12,6 +12,14 @@ require_path() {
   fi
 }
 
+require_absent() {
+  path="$1"
+  if [ -e "$ROOT_DIR/$path" ]; then
+    printf 'unexpected file: %s\n' "$path" >&2
+    status=1
+  fi
+}
+
 require_contains() {
   path="$1"
   pattern="$2"
@@ -263,7 +271,7 @@ for path in \
   clients/haskell/flags2env.cabal \
   clients/ocaml/dune \
   clients/ocaml/flags2env.opam \
-  clients/reasonml/flags2env.opam \
+  clients/reasonml/flags2env-reason.opam \
   clients/reasonml/src/dune \
   clients/lua/flags2env-0.1.0-1.rockspec \
   clients/perl/MANIFEST.SKIP \
@@ -308,6 +316,7 @@ require_contains scripts/docker-check-new-clients.sh 'clojure:temurin-21-tools-d
 require_contains scripts/docker-check-new-clients.sh 'sbtscala/scala-sbt'
 require_contains scripts/docker-check-new-clients.sh 'zig build test'
 require_contains scripts/docker-check-new-clients.sh 'cabal test --extra-lib-dirs=/work/build'
+require_contains scripts/docker-check-new-clients.sh 'clients/reasonml/flags2env-reason\.opam'
 require_contains scripts/docker-check-new-clients.sh 'npm test && npm pack'
 require_contains packaging/homebrew/Formula/flags2env.rb 'class Flags2env < Formula'
 require_contains packaging/homebrew/Formula/flags2env.rb 'shell-env'
@@ -446,9 +455,13 @@ require_contains clients/haskell/flags2env.cabal '^  main-is: test\.hs$'
 require_contains clients/ocaml/dune '^\(test'
 require_contains clients/ocaml/flags2env.opam '^build:'
 require_contains clients/ocaml/flags2env.opam '\{with-test\}'
-require_contains clients/reasonml/flags2env.opam '^build:'
-require_contains clients/reasonml/flags2env.opam '"reason"'
-require_contains clients/reasonml/flags2env.opam '\{with-test\}'
+require_contains clients/reasonml/dune-project '\(name flags2env_reason\)'
+require_contains clients/reasonml/dune-project '\(name flags2env-reason\)'
+require_contains clients/reasonml/flags2env-reason.opam '^build:'
+require_contains clients/reasonml/flags2env-reason.opam '"reason"'
+require_contains clients/reasonml/flags2env-reason.opam '"flags2env"'
+require_contains clients/reasonml/flags2env-reason.opam '\{with-test\}'
+require_absent clients/reasonml/flags2env.opam
 require_contains clients/reasonml/src/dune '^\(test'
 require_contains clients/perl/MANIFEST.SKIP '^\^blib/'
 require_contains clients/perl/MANIFEST.SKIP '^\^publish\\\.sh\$'
@@ -504,6 +517,7 @@ require_contains scripts/publish-client.sh 'mix hex.publish'
 require_contains scripts/publish-client.sh 'rebar3 hex publish'
 require_contains scripts/publish-client.sh 'cabal upload'
 require_contains scripts/publish-client.sh 'opam publish submit'
+require_contains scripts/publish-client.sh 'opam lint flags2env-reason\.opam'
 require_contains scripts/publish-client.sh 'cpan-upload'
 require_contains scripts/publish-client.sh 'luarocks upload flags2env-0\.1\.0-1\.rockspec'
 require_contains scripts/publish-client.sh 'nimble publish'

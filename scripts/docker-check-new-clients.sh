@@ -72,7 +72,7 @@ if [ "$FULL" -eq 1 ]; then
     'make clean && make all && cd clients/haskell && cabal update && cabal check && LIBRARY_PATH=/work/build LD_LIBRARY_PATH=/work/build cabal test --extra-lib-dirs=/work/build all'
 
   run ocaml debian:bookworm \
-    'apt-get update && apt-get install -y --no-install-recommends opam ca-certificates && opam lint clients/ocaml/flags2env.opam && opam lint clients/reasonml/flags2env.opam'
+    'apt-get update && apt-get install -y --no-install-recommends opam ca-certificates && opam lint clients/ocaml/flags2env.opam && opam lint clients/reasonml/flags2env-reason.opam'
 
   run julia julia:1.10 \
     'make clean && make all && LD_LIBRARY_PATH=build julia --project=clients/julia -e "using Pkg; Pkg.instantiate(); Pkg.test()"'

@@ -139,8 +139,11 @@ case "$client" in
   haskell)
     run 'cabal check && cabal sdist && cabal upload dist-newstyle/sdist/*.tar.gz'
     ;;
-  ocaml|reasonml)
+  ocaml)
     run 'opam lint flags2env.opam && opam publish prepare && opam publish submit'
+    ;;
+  reasonml)
+    run 'opam lint flags2env-reason.opam && opam publish prepare && opam publish submit'
     ;;
   perl)
     run 'perl Makefile.PL && make manifest && make dist && cpan-upload *.tar.gz'

@@ -120,6 +120,10 @@ fixture when `FLAGS2ENV_FIXTURE` is absent. The F# smoke program registers a
 `DllImportResolver` before the first native call so `DllImport("flags2env")`
 loads that temporary library.
 
+The OCaml opam package is `flags2env`. The ReasonML facade publishes as
+`flags2env-reason` via `clients/reasonml/flags2env-reason.opam`, and depends on
+the OCaml package instead of reusing the same opam package name.
+
 The MATLAB source archive includes `+flags2env`, `native/parser.h`, and
 `native/parser.c`. The loader defaults to that package-local header for
 `loadlibrary`, while callers can still pass an explicit shared library or
