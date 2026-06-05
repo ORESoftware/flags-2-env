@@ -143,6 +143,7 @@ const packageControls = {
   php: [
     ["clients/php/composer.json", /"archive"\s*:\s*\{/, "Composer archive controls"],
     ["clients/php/composer.json", /"\/Dockerfile"/, "Composer archive excludes Dockerfile"],
+    ["clients/php/composer.json", /"\/publish\.sh"/, "Composer archive excludes publish wrapper"],
     ["clients/php/composer.json", /"\/test\.php"/, "Composer archive excludes tests"],
   ],
   ruby: [
@@ -154,6 +155,8 @@ const packageControls = {
     ["clients/dart/pubspec.yaml", /^description:/m, "pub.dev package description"],
     ["clients/dart/pubspec.yaml", /^repository:/m, "pub.dev repository metadata"],
     ["clients/dart/.pubignore", /^Dockerfile$/m, "pub.dev excludes Dockerfile"],
+    ["clients/dart/.pubignore", /^\.dart_tool\/$/m, "pub.dev excludes local Dart tool state"],
+    ["clients/dart/.pubignore", /^pubspec\.lock$/m, "pub.dev excludes app lockfile"],
     ["clients/dart/.pubignore", /^test\.dart$/m, "pub.dev excludes test file"],
     ["clients/dart/.pubignore", /^publish\.sh$/m, "pub.dev excludes publish wrapper"],
   ],
