@@ -1,4 +1,5 @@
 config <- tempfile(fileext = ".toml")
+on.exit(unlink(config), add = TRUE)
 writeLines(c(
   "[flags.port]",
   "env = \"PORT\"",

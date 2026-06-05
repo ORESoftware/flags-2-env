@@ -19,6 +19,9 @@ program test_flags2env
   close(10)
 
   parsed = parse_json_argv_from_file(config_path, '["app","--port","8181","--debug=t"]')
+  open(unit=10, file=config_path, status='old', action='read')
+  close(10, status='delete')
+
   if (index(parsed, '"PORT":"8181"') == 0) error stop "missing PORT"
   if (index(parsed, '"DEBUG":"true"') == 0) error stop "missing DEBUG"
 end program

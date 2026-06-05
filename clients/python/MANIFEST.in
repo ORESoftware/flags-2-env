@@ -1,6 +1,7 @@
 include lib.py
 include flags2env.py
 include README.md
+include LICENSE
 recursive-exclude native *
 exclude Dockerfile
 exclude publish.sh

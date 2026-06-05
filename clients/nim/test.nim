@@ -16,5 +16,6 @@ true_aliases = ["t"]
 """)
 
 let parsed = parseFromFile(config, @["app", "--debug=t", "--port", "8181"])
+removeFile(config)
 doAssert parsed["DEBUG"].getStr() == "true"
 doAssert parsed["PORT"].getStr() == "8181"

@@ -42,7 +42,7 @@ if (disallowed.length > 0) {
   process.exit(1);
 }
 
-for (const required of ["clients/nodejs/lib.mjs", "clients/bun/lib.mjs", "clients/deno/mod.ts", "src/parser.c"]) {
+for (const required of ["LICENSE", "clients/nodejs/lib.mjs", "clients/bun/lib.mjs", "clients/deno/mod.ts", "src/parser.c"]) {
   if (!files.includes(required)) {
     process.stderr.write(`npm package is missing required file: ${required}\n`);
     process.exit(1);
@@ -50,4 +50,3 @@ for (const required of ["clients/nodejs/lib.mjs", "clients/bun/lib.mjs", "client
 }
 
 console.log(`npm package audit passed (${files.length} files)`);
-

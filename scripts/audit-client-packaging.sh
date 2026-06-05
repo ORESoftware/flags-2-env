@@ -159,7 +159,6 @@ audit_r_staging() {
   rm -rf "$tmp_dir"
   mkdir -p "$tmp_dir/r"
   cp -R "$ROOT_DIR/clients/r/." "$tmp_dir/r/"
-  cp "$ROOT_DIR/src/parser.c" "$ROOT_DIR/src/parser.h" "$tmp_dir/r/src/"
   for path in src/flags2env_r.c src/parser.c src/parser.h src/Makevars DESCRIPTION NAMESPACE tests/smoke.R; do
     if [ ! -e "$tmp_dir/r/$path" ]; then
       printf 'staged R package is missing: %s\n' "$path" >&2
@@ -168,6 +167,10 @@ audit_r_staging() {
   done
   if grep -Eq '\.\./\.\./\.\./src/parser\.h' "$tmp_dir/r/src/flags2env_r.c"; then
     printf 'staged R package still points to repository parser header\n' >&2
+    status=1
+  fi
+  if grep -Eq '\.\./\.\./\.\./src' "$tmp_dir/r/src/Makevars"; then
+    printf 'staged R package Makevars reaches into repository source directory\n' >&2
     status=1
   fi
   rm -rf "$tmp_dir"
@@ -210,6 +213,7 @@ done
 
 for path in \
   .npmignore \
+  LICENSE \
   Package.swift \
   package.json \
   packaging/homebrew/README.md \
@@ -225,6 +229,7 @@ for path in \
   clients/zsh/test.zsh \
   clients/cpp/native/parser.c \
   clients/cpp/native/parser.h \
+  clients/python/LICENSE \
   clients/python/MANIFEST.in \
   clients/python/pyproject.toml \
   clients/golang/parser.c \
@@ -282,6 +287,8 @@ for path in \
   clients/nim/flags2env.nimble \
   clients/r/.Rbuildignore \
   clients/r/DESCRIPTION \
+  clients/r/src/parser.c \
+  clients/r/src/parser.h \
   clients/r/tests/smoke.R \
   clients/matlab/+flags2env/defaultHeaderPath.m \
   clients/matlab/native/parser.c \
@@ -291,6 +298,8 @@ for path in \
   clients/julia/README.md \
   clients/julia/REGISTRATION.md \
   clients/solidity/package.json \
+  clients/fortran/src/parser.c \
+  clients/fortran/src/parser.h \
   clients/zig/native/parser.c \
   clients/zig/native/parser.h \
   .github/workflows/client-packaging.yml \
@@ -300,10 +309,13 @@ do
 done
 
 require_contains .npmignore '^!clients/nodejs/'
+require_contains .npmignore '^!LICENSE$'
 require_contains Package.swift 'path: "clients/swift"'
 require_contains Package.swift 'exclude: \["Dockerfile", "Package\.swift", "test\.swift", "publish\.sh"\]'
 require_contains Makefile '@rpath/lib\$\(LIB_NAME\)\.dylib'
 require_contains package.json '"files"'
+require_contains package.json '"license": "MIT"'
+require_contains package.json '"LICENSE"'
 require_contains package.json '"pack:audit"'
 require_contains package.json '"release:audit"'
 require_contains scripts/audit-npm-package.mjs 'non-JS clients'
@@ -335,9 +347,11 @@ require_contains clients/zsh/flags2env.zsh 'flags2env_apply'
 require_contains clients/python/MANIFEST.in '^include lib\.py$'
 require_contains clients/python/MANIFEST.in '^include flags2env\.py$'
 require_contains clients/python/MANIFEST.in '^include README\.md$'
+require_contains clients/python/MANIFEST.in '^include LICENSE$'
 require_contains clients/python/MANIFEST.in '^exclude publish\.sh$'
 require_contains clients/python/pyproject.toml 'setuptools>=77'
 require_contains clients/python/pyproject.toml '^license = "MIT"$'
+require_contains clients/python/pyproject.toml '^license-files = \["LICENSE"\]$'
 forbid_contains clients/python/pyproject.toml 'license = \{ text = "MIT" \}'
 require_contains clients/rust/Cargo.toml '^include = \['
 require_contains clients/rust/Cargo.toml '"native/\*\*"'
@@ -448,6 +462,7 @@ require_contains clients/elixir/README.md 'flags2env_elixir'
 require_contains clients/elixir/Dockerfile 'clients/elixir/native/parser\.c'
 forbid_contains clients/elixir/Dockerfile 'COPY src|COPY tests|src/parser\.c|tests/fixtures|clients/erlang'
 forbid_contains clients/elixir/test.exs 'tests/fixtures|\.\./\.\./tests|\.\./\.cli-flags\.toml'
+require_contains clients/elixir/test.exs 'System\.at_exit'
 require_same_file clients/erlang/flags2env.erl clients/elixir/native/flags2env.erl
 require_same_file clients/erlang/flags2env_nif.c clients/elixir/native/flags2env_nif.c
 require_same_file src/parser.c clients/elixir/native/parser.c
@@ -488,11 +503,18 @@ require_contains clients/lua/flags2env-dev-1.rockspec 'clients/lua/flags2env\.lu
 require_contains clients/lua/flags2env-0.1.0-1.rockspec '^version = "0\.1\.0-1"'
 require_contains clients/lua/flags2env-0.1.0-1.rockspec 'tag = "v0\.1\.0"'
 require_contains clients/lua/flags2env-0.1.0-1.rockspec 'clients/lua/flags2env\.lua'
+require_contains clients/lua/test.lua 'os\.remove\(config\)'
 require_contains clients/nim/flags2env.nimble '^installFiles'
+require_contains clients/nim/test.nim 'removeFile\(config\)'
 require_contains clients/r/.Rbuildignore '\^Dockerfile\$'
+require_contains clients/r/src/Makevars 'PARSER_SRC = parser\.c'
+forbid_contains clients/r/src/Makevars '\.\./\.\./\.\./src'
 require_contains clients/r/src/flags2env_r.c '#include "parser\.h"'
 forbid_contains clients/r/src/flags2env_r.c '\.\./\.\./\.\./src/parser\.h'
+require_same_file src/parser.c clients/r/src/parser.c
+require_same_file src/parser.h clients/r/src/parser.h
 require_contains clients/r/tests/smoke.R 'parse_flags'
+require_contains clients/r/tests/smoke.R 'on\.exit\(unlink\(config\), add = TRUE\)'
 require_contains clients/matlab/test.m 'flags2env\.parse'
 require_contains clients/matlab/+flags2env/defaultHeaderPath.m 'native'
 require_contains clients/matlab/+flags2env/ensureLoaded.m 'flags2env\.defaultHeaderPath\(\)'
@@ -506,9 +528,14 @@ require_contains clients/julia/Project.toml '^name = "Flags2Env"'
 require_contains clients/julia/Project.toml '^uuid = "[0-9a-f-]{36}"'
 require_contains clients/julia/Project.toml '^version = "0\.1\.0"'
 require_contains clients/julia/REGISTRATION.md '@JuliaRegistrator register subdir=clients/julia'
+require_contains clients/julia/test/runtests.jl 'atexit'
 require_contains clients/solidity/package.json '"files"'
 require_contains clients/solidity/package.json '"test"'
 require_contains clients/solidity/package.json '"solc"'
+require_contains scripts/docker-check-new-clients.sh 'clients/fortran/src/parser\.c'
+forbid_contains scripts/docker-check-new-clients.sh ' -c src/parser\.c -o /tmp/flags2env-parser\.o'
+require_same_file src/parser.c clients/fortran/src/parser.c
+require_same_file src/parser.h clients/fortran/src/parser.h
 require_contains clients/zig/build.zig 'native/parser\.c'
 require_contains clients/zig/build.zig 'b\.path\("native"\)'
 forbid_contains clients/zig/build.zig '\.\./\.\./src'
@@ -517,7 +544,7 @@ require_same_file src/parser.h clients/zig/native/parser.h
 require_contains clients/deno/deno.json '"native"'
 require_contains scripts/render-client.mjs 'src/parser\.c'
 require_contains scripts/render-client.mjs 'native'
-require_contains scripts/publish-client.sh 'cp src/parser\.c src/parser\.h dist/r/src/'
+forbid_contains scripts/publish-client.sh 'cp src/parser\.c src/parser\.h dist/r/src/'
 require_contains scripts/publish-client.sh 'npm publish --access public'
 require_contains scripts/publish-client.sh 'node scripts/render-client\.mjs deno dist/deno'
 require_contains scripts/publish-client.sh '\$\{PYTHON:-python3\} -m build'

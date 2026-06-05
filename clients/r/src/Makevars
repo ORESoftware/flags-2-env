@@ -1,13 +1,8 @@
-PKG_CPPFLAGS = -I../../../src
 OBJECTS = flags2env_r.o parser.o
 
-PARSER_SRC = ../../../src/parser.c
-PARSER_HEADER = ../../../src/parser.h
-ifeq ($(wildcard parser.c),parser.c)
 PARSER_SRC = parser.c
 PARSER_HEADER = parser.h
 PKG_CPPFLAGS = -I.
-endif
 
 parser.o: $(PARSER_SRC) $(PARSER_HEADER)
 	$(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) -fPIC -c $(PARSER_SRC) -o parser.o

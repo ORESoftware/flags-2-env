@@ -25,3 +25,4 @@ assert(parsed.DEBUG == "true" and parsed.PORT == "8181", "unexpected parsed map"
 
 local combined = flags:apply({ PORT = "env", KEEP = "1" }, { "app", "--port", "8181" }, config)
 assert(combined.PORT == "8181" and combined.KEEP == "1", "unexpected combined map")
+os.remove(config)

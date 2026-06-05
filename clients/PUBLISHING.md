@@ -37,6 +37,11 @@ The goal is that a package for one runtime never bundles every other
 `clients/*` directory. The registry/package-control audit checks both the
 manifest files and the publish dispatcher commands.
 
+The root npm package and Python PyPI package both ship package-local MIT license
+files. The npm audit checks `LICENSE` appears in the packed tarball, and the
+Python build uses `license-files = ["LICENSE"]` so wheels place it under
+`dist-info/licenses`.
+
 The Go client is a module rooted at `clients/golang`, so its release tags use
 the Go module subdirectory prefix, for example `clients/golang/v0.1.0`, so
 `pkg.go.dev` and the Go command resolve the module version correctly. The Go
@@ -135,6 +140,14 @@ the Central Portal OSSRH compatibility endpoint.
 The Haskell Hackage package declares `license-file: LICENSE` and includes that
 file in `extra-source-files`, so `cabal sdist` carries package-local license
 metadata alongside `README.md`.
+
+The Fortran fpm package carries package-local copies of `parser.c` and
+`parser.h` under `clients/fortran/src`, so the smoke build and package sources
+do not depend on the repository-root C source directory.
+
+The R package also carries package-local `src/parser.c` and `src/parser.h`.
+`src/Makevars` builds those local files, which keeps `R CMD INSTALL clients/r`
+and the staged CRAN archive independent of the monorepo root.
 
 The Perl CPAN package includes package-local `README.md` and `LICENSE` files,
 and the manifest audit checks that generated CPAN manifests include both while

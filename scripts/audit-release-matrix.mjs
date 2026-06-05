@@ -54,7 +54,10 @@ const expectedRepositories = {
 const packageControls = {
   nodejs: [
     [".npmignore", /^!clients\/nodejs\//m, "npm allowlist includes Node.js client"],
+    [".npmignore", /^!LICENSE$/m, "npm allowlist includes package license"],
     ["package.json", /"files"\s*:\s*\[/, "npm package files allowlist"],
+    ["package.json", /"license"\s*:\s*"MIT"/, "npm package declares MIT license"],
+    ["package.json", /"LICENSE"/, "npm package includes root license file"],
     ["package.json", /"clients\/nodejs\/lib\.mjs"/, "npm package includes Node.js ESM client"],
     ["package.json", /"clients\/bun\/lib\.mjs"/, "npm package includes Bun entry"],
     ["package.json", /"clients\/deno\/mod\.ts"/, "npm package includes Deno entry"],
@@ -63,11 +66,13 @@ const packageControls = {
     ["clients/python/MANIFEST.in", /^include lib\.py$/m, "PyPI MANIFEST includes runtime module"],
     ["clients/python/MANIFEST.in", /^include flags2env\.py$/m, "PyPI MANIFEST includes public module"],
     ["clients/python/MANIFEST.in", /^include README\.md$/m, "PyPI MANIFEST includes README"],
+    ["clients/python/MANIFEST.in", /^include LICENSE$/m, "PyPI MANIFEST includes license file"],
     ["clients/python/MANIFEST.in", /^exclude Dockerfile$/m, "PyPI MANIFEST excludes Dockerfile"],
     ["clients/python/MANIFEST.in", /^exclude publish\.sh$/m, "PyPI MANIFEST excludes publish wrapper"],
     ["clients/python/MANIFEST.in", /^exclude test\.py$/m, "PyPI MANIFEST excludes test file"],
     ["clients/python/pyproject.toml", /setuptools>=77/, "PyPI build backend supports SPDX license metadata"],
     ["clients/python/pyproject.toml", /^license = "MIT"$/m, "PyPI metadata uses SPDX license string"],
+    ["clients/python/pyproject.toml", /^license-files = \["LICENSE"\]$/m, "PyPI metadata declares package-local license file"],
     ["scripts/publish-client.sh", /\$\{PYTHON:-python3\} -m build/, "Python publish command defaults to python3"],
   ],
   java: [
@@ -189,6 +194,7 @@ const packageControls = {
     ["clients/elixir/mix.exs", /"native\/parser\.h"/, "Elixir Hex package includes parser header"],
     ["clients/elixir/README.md", /flags2env_elixir/, "Elixir package README documents Hex package name"],
     ["clients/elixir/Dockerfile", /clients\/elixir\/native\/parser\.c/, "Elixir Docker smoke builds package-local parser source"],
+    ["clients/elixir/test.exs", /System\.at_exit/, "Elixir smoke test removes generated TOML fixture"],
   ],
   erlang: [
     ["clients/erlang/rebar.config", /\{files, \["flags2env\.erl", "flags2env_nif\.c", "parser\.c", "parser\.h", "rebar\.config"\]\}/, "Hex package file list"],
@@ -238,15 +244,19 @@ const packageControls = {
     ["clients/lua/flags2env-0.1.0-1.rockspec", /^version = "0\.1\.0-1"$/m, "LuaRocks stable version"],
     ["clients/lua/flags2env-0.1.0-1.rockspec", /tag = "v0\.1\.0"/, "LuaRocks stable source tag"],
     ["clients/lua/flags2env-0.1.0-1.rockspec", /flags2env = "clients\/lua\/flags2env\.lua"/, "LuaRocks stable module mapping from repository root"],
+    ["clients/lua/test.lua", /os\.remove\(config\)/, "Lua smoke test removes generated TOML fixture"],
   ],
   nim: [
     ["clients/nim/flags2env.nimble", /^installFiles\s+=\s+@\["flags2env\.nim"\]/m, "Nimble install file list"],
+    ["clients/nim/test.nim", /removeFile\(config\)/, "Nim smoke test removes generated TOML fixture"],
   ],
   r: [
     ["clients/r/.Rbuildignore", /^\^Dockerfile\$$/m, "R build excludes Dockerfile"],
     ["clients/r/.Rbuildignore", /^\^publish\\\.sh\$$/m, "R build excludes publish wrapper"],
+    ["clients/r/src/Makevars", /PARSER_SRC = parser\.c/, "R package builds package-local parser source"],
     ["clients/r/src/flags2env_r.c", /#include "parser\.h"/, "R staged package includes local parser header"],
     ["clients/r/tests/smoke.R", /parse_flags/, "R package smoke test"],
+    ["clients/r/tests/smoke.R", /on\.exit\(unlink\(config\), add = TRUE\)/, "R smoke test removes generated TOML fixture"],
   ],
   matlab: [
     ["clients/matlab/README.md", /MATLAB bindings use `loadlibrary`/, "MATLAB source-archive usage docs"],
@@ -262,10 +272,12 @@ const packageControls = {
     ["clients/julia/Project.toml", /^version = "0\.1\.0"$/m, "Julia package version"],
     ["clients/julia/Project.toml", /^\[compat\]/m, "Julia compatibility metadata"],
     ["clients/julia/REGISTRATION.md", /@JuliaRegistrator register subdir=clients\/julia/, "Julia subdir Registrator instruction"],
+    ["clients/julia/test/runtests.jl", /atexit/, "Julia smoke test removes generated TOML fixture"],
   ],
   fortran: [
     ["clients/fortran/fpm.toml", /^\[library\]/m, "fpm library metadata"],
     ["clients/fortran/fpm.toml", /^\[\[test\]\]/m, "fpm smoke test metadata"],
+    ["scripts/docker-check-new-clients.sh", /clients\/fortran\/src\/parser\.c/, "Fortran Docker smoke builds package-local parser source"],
   ],
   zig: [
     ["clients/zig/build.zig", /b\.addModule\("flags2env"/, "Zig package module"],
@@ -349,6 +361,10 @@ const forbiddenPackageContent = {
   reasonml: [
     ["clients/reasonml/src/Test.re", /tests\/fixtures|\.\.\/\.\.\/tests/, "ReasonML smoke test depends on repo fixture tree"],
   ],
+  r: [
+    ["clients/r/src/Makevars", /\.\.\/\.\.\/\.\.\/src/, "R Makevars reaches into repository source directory"],
+    ["scripts/publish-client.sh", /cp src\/parser\.c src\/parser\.h dist\/r\/src\//, "R publish command stages repository-root parser sources"],
+  ],
   matlab: [
     ["clients/matlab/+flags2env/apply.m", /fullfile\(pwd, "src", "parser\.h"\)/, "MATLAB apply uses repo-root parser header default"],
     ["clients/matlab/+flags2env/ensureLoaded.m", /fullfile\(pwd, "src", "parser\.h"\)/, "MATLAB loader uses repo-root parser header default"],
@@ -375,7 +391,7 @@ const matrix = [
     language: "Python",
     client: "python",
     repository: "PyPI",
-    controls: ["clients/python/MANIFEST.in", "clients/python/pyproject.toml"],
+    controls: ["clients/python/MANIFEST.in", "clients/python/pyproject.toml", "clients/python/LICENSE"],
     sources: ["clients/python/lib.py", "clients/python/flags2env.py"],
     tests: ["clients/python/test.py"],
     publishIncludes: ["twine upload"],
@@ -601,7 +617,7 @@ const matrix = [
     client: "r",
     repository: "CRAN / R-universe",
     controls: ["clients/r/DESCRIPTION", "clients/r/.Rbuildignore"],
-    sources: ["clients/r/R/flags2env.R", "clients/r/src/flags2env_r.c"],
+    sources: ["clients/r/R/flags2env.R", "clients/r/src/flags2env_r.c", "clients/r/src/parser.c", "clients/r/src/parser.h"],
     tests: ["clients/r/tests/smoke.R"],
     publishIncludes: ["submit_cran"],
   },
@@ -634,7 +650,7 @@ const matrix = [
     client: "fortran",
     repository: "Git repository / fpm package",
     controls: ["clients/fortran/fpm.toml"],
-    sources: ["clients/fortran/src/flags2env.f90"],
+    sources: ["clients/fortran/src/flags2env.f90", "clients/fortran/src/parser.c", "clients/fortran/src/parser.h"],
     tests: ["clients/fortran/test.f90"],
     publishIncludes: ["git tag"],
   },

@@ -1,5 +1,6 @@
 *
 !README.md
+!LICENSE
 !package.json
 !clients/nodejs/addon.c
 !clients/nodejs/binding.gyp

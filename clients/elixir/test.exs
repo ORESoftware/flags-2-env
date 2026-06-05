@@ -1,4 +1,5 @@
 config = Path.join(System.tmp_dir!(), "flags2env-elixir-smoke.toml")
+System.at_exit(fn _ -> File.rm(config) end)
 
 File.write!(config, """
 [flags.port]

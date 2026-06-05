@@ -2,6 +2,7 @@
   "name": "@oresoftware/f2e",
   "version": "0.1.0",
   "description": "Parse project-declared CLI flags into environment override maps.",
+  "license": "MIT",
   "type": "module",
   "main": "./clients/nodejs/lib.cjs",
   "types": "./clients/nodejs/lib.ts",
@@ -35,6 +36,7 @@
     "test:readme": "node scripts/test-readme-snippets.mjs"
   },
   "files": [
+    "LICENSE",
     "README.md",
     "clients/nodejs/addon.c",
     "clients/nodejs/binding.gyp",

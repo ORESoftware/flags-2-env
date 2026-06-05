@@ -1,6 +1,7 @@
 using Flags2Env
 
 config_path = tempname() * ".toml"
+atexit(() -> isfile(config_path) && rm(config_path))
 write(config_path, """
 [flags.port]
 env = "PORT"
