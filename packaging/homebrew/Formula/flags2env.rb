@@ -47,5 +47,20 @@ class Flags2env < Formula
 
     assert_match "\"PORT\":\"8181\"", shell_output("#{bin}/flags2env --port 8181")
     assert_match "export DEBUG='true'", shell_output("#{bin}/flags2env shell-env -- --debug")
+
+    assert_path_exists pkgshare/"shell/flags2env.bash"
+    assert_path_exists pkgshare/"shell/flags2env.zsh"
+
+    (testpath/"bash-helper-test").write <<~SH
+      #!/usr/bin/env bash
+      set -euo pipefail
+      source "#{pkgshare}/shell/flags2env.bash"
+      export FLAGS2ENV_BIN="#{bin}/flags2env"
+      export FLAGS2ENV_CONFIG="#{testpath}/.cli-flags.toml"
+      flags2env_apply --debug
+      printf "%s" "$DEBUG"
+    SH
+
+    assert_equal "true", shell_output("bash #{testpath}/bash-helper-test")
   end
 end

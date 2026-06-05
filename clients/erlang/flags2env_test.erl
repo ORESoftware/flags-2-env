@@ -23,6 +23,7 @@ main() ->
 
   Combined = maps:merge(#{<<"PORT">> => <<"env">>, <<"KEEP">> => <<"1">>}, flags2env:parse(["app", "--port", "8181"], Config)),
   assert_map("combined", Combined, [{<<"PORT">>, <<"8181">>}, {<<"KEEP">>, <<"1">>}]),
+  ok = file:delete(Config),
   halt(0).
 
 assert_map(Label, Map, Expected) ->

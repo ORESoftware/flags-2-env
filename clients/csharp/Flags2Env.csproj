@@ -8,6 +8,7 @@
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/ORESoftware/flags-2-env</PackageProjectUrl>
     <RepositoryUrl>https://github.com/ORESoftware/flags-2-env</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
@@ -15,6 +16,7 @@
   <ItemGroup>
     <PackageReference Include="System.Text.Json" Version="8.0.5" />
     <Compile Remove="Flags2EnvTest.cs" />
+    <None Include="README.md" Pack="true" PackagePath="" />
     <None Include="native/parser.c" Pack="true" PackagePath="native/" />
     <None Include="native/parser.h" Pack="true" PackagePath="native/" />
   </ItemGroup>

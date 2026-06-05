@@ -42,6 +42,21 @@ files. The npm audit checks `LICENSE` appears in the packed tarball, and the
 Python build uses `license-files = ["LICENSE"]` so wheels place it under
 `dist-info/licenses`.
 
+RubyGems and Packagist packages carry package-local README and MIT license
+files as well. The Ruby gemspec includes `README.md`, `LICENSE`, and `lib.rb`,
+while Composer archives keep README/license metadata and exclude only local
+test/build/publish files.
+
+Rust crates, Go modules, C/C++ source helpers, Bash/Zsh helpers, LuaRocks,
+Nimble, Crystal Shards, Zig packages, and fpm package folders also include
+package-local README and MIT license files so source-index pages have the same
+basic metadata as the binary registry packages. Solidity's npm package
+allowlist includes its contract sources plus package-local README and license
+files.
+OCaml and ReasonML opam package folders follow the same pattern.
+Erlang and Gleam Hex packages include package-local README and MIT license files
+alongside their native parser sources.
+
 The Go client is a module rooted at `clients/golang`, so its release tags use
 the Go module subdirectory prefix, for example `clients/golang/v0.1.0`, so
 `pkg.go.dev` and the Go command resolve the module version correctly. The Go
@@ -56,16 +71,19 @@ of reaching back to the repository root.
 The Erlang Hex package carries `parser.c` and `parser.h` beside the NIF source,
 and the Gleam Docker smoke uses the same package-local Erlang native sources.
 The Elixir facade publishes as `flags2env_elixir`, includes its own package-local
-copy of the Erlang NIF source and parser sources, and avoids reaching into the
-Erlang client tree during package smoke checks.
+README, MIT license file, copy of the Erlang NIF source and parser sources, and
+avoids reaching into the Erlang client tree during package smoke checks.
 
 The C# and F# NuGet packages carry package-local `native/parser.c` and
 `native/parser.h` copies, so the native source files in each `.nupkg` do not
 depend on repository-relative `../../src` paths.
+Their SDK project files and `.nuspec` manifests also include package README
+metadata so NuGet packages render useful package documentation.
 
 The C++ package is rooted at `clients/cpp` and carries package-local parser
 sources under `clients/cpp/native`, so its CMake target can be consumed without
-repository-relative `../../src` paths.
+repository-relative `../../src` paths. The C and C++ helper folders also carry
+package-local README and MIT license files for source archive consumers.
 
 SwiftPM expects a `Package.swift` manifest in the repository root and a full
 semantic-version tag such as `0.1.0`, so the root manifest points at
@@ -82,15 +100,22 @@ Registrator trigger comment:
 The Zig package is rooted at `clients/zig` and carries package-local copies of
 `src/parser.c` and `src/parser.h` under `clients/zig/native`. The packaging
 audit verifies those copies match the root parser sources so consumers can build
-the Zig package without relying on repository-relative `../../src` paths.
+the Zig package without relying on repository-relative `../../src` paths. Its
+`build.zig.zon` path list includes only the build files, sources, native parser,
+README, and license.
 
 Docker-backed verification for the newer client scaffolds lives in
 `scripts/docker-check-new-clients.sh`. Run the default set for practical local
-coverage, or pass `--full` in CI to include heavier Haskell, OCaml/opam, Julia,
-Scala, Kotlin, Groovy, and JVM facade checks. The Haskell full check runs the
-Cabal smoke test suite against the freshly built native library. The GitHub
-Actions client packaging workflow runs the default Docker set automatically and
-exposes a manual `full_docker_checks` input for the heavyweight set.
+coverage, including Perl FFI, .NET, C++, Fortran, Zig, Lua, PHP FFI, Nim,
+Crystal, R, Clojure, Solidity, and package-control audits. Pass `--full` in CI
+to include heavier Haskell, OCaml/ReasonML, Julia, Scala, Kotlin, Groovy, and
+JVM facade checks. The Haskell full check runs the Cabal smoke test suite
+against the freshly built native library, and the OCaml/ReasonML full check
+runs Dune tests after installing the OCaml package into the opam switch. The
+script also accepts `--dry-run` to print the default or full container plan
+without requiring a Docker daemon. The GitHub Actions client packaging workflow
+runs the default Docker set automatically and exposes a manual
+`full_docker_checks` input for the heavyweight set.
 
 The registry/package-control audit is available without language toolchains:
 
@@ -115,9 +140,10 @@ alongside the core shell integration tests whenever client, packaging, script,
 source, or test files change.
 
 The Rust crate includes `clients/rust/native/parser.c` and
-`clients/rust/native/parser.h` in its Cargo allowlist. Its packaged smoke test
-compiles those local sources into a temporary shared library, so `cargo test`
-does not depend on the monorepo `build/` directory or shared test fixtures.
+`clients/rust/native/parser.h`, plus package-local README and license files, in
+its Cargo allowlist. Its packaged smoke test compiles those local sources into a
+temporary shared library, so `cargo test` does not depend on the monorepo
+`build/` directory or shared test fixtures.
 
 The C# and F# smoke programs use the package-local `native/parser.c` fallback
 when `FLAGS2ENV_NATIVE_LIB` is not set and write their own temporary TOML
@@ -153,17 +179,17 @@ The Perl CPAN package includes package-local `README.md` and `LICENSE` files,
 and the manifest audit checks that generated CPAN manifests include both while
 still excluding generated build metadata and `publish.sh`.
 
-The MATLAB source archive includes `+flags2env`, `native/parser.h`, and
-`native/parser.c`. The loader defaults to that package-local header for
-`loadlibrary`, while callers can still pass an explicit shared library or
-header path when embedding flags2env elsewhere.
+The MATLAB source archive includes `+flags2env`, `native/parser.h`,
+`native/parser.c`, `README.md`, and `LICENSE`. The loader defaults to that
+package-local header for `loadlibrary`, while callers can still pass an
+explicit shared library or header path when embedding flags2env elsewhere.
 
 The native C CLI has a Homebrew formula at
 `packaging/homebrew/Formula/flags2env.rb`. It builds the CLI and C library,
 installs bash/zsh helper files under `pkgshare`, and includes a formula test for
 the `shell-env` output used by shell functions. `scripts/publish-homebrew.sh`
-prints or runs the local `brew install --build-from-source`, `brew test`, and
-`brew audit --strict --new --online` checks.
+prints or runs the local `brew install --build-from-source`,
+`brew audit --strict --new --online`, and `brew test` checks.
 
 JVM clients share the Java JNI bridge. Kotlin, Scala, Groovy, and Clojure expose
 idiomatic wrappers over `com.oresoftware.flags2env.Flags2Env` and are packaged
@@ -173,7 +199,8 @@ Staging API compatibility endpoint and then call
 `scripts/publish-central-ossrh-compat.sh` to hand the deployment to Central
 Portal. Set `CENTRAL_NAMESPACE` plus `CENTRAL_BEARER_TOKEN`, or
 `CENTRAL_TOKEN_USERNAME` and `CENTRAL_TOKEN_PASSWORD`, for those release paths.
-Scala uses `sbt-sonatype` with `sonatypeCentralHost`. The setup follows
-Sonatype's Central Portal Maven plugin docs and OSSRH Staging API compatibility
-docs; Sonatype's Gradle docs currently note that there is no official Gradle
-plugin for the Central Publishing Portal.
+Scala uses `sbt-sonatype` with `sonatypeCentralHost` and `sbt-pgp`; its build
+explicitly publishes source and doc artifacts before `publishSigned
+sonatypeBundleRelease`. The setup follows Sonatype's Central Portal Maven plugin
+docs and OSSRH Staging API compatibility docs; Sonatype's Gradle docs currently
+note that there is no official Gradle plugin for the Central Publishing Portal.

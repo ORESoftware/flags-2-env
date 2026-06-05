@@ -158,7 +158,7 @@ case "$client" in
     run_root 'rm -rf dist/r && mkdir -p dist/r && cp -R clients/r/. dist/r/ && cd dist && R CMD build r && R CMD check flags2env_*.tar.gz && pkg="$(ls flags2env_*.tar.gz | tail -1)" && Rscript -e "if (!requireNamespace('\''devtools'\'', quietly = TRUE)) stop('\''install devtools to submit to CRAN'\''); devtools::submit_cran(commandArgs(TRUE)[1])" "$pkg"'
     ;;
   matlab)
-    run 'zip -r flags2env-matlab.zip +flags2env native README.md'
+    run 'zip -r flags2env-matlab.zip +flags2env native README.md LICENSE'
     ;;
   julia)
     run_root 'julia --project=clients/julia -e "using Pkg; Pkg.instantiate(); Pkg.test()" && printf "%s\n" "@JuliaRegistrator register subdir=clients/julia"'

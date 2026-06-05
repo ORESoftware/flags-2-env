@@ -3,18 +3,33 @@ set -eu
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 FULL=0
+DRY_RUN=0
 
-if [ "${1:-}" = "--full" ]; then
-  FULL=1
-elif [ "$#" -gt 0 ]; then
-  printf 'usage: %s [--full]\n' "$0" >&2
-  exit 2
-fi
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --full)
+      FULL=1
+      ;;
+    --dry-run)
+      DRY_RUN=1
+      ;;
+    *)
+      printf 'usage: %s [--full] [--dry-run]\n' "$0" >&2
+      exit 2
+      ;;
+  esac
+  shift
+done
 
 run() {
   label="$1"
   image="$2"
   command="$3"
+  if [ "$DRY_RUN" -eq 1 ]; then
+    printf '[dry-run] docker check %s: %s\n' "$label" "$image"
+    printf '[dry-run] docker command %s: %s\n' "$label" "$command"
+    return
+  fi
   printf '\n==> docker check %s\n' "$label"
   docker run --rm -u 0:0 -v "$ROOT_DIR:/repo:ro" -w /work "$image" sh -euxc "cp -R /repo/. /work && $command"
 }
@@ -42,6 +57,9 @@ run zig kassany/bookworm-ziglang:0.13.0 \
 
 run lua debian:bookworm \
   'apt-get update && apt-get install -y --no-install-recommends build-essential make luajit && make clean && make all && FLAGS2ENV_NATIVE_LIB=build/libflags2env.so luajit clients/lua/test.lua'
+
+run php php:8.3-cli \
+  'apt-get update && apt-get install -y --no-install-recommends build-essential libffi-dev make && docker-php-ext-install ffi && make clean && make all && php -d ffi.enable=true clients/php/test.php'
 
 run nim nimlang/nim:2.0.10 \
   'apt-get update && apt-get install -y --no-install-recommends build-essential make && make clean && make all && LD_LIBRARY_PATH=build nim c -r clients/nim/test.nim'
@@ -72,7 +90,7 @@ if [ "$FULL" -eq 1 ]; then
     'make clean && make all && cd clients/haskell && cabal update && cabal check && LIBRARY_PATH=/work/build LD_LIBRARY_PATH=/work/build cabal test --extra-lib-dirs=/work/build all'
 
   run ocaml debian:bookworm \
-    'apt-get update && apt-get install -y --no-install-recommends opam ca-certificates && opam lint clients/ocaml/flags2env.opam && opam lint clients/reasonml/flags2env-reason.opam'
+    'apt-get update && apt-get install -y --no-install-recommends build-essential make opam pkg-config libffi-dev m4 ca-certificates && opam init --disable-sandboxing --bare -y && opam switch create flags2env ocaml-base-compiler.5.1.1 -y && eval "$(opam env --switch=flags2env)" && opam install -y dune ctypes ctypes-foreign yojson reason && make clean && make all && opam lint clients/ocaml/flags2env.opam && opam lint clients/reasonml/flags2env-reason.opam && cd clients/ocaml && FLAGS2ENV_NATIVE_LIB=/work/build/libflags2env.so dune runtest && dune install --prefix="$(opam var prefix)" flags2env && cd ../reasonml && FLAGS2ENV_NATIVE_LIB=/work/build/libflags2env.so dune runtest'
 
   run julia julia:1.10 \
     'make clean && make all && LD_LIBRARY_PATH=build julia --project=clients/julia -e "using Pkg; Pkg.instantiate(); Pkg.test()"'

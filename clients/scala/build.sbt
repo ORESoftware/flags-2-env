@@ -15,6 +15,7 @@ lazy val root = (project in file("."))
   .settings(
     name := "flags2env-scala",
     libraryDependencies += "com.oresoftware" % "flags2env" % "0.1.0",
+    Compile / packageSrc / publishArtifact := true,
     Compile / packageDoc / publishArtifact := true,
     publishMavenStyle := true
   )

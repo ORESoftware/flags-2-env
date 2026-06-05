@@ -25,6 +25,7 @@ defmodule Flags2Env.MixProject do
       files: [
         "lib.ex",
         "README.md",
+        "LICENSE",
         "mix.exs",
         "native/flags2env.erl",
         "native/flags2env_nif.c",

@@ -36,11 +36,11 @@ if [ "$release" -eq 1 ]; then
     exit 1
   fi
   brew install --build-from-source "$INSTALL_TARGET"
-  brew test "$TEST_TARGET"
   brew audit --strict --new --online "$AUDIT_TARGET"
+  brew test "$TEST_TARGET"
 else
   printf '[dry-run] homebrew: HOMEBREW_CACHE=%s\n' "$HOMEBREW_CACHE"
   printf '[dry-run] homebrew: brew install --build-from-source %s\n' "$INSTALL_TARGET"
-  printf '[dry-run] homebrew: brew test %s\n' "$TEST_TARGET"
   printf '[dry-run] homebrew: brew audit --strict --new --online %s\n' "$AUDIT_TARGET"
+  printf '[dry-run] homebrew: brew test %s\n' "$TEST_TARGET"
 fi

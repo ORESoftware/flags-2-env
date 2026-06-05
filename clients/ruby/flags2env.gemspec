@@ -7,6 +7,8 @@ Gem::Specification.new do |spec|
   spec.homepage = "https://github.com/ORESoftware/flags-2-env"
   spec.required_ruby_version = ">= 3.0"
   spec.files = [
+    "LICENSE",
+    "README.md",
     "lib.rb"
   ]
   spec.require_paths = ["."]

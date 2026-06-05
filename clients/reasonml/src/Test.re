@@ -22,6 +22,7 @@ let parsed =
     ~configPath,
     ~argv=["app", "--debug=t", "--port", "8181"],
   );
+Sys.remove(configPath);
 
 let get = key => List.assoc(key, parsed);
 

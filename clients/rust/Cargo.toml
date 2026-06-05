@@ -5,7 +5,10 @@ edition = "2021"
 license = "MIT"
 description = "Rust bindings for flags2env."
 repository = "https://github.com/ORESoftware/flags-2-env"
+readme = "README.md"
 include = [
+  "LICENSE",
+  "README.md",
   "native/**",
   "src/**",
   "tests/**",

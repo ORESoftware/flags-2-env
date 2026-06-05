@@ -7,6 +7,7 @@
     <license type="expression">MIT</license>
     <projectUrl>https://github.com/ORESoftware/flags-2-env</projectUrl>
     <repository type="git" url="https://github.com/ORESoftware/flags-2-env" />
+    <readme>README.md</readme>
     <description>F# bindings for flags2env.</description>
     <dependencies>
       <group targetFramework="net6.0">
@@ -16,6 +17,7 @@
   </metadata>
   <files>
     <file src="Flags2Env.fs" target="src" exclude="bin/**;obj/**;*.nupkg" />
+    <file src="README.md" target="" exclude="bin/**;obj/**;*.nupkg" />
     <file src="native/parser.c" target="native" exclude="bin/**;obj/**;*.nupkg" />
     <file src="native/parser.h" target="native" exclude="bin/**;obj/**;*.nupkg" />
   </files>

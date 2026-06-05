@@ -1,6 +1,8 @@
 {
   "name": "@oresoftware/flags2env",
   "version": "0.1.0",
+  "description": "Deno bindings for flags2env.",
+  "license": "MIT",
   "exports": "./mod.ts",
   "publish": {
     "include": [

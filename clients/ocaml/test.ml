@@ -15,6 +15,7 @@ true_aliases = ["t"]
 |};
   close_out out;
   let parsed = Flags2env.parse ~config_path [ "app"; "--debug=t"; "--port"; "8181" ] in
+  Sys.remove config_path;
   let get key = List.assoc key parsed in
   if get "DEBUG" <> "true" || get "PORT" <> "8181" then
     failwith "unexpected parsed map"

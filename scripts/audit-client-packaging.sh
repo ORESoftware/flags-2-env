@@ -69,7 +69,8 @@ native_library_name() {
 audit_rendered_js_client() {
   runtime="$1"
   tmp_dir="${TMPDIR:-/tmp}/flags2env-render-audit-$runtime-$$"
-  rm -rf "$tmp_dir"
+  tmp_cache="${TMPDIR:-/tmp}/flags2env-render-npm-audit-$runtime-$$"
+  rm -rf "$tmp_dir" "$tmp_cache"
   if ! node "$ROOT_DIR/scripts/render-client.mjs" "$runtime" "$tmp_dir" >/dev/null 2>&1; then
     printf 'render failed for JS client: %s\n' "$runtime" >&2
     status=1
@@ -91,7 +92,29 @@ audit_rendered_js_client() {
     printf 'rendered nodejs binding.gyp points outside the package\n' >&2
     status=1
   fi
-  rm -rf "$tmp_dir"
+
+  if [ -e "$tmp_dir/package.json" ]; then
+    output="$(
+      cd "$tmp_dir" &&
+        npm_config_cache="$tmp_cache" npm pack --dry-run --json 2>/dev/null
+    )" || {
+      printf 'npm pack dry-run failed for rendered JS client: %s\n' "$runtime" >&2
+      status=1
+      rm -rf "$tmp_dir" "$tmp_cache"
+      return
+    }
+
+    for path in "$@"; do
+      if [ "$path" = "$runtime" ]; then
+        continue
+      fi
+      if ! printf '%s\n' "$output" | grep -Fq "\"path\": \"$path\""; then
+        printf 'rendered npm package for %s is missing: %s\n' "$runtime" "$path" >&2
+        status=1
+      fi
+    done
+  fi
+  rm -rf "$tmp_dir" "$tmp_cache"
 }
 
 audit_npm_pack_client() {
@@ -176,6 +199,24 @@ audit_r_staging() {
   rm -rf "$tmp_dir"
 }
 
+audit_docker_check_plan() {
+  output="$("$ROOT_DIR/scripts/docker-check-new-clients.sh" --dry-run --full 2>/dev/null)" || {
+    printf 'Docker client check dry-run failed\n' >&2
+    status=1
+    return
+  }
+
+  for label in \
+    perl dotnet cpp fortran zig lua php nim crystal r clojure solidity packaging \
+    jvm scala haskell ocaml julia
+  do
+    if ! printf '%s\n' "$output" | grep -Fq "[dry-run] docker check $label:"; then
+      printf 'Docker client check dry-run is missing label: %s\n' "$label" >&2
+      status=1
+    fi
+  done
+}
+
 require_client() {
   client="$1"
   require_path "clients/$client"
@@ -223,23 +264,41 @@ for path in \
   scripts/docker-check-new-clients.sh \
   scripts/publish-central-ossrh-compat.sh \
   scripts/publish-homebrew.sh \
+  clients/bash/LICENSE \
+  clients/bash/README.md \
   clients/bash/flags2env.bash \
   clients/bash/test.bash \
+  clients/zsh/LICENSE \
+  clients/zsh/README.md \
   clients/zsh/flags2env.zsh \
   clients/zsh/test.zsh \
+  clients/c/LICENSE \
+  clients/c/README.md \
+  clients/c/lib.c \
+  clients/c/lib.h \
+  clients/cpp/LICENSE \
+  clients/cpp/README.md \
   clients/cpp/native/parser.c \
   clients/cpp/native/parser.h \
   clients/python/LICENSE \
   clients/python/MANIFEST.in \
   clients/python/pyproject.toml \
+  clients/golang/LICENSE \
+  clients/golang/README.md \
   clients/golang/parser.c \
   clients/golang/parser.h \
   clients/rust/Cargo.toml \
   clients/rust/Dockerfile \
+  clients/rust/LICENSE \
+  clients/rust/README.md \
   clients/rust/native/parser.c \
   clients/rust/native/parser.h \
   clients/ruby/flags2env.gemspec \
+  clients/ruby/LICENSE \
+  clients/ruby/README.md \
   clients/php/composer.json \
+  clients/php/LICENSE \
+  clients/php/README.md \
   clients/java/pom.xml \
   clients/java/native/parser.c \
   clients/java/native/parser.h \
@@ -249,10 +308,12 @@ for path in \
   clients/scala/project/plugins.sbt \
   clients/csharp/Flags2Env.nuspec \
   clients/csharp/Flags2Env.csproj \
+  clients/csharp/README.md \
   clients/csharp/native/parser.c \
   clients/csharp/native/parser.h \
   clients/fsharp/Flags2Env.FSharp.nuspec \
   clients/fsharp/Flags2Env.FSharp.fsproj \
+  clients/fsharp/README.md \
   clients/fsharp/native/parser.c \
   clients/fsharp/native/parser.h \
   clients/dart/CHANGELOG.md \
@@ -261,6 +322,7 @@ for path in \
   clients/dart/pubspec.yaml \
   clients/dart/.pubignore \
   clients/swift/Package.swift \
+  clients/elixir/LICENSE \
   clients/elixir/README.md \
   clients/elixir/mix.exs \
   clients/elixir/native/flags2env.erl \
@@ -268,28 +330,44 @@ for path in \
   clients/elixir/native/parser.c \
   clients/elixir/native/parser.h \
   clients/erlang/rebar.config \
+  clients/erlang/LICENSE \
+  clients/erlang/README.md \
   clients/erlang/parser.c \
   clients/erlang/parser.h \
+  clients/gleam/LICENSE \
+  clients/gleam/README.md \
   clients/gleam/gleam.toml \
   clients/gleam/src/flags2env.gleam \
   clients/gleam/src/flags2env_native.erl \
   clients/haskell/LICENSE \
   clients/haskell/flags2env.cabal \
   clients/ocaml/dune \
+  clients/ocaml/LICENSE \
+  clients/ocaml/README.md \
   clients/ocaml/flags2env.opam \
+  clients/reasonml/LICENSE \
+  clients/reasonml/README.md \
   clients/reasonml/flags2env-reason.opam \
   clients/reasonml/src/dune \
   clients/perl/LICENSE \
   clients/perl/README.md \
   clients/lua/flags2env-0.1.0-1.rockspec \
+  clients/lua/LICENSE \
+  clients/lua/README.md \
   clients/perl/MANIFEST.SKIP \
   clients/lua/flags2env-dev-1.rockspec \
+  clients/nim/LICENSE \
+  clients/nim/README.md \
   clients/nim/flags2env.nimble \
   clients/r/.Rbuildignore \
   clients/r/DESCRIPTION \
+  clients/r/LICENSE \
+  clients/r/README.md \
   clients/r/src/parser.c \
   clients/r/src/parser.h \
   clients/r/tests/smoke.R \
+  clients/matlab/LICENSE \
+  clients/matlab/README.md \
   clients/matlab/+flags2env/defaultHeaderPath.m \
   clients/matlab/native/parser.c \
   clients/matlab/native/parser.h \
@@ -298,8 +376,17 @@ for path in \
   clients/julia/README.md \
   clients/julia/REGISTRATION.md \
   clients/solidity/package.json \
+  clients/solidity/LICENSE \
+  clients/solidity/README.md \
+  clients/fortran/LICENSE \
+  clients/fortran/README.md \
   clients/fortran/src/parser.c \
   clients/fortran/src/parser.h \
+  clients/crystal/LICENSE \
+  clients/crystal/README.md \
+  clients/zig/LICENSE \
+  clients/zig/README.md \
+  clients/zig/build.zig.zon \
   clients/zig/native/parser.c \
   clients/zig/native/parser.h \
   .github/workflows/client-packaging.yml \
@@ -330,11 +417,21 @@ require_contains scripts/publish-central-ossrh-compat.sh 'ossrh-staging-api\.cen
 require_contains scripts/docker-check-new-clients.sh 'clojure:temurin-21-tools-deps'
 require_contains scripts/docker-check-new-clients.sh 'sbtscala/scala-sbt'
 require_contains scripts/docker-check-new-clients.sh 'zig build test'
+require_contains scripts/docker-check-new-clients.sh 'dry-run'
 require_contains scripts/docker-check-new-clients.sh 'cabal test --extra-lib-dirs=/work/build'
 require_contains scripts/docker-check-new-clients.sh 'clients/reasonml/flags2env-reason\.opam'
+require_contains scripts/docker-check-new-clients.sh 'php -d ffi\.enable=true clients/php/test\.php'
+require_contains scripts/docker-check-new-clients.sh 'docker-php-ext-install ffi'
+require_contains scripts/docker-check-new-clients.sh 'clients/ocaml && FLAGS2ENV_NATIVE_LIB=/work/build/libflags2env\.so dune runtest'
+require_contains scripts/docker-check-new-clients.sh 'dune install --prefix="\$\(opam var prefix\)" flags2env'
+require_contains scripts/docker-check-new-clients.sh 'cd \.\./reasonml && FLAGS2ENV_NATIVE_LIB=/work/build/libflags2env\.so dune runtest'
 require_contains scripts/docker-check-new-clients.sh 'npm test && npm pack'
 require_contains packaging/homebrew/Formula/flags2env.rb 'class Flags2env < Formula'
 require_contains packaging/homebrew/Formula/flags2env.rb 'shell-env'
+require_contains packaging/homebrew/Formula/flags2env.rb 'assert_path_exists pkgshare/"shell/flags2env\.bash"'
+require_contains packaging/homebrew/Formula/flags2env.rb 'assert_path_exists pkgshare/"shell/flags2env\.zsh"'
+require_contains packaging/homebrew/Formula/flags2env.rb 'bash-helper-test'
+require_contains packaging/homebrew/Formula/flags2env.rb 'flags2env_apply --debug'
 require_contains packaging/homebrew/README.md 'scripts/publish-homebrew\.sh --release'
 require_contains clients/PUBLISHING.md '@JuliaRegistrator register subdir=clients/julia'
 require_contains clients/PUBLISHING.md 'clients/zig/native'
@@ -342,7 +439,11 @@ require_contains scripts/publish-homebrew.sh 'brew audit --strict --new --online
 require_contains scripts/publish-homebrew.sh 'FLAGS2ENV_HOMEBREW_AUDIT_TARGET'
 require_contains scripts/publish-homebrew.sh 'rev-parse "v\$VERSION'
 require_contains src/main.c 'shell-env'
+require_contains clients/bash/LICENSE 'MIT License'
+require_contains clients/bash/README.md 'flags2env Bash'
 require_contains clients/bash/flags2env.bash 'flags2env_apply'
+require_contains clients/zsh/LICENSE 'MIT License'
+require_contains clients/zsh/README.md 'flags2env Zsh'
 require_contains clients/zsh/flags2env.zsh 'flags2env_apply'
 require_contains clients/python/MANIFEST.in '^include lib\.py$'
 require_contains clients/python/MANIFEST.in '^include flags2env\.py$'
@@ -354,30 +455,47 @@ require_contains clients/python/pyproject.toml '^license = "MIT"$'
 require_contains clients/python/pyproject.toml '^license-files = \["LICENSE"\]$'
 forbid_contains clients/python/pyproject.toml 'license = \{ text = "MIT" \}'
 require_contains clients/rust/Cargo.toml '^include = \['
+require_contains clients/rust/Cargo.toml '^readme = "README\.md"$'
+require_contains clients/rust/Cargo.toml '"LICENSE"'
+require_contains clients/rust/Cargo.toml '"README\.md"'
 require_contains clients/rust/Cargo.toml '"native/\*\*"'
 require_contains clients/rust/Cargo.toml '"tests/\*\*"'
+require_contains clients/rust/LICENSE 'MIT License'
+require_contains clients/rust/README.md 'Rust bindings'
 require_contains clients/rust/Dockerfile 'COPY clients/rust ./clients/rust'
 forbid_contains clients/rust/Dockerfile 'COPY src|COPY tests|src/parser\.c|tests/fixtures|make all|LD_LIBRARY_PATH'
 forbid_contains clients/rust/tests/smoke.rs '\.\./\.\./build|tests/fixtures|\.\./\.\./tests'
 require_contains clients/rust/tests/smoke.rs 'native/parser\.c'
 require_same_file src/parser.c clients/rust/native/parser.c
 require_same_file src/parser.h clients/rust/native/parser.h
+require_contains clients/c/LICENSE 'MIT License'
+require_contains clients/c/README.md 'flags2env C'
+require_contains clients/c/lib.h 'f2e_client_parse'
 require_contains clients/cpp/CMakeLists.txt 'native/parser\.c'
 require_contains clients/cpp/CMakeLists.txt 'target_include_directories\(flags2env_native PUBLIC native\)'
 require_contains clients/cpp/CMakeLists.txt 'target_include_directories\(flags2env_cpp INTERFACE include native\)'
 require_contains clients/cpp/CMakeLists.txt 'add_test\(NAME flags2env_cpp_smoke'
+require_contains clients/cpp/LICENSE 'MIT License'
+require_contains clients/cpp/README.md 'flags2env C\+\+'
 forbid_contains clients/cpp/CMakeLists.txt '\.\./\.\./src'
 require_same_file src/parser.c clients/cpp/native/parser.c
 require_same_file src/parser.h clients/cpp/native/parser.h
 require_contains clients/golang/lib.go '#cgo CFLAGS: -I\.'
 require_contains clients/golang/lib.go '#include "parser\.h"'
+require_contains clients/golang/LICENSE 'MIT License'
+require_contains clients/golang/README.md 'Go bindings'
+require_contains clients/golang/README.md 'pkg\.go\.dev'
 forbid_contains clients/golang/lib.go '\.\./\.\./src|\.\./\.\./build|LDFLAGS'
 require_same_file src/parser.c clients/golang/parser.c
 require_same_file src/parser.h clients/golang/parser.h
 require_contains clients/ruby/flags2env.gemspec 'spec\.files'
+require_contains clients/ruby/flags2env.gemspec '"LICENSE"'
+require_contains clients/ruby/flags2env.gemspec '"README\.md"'
 forbid_contains clients/ruby/flags2env.gemspec '"test\.rb"'
 require_contains clients/php/composer.json '"archive"'
+require_contains clients/php/composer.json '"license": "MIT"'
 require_contains clients/php/composer.json '"\/publish\.sh"'
+require_contains scripts/docker-check-new-clients.sh 'run php php:8\.3-cli'
 require_contains clients/java/pom.xml 'central-publishing-maven-plugin'
 require_contains clients/java/pom.xml '<publishingServerId>'
 require_contains clients/java/pom.xml '<excludes>'
@@ -407,6 +525,9 @@ require_contains clients/groovy/build.gradle 'ossrh-staging-api\.central\.sonaty
 require_contains clients/scala/build.sbt 'sonatype'
 require_contains clients/scala/build.sbt 'sonatypeCentralHost'
 require_contains clients/scala/build.sbt 'flags2env-scala'
+require_contains clients/scala/build.sbt 'Compile / packageSrc / publishArtifact := true'
+require_contains clients/scala/build.sbt 'Compile / packageDoc / publishArtifact := true'
+require_contains clients/scala/project/plugins.sbt 'sbt-pgp'
 require_contains clients/clojure/build.clj 'sign-and-deploy-file'
 require_contains clients/clojure/build.clj 'CENTRAL_OSSRH_DEPLOY_URL'
 require_contains clients/clojure/build.clj 'javadoc-jar-file'
@@ -415,11 +536,15 @@ require_contains clients/clojure/build.clj '"-Djavadoc="'
 require_contains clients/clojure/build.clj 'flags2env-clojure'
 require_contains scripts/docker-check-new-clients.sh 'clojure -T:build javadoc-jar'
 require_contains clients/csharp/Flags2Env.nuspec '<files>'
+require_contains clients/csharp/Flags2Env.nuspec '<readme>README\.md</readme>'
+require_contains clients/csharp/Flags2Env.nuspec 'src="README\.md"'
 require_contains clients/csharp/Flags2Env.nuspec 'exclude='
 require_contains clients/csharp/Flags2Env.nuspec 'native/parser\.c'
 require_contains clients/csharp/Flags2Env.nuspec 'native/parser\.h'
 forbid_contains clients/csharp/Flags2Env.nuspec '\.\./\.\./src|\.\./\.\./clients'
 require_contains clients/csharp/Flags2Env.csproj 'Pack="true"'
+require_contains clients/csharp/Flags2Env.csproj '<PackageReadmeFile>README\.md</PackageReadmeFile>'
+require_contains clients/csharp/Flags2Env.csproj 'Include="README\.md"'
 require_contains clients/csharp/Flags2Env.csproj 'Include="native/parser\.c"'
 require_contains clients/csharp/Flags2Env.csproj 'Include="native/parser\.h"'
 require_contains clients/csharp/Flags2Env.csproj 'PackagePath="native/"'
@@ -429,11 +554,15 @@ forbid_contains clients/csharp/Flags2EnvTest.cs 'build/libflags2env|tests/fixtur
 require_same_file src/parser.c clients/csharp/native/parser.c
 require_same_file src/parser.h clients/csharp/native/parser.h
 require_contains clients/fsharp/Flags2Env.FSharp.nuspec '<files>'
+require_contains clients/fsharp/Flags2Env.FSharp.nuspec '<readme>README\.md</readme>'
+require_contains clients/fsharp/Flags2Env.FSharp.nuspec 'src="README\.md"'
 require_contains clients/fsharp/Flags2Env.FSharp.nuspec 'exclude='
 require_contains clients/fsharp/Flags2Env.FSharp.nuspec 'native/parser\.c'
 require_contains clients/fsharp/Flags2Env.FSharp.nuspec 'native/parser\.h'
 forbid_contains clients/fsharp/Flags2Env.FSharp.nuspec '\.\./\.\./src|\.\./\.\./clients'
 require_contains clients/fsharp/Flags2Env.FSharp.fsproj 'Pack="true"'
+require_contains clients/fsharp/Flags2Env.FSharp.fsproj '<PackageReadmeFile>README\.md</PackageReadmeFile>'
+require_contains clients/fsharp/Flags2Env.FSharp.fsproj 'Include="README\.md"'
 require_contains clients/fsharp/Flags2Env.FSharp.fsproj 'Include="native/parser\.c"'
 require_contains clients/fsharp/Flags2Env.FSharp.fsproj 'Include="native/parser\.h"'
 require_contains clients/fsharp/Flags2Env.FSharp.fsproj 'PackagePath="native/"'
@@ -451,6 +580,9 @@ require_contains clients/dart/.pubignore '^pubspec\.lock$'
 require_contains clients/dart/.pubignore '^test\.dart$'
 require_contains clients/dart/.pubignore '^publish\.sh$'
 require_contains clients/swift/Package.swift 'exclude:'
+require_contains clients/nodejs/package.json.ejs '"license": "MIT"'
+require_contains clients/bun/package.json.ejs '"license": "MIT"'
+require_contains clients/deno/deno.json '"license": "MIT"'
 require_contains clients/elixir/mix.exs 'files:'
 require_contains clients/elixir/mix.exs 'name: "flags2env_elixir"'
 require_contains clients/elixir/mix.exs 'erlc_paths: \["native"\]'
@@ -458,6 +590,8 @@ require_contains clients/elixir/mix.exs '"native/flags2env\.erl"'
 require_contains clients/elixir/mix.exs '"native/flags2env_nif\.c"'
 require_contains clients/elixir/mix.exs '"native/parser\.c"'
 require_contains clients/elixir/mix.exs '"native/parser\.h"'
+require_contains clients/elixir/mix.exs '"LICENSE"'
+require_contains clients/elixir/LICENSE 'MIT License'
 require_contains clients/elixir/README.md 'flags2env_elixir'
 require_contains clients/elixir/Dockerfile 'clients/elixir/native/parser\.c'
 forbid_contains clients/elixir/Dockerfile 'COPY src|COPY tests|src/parser\.c|tests/fixtures|clients/erlang'
@@ -468,8 +602,13 @@ require_same_file clients/erlang/flags2env_nif.c clients/elixir/native/flags2env
 require_same_file src/parser.c clients/elixir/native/parser.c
 require_same_file src/parser.h clients/elixir/native/parser.h
 require_contains clients/erlang/rebar.config '\{files,'
+require_contains clients/erlang/rebar.config '"README\.md"'
+require_contains clients/erlang/rebar.config '"LICENSE"'
+require_contains clients/erlang/LICENSE 'MIT License'
+require_contains clients/erlang/README.md 'Erlang bindings'
 require_contains clients/erlang/rebar.config '"parser\.c"'
 require_contains clients/erlang/rebar.config '"parser\.h"'
+require_contains clients/erlang/flags2env_test.erl 'file:delete\(Config\)'
 require_contains clients/erlang/flags2env_nif.c '#include "parser\.h"'
 forbid_contains clients/erlang/flags2env_nif.c '\.\./\.\./src/parser\.h'
 require_contains clients/erlang/Dockerfile 'clients/erlang/parser\.c'
@@ -477,6 +616,8 @@ forbid_contains clients/erlang/Dockerfile 'COPY src|COPY tests|src/parser\.c|tes
 require_same_file src/parser.c clients/erlang/parser.c
 require_same_file src/parser.h clients/erlang/parser.h
 require_contains clients/gleam/Dockerfile 'clients/erlang/parser\.c'
+require_contains clients/gleam/LICENSE 'MIT License'
+require_contains clients/gleam/README.md 'Gleam bindings'
 forbid_contains clients/gleam/Dockerfile 'COPY src|COPY tests|src/parser\.c|tests/fixtures'
 forbid_contains clients/gleam/test.gleam '/repo/tests|tests/fixtures'
 require_contains clients/haskell/flags2env.cabal '^extra-source-files:'
@@ -485,28 +626,41 @@ require_contains clients/haskell/flags2env.cabal '^  LICENSE$'
 require_contains clients/haskell/flags2env.cabal '^test-suite flags2env-smoke$'
 require_contains clients/haskell/flags2env.cabal '^  main-is: test\.hs$'
 require_contains clients/ocaml/dune '^\(test'
+require_contains clients/ocaml/LICENSE 'MIT License'
+require_contains clients/ocaml/README.md 'OCaml bindings'
 require_contains clients/ocaml/flags2env.opam '^build:'
 require_contains clients/ocaml/flags2env.opam '\{with-test\}'
+require_contains clients/ocaml/test.ml 'Sys\.remove config_path'
 require_contains clients/reasonml/dune-project '\(name flags2env_reason\)'
 require_contains clients/reasonml/dune-project '\(name flags2env-reason\)'
+require_contains clients/reasonml/LICENSE 'MIT License'
+require_contains clients/reasonml/README.md 'ReasonML facade'
 require_contains clients/reasonml/flags2env-reason.opam '^build:'
 require_contains clients/reasonml/flags2env-reason.opam '"reason"'
 require_contains clients/reasonml/flags2env-reason.opam '"flags2env"'
 require_contains clients/reasonml/flags2env-reason.opam '\{with-test\}'
 require_absent clients/reasonml/flags2env.opam
 require_contains clients/reasonml/src/dune '^\(test'
+require_contains clients/reasonml/src/Test.re 'Sys\.remove\(configPath\)'
 require_contains clients/perl/MANIFEST.SKIP '^\^blib/'
 require_contains clients/perl/MANIFEST.SKIP '^\^publish\\\.sh\$'
 require_contains clients/perl/MANIFEST.SKIP '^\^MYMETA\\\.'
 require_contains clients/lua/flags2env-dev-1.rockspec '^build ='
+require_contains clients/lua/LICENSE 'MIT License'
+require_contains clients/lua/README.md 'LuaJIT FFI bindings'
 require_contains clients/lua/flags2env-dev-1.rockspec 'clients/lua/flags2env\.lua'
 require_contains clients/lua/flags2env-0.1.0-1.rockspec '^version = "0\.1\.0-1"'
 require_contains clients/lua/flags2env-0.1.0-1.rockspec 'tag = "v0\.1\.0"'
 require_contains clients/lua/flags2env-0.1.0-1.rockspec 'clients/lua/flags2env\.lua'
 require_contains clients/lua/test.lua 'os\.remove\(config\)'
 require_contains clients/nim/flags2env.nimble '^installFiles'
+require_contains clients/nim/LICENSE 'MIT License'
+require_contains clients/nim/README.md 'Nim bindings'
 require_contains clients/nim/test.nim 'removeFile\(config\)'
 require_contains clients/r/.Rbuildignore '\^Dockerfile\$'
+require_contains clients/r/DESCRIPTION 'License: MIT \+ file LICENSE'
+require_contains clients/r/LICENSE 'COPYRIGHT HOLDER: ORESoftware'
+require_contains clients/r/README.md 'R bindings'
 require_contains clients/r/src/Makevars 'PARSER_SRC = parser\.c'
 forbid_contains clients/r/src/Makevars '\.\./\.\./\.\./src'
 require_contains clients/r/src/flags2env_r.c '#include "parser\.h"'
@@ -516,6 +670,8 @@ require_same_file src/parser.h clients/r/src/parser.h
 require_contains clients/r/tests/smoke.R 'parse_flags'
 require_contains clients/r/tests/smoke.R 'on\.exit\(unlink\(config\), add = TRUE\)'
 require_contains clients/matlab/test.m 'flags2env\.parse'
+require_contains clients/matlab/LICENSE 'MIT License'
+require_contains clients/matlab/README.md 'MATLAB bindings'
 require_contains clients/matlab/+flags2env/defaultHeaderPath.m 'native'
 require_contains clients/matlab/+flags2env/ensureLoaded.m 'flags2env\.defaultHeaderPath\(\)'
 forbid_contains clients/matlab/+flags2env/apply.m 'fullfile\(pwd, "src", "parser\.h"\)'
@@ -530,17 +686,30 @@ require_contains clients/julia/Project.toml '^version = "0\.1\.0"'
 require_contains clients/julia/REGISTRATION.md '@JuliaRegistrator register subdir=clients/julia'
 require_contains clients/julia/test/runtests.jl 'atexit'
 require_contains clients/solidity/package.json '"files"'
+require_contains clients/solidity/package.json '"README\.md"'
+require_contains clients/solidity/package.json '"LICENSE"'
 require_contains clients/solidity/package.json '"test"'
 require_contains clients/solidity/package.json '"solc"'
+require_contains clients/solidity/LICENSE 'MIT License'
+require_contains clients/solidity/README.md 'Solidity'
+require_contains clients/fortran/LICENSE 'MIT License'
+require_contains clients/fortran/README.md 'Fortran bindings'
 require_contains scripts/docker-check-new-clients.sh 'clients/fortran/src/parser\.c'
 forbid_contains scripts/docker-check-new-clients.sh ' -c src/parser\.c -o /tmp/flags2env-parser\.o'
 require_same_file src/parser.c clients/fortran/src/parser.c
 require_same_file src/parser.h clients/fortran/src/parser.h
 require_contains clients/zig/build.zig 'native/parser\.c'
 require_contains clients/zig/build.zig 'b\.path\("native"\)'
+require_contains clients/zig/build.zig.zon '\.paths'
+require_contains clients/zig/build.zig.zon '"README\.md"'
+require_contains clients/zig/build.zig.zon '"LICENSE"'
+require_contains clients/zig/LICENSE 'MIT License'
+require_contains clients/zig/README.md 'Zig bindings'
 forbid_contains clients/zig/build.zig '\.\./\.\./src'
 require_same_file src/parser.c clients/zig/native/parser.c
 require_same_file src/parser.h clients/zig/native/parser.h
+require_contains clients/crystal/LICENSE 'MIT License'
+require_contains clients/crystal/README.md 'Crystal bindings'
 require_contains clients/deno/deno.json '"native"'
 require_contains scripts/render-client.mjs 'src/parser\.c'
 require_contains scripts/render-client.mjs 'native'
@@ -568,7 +737,7 @@ require_contains scripts/publish-client.sh 'cpan-upload'
 require_contains scripts/publish-client.sh 'luarocks upload flags2env-0\.1\.0-1\.rockspec'
 require_contains scripts/publish-client.sh 'nimble publish'
 require_contains scripts/publish-client.sh 'submit_cran'
-require_contains scripts/publish-client.sh 'zip -r flags2env-matlab\.zip \+flags2env native README\.md'
+require_contains scripts/publish-client.sh 'zip -r flags2env-matlab\.zip \+flags2env native README\.md LICENSE'
 require_contains scripts/publish-client.sh '@JuliaRegistrator register subdir=clients/julia'
 require_contains scripts/docker-check-new-clients.sh 'dotnet run'
 require_contains scripts/docker-check-new-clients.sh 'dotnet run --project /tmp/f2e-csharp-test/f2e-csharp-test\.csproj'
@@ -640,9 +809,10 @@ native_lib="$(native_library_name)"
 audit_rendered_js_client nodejs package.json binding.gyp addon.c src/parser.c src/parser.h lib.mjs lib.cjs lib.ts cli.mjs
 audit_rendered_js_client bun package.json "native/$native_lib" lib.mjs lib.cjs lib.ts
 audit_rendered_js_client deno deno.json "native/$native_lib" mod.ts lib.ts
-audit_npm_pack_client solidity "contracts/Flags2Env.sol package.json" "test.js test.ts Dockerfile"
+audit_npm_pack_client solidity "contracts/Flags2Env.sol package.json README.md LICENSE" "test.js test.ts Dockerfile"
 audit_perl_manifest
 audit_r_staging
+audit_docker_check_plan
 
 if [ "$status" -eq 0 ]; then
   printf 'client packaging audit passed\n'
