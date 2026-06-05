@@ -283,7 +283,7 @@ C/C++/Fortran/Zig/Crystal/MATLAB/Solidity: source packages or git-tagged release
 Bash/Zsh: source packages, Homebrew-installed shell helpers, or git-tagged releases
 ```
 
-Every client folder has a `publish.sh` wrapper. It defaults to a dry-run command printout and only publishes when passed `--release`. See `clients/PUBLISHING.md` for package manifest controls such as `.npmignore`, `MANIFEST.in`, `.gemspec` file lists, Composer archive excludes, NuGet `.nuspec` files, `.pubignore`, `Package.swift` excludes, Mix package files, Cabal manifests, opam metadata, CPAN `MANIFEST.SKIP`, LuaRocks rockspecs, Nimble manifests, Julia `Project.toml`, and the Homebrew formula under `packaging/homebrew/Formula/`.
+Every client folder has a `publish.sh` wrapper. It defaults to a dry-run command printout and only publishes when passed `--release`. See `docs/plan.md` for the coverage plan and `clients/PUBLISHING.md` for package manifest controls such as `.npmignore`, `MANIFEST.in`, `.gemspec` file lists, Composer archive excludes, NuGet `.nuspec` files, `.pubignore`, `Package.swift` excludes, Mix package files, Cabal manifests, opam metadata, CPAN `MANIFEST.SKIP`, LuaRocks rockspecs, Nimble manifests, Julia `Project.toml`, and the Homebrew formula under `packaging/homebrew/Formula/`.
 
 The native CLI can be distributed through Homebrew with
 `packaging/homebrew/Formula/flags2env.rb`. Run

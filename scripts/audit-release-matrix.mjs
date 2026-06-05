@@ -282,6 +282,10 @@ const packageControls = {
     ["clients/erlang/flags2env_test.erl", /file:delete\(Config\)/, "Erlang smoke test removes generated TOML fixture"],
     ["clients/erlang/c_src/flags2env_nif.c", /#include "parser\.h"/, "Erlang NIF includes package-local parser header"],
     ["clients/erlang/Dockerfile", /clients\/erlang\/c_src\/parser\.c/, "Erlang Docker smoke builds package-local parser source"],
+    ["scripts/docker-check-new-clients.sh", /run erlang-hex erlang:27/, "Docker smoke includes Erlang Hex package runtime"],
+    ["scripts/docker-check-new-clients.sh", /rebar3 hex build package/, "Docker smoke builds Erlang Hex package tarball"],
+    ["scripts/docker-check-new-clients.sh", /Erlang Hex package missing/, "Docker smoke verifies required Erlang Hex package files"],
+    ["scripts/docker-check-new-clients.sh", /Erlang Hex package includes forbidden local file/, "Docker smoke rejects forbidden Erlang Hex package files"],
   ],
   gleam: [
     ["clients/gleam/gleam.toml", /^repository = /m, "Gleam package repository metadata"],
@@ -442,6 +446,8 @@ const packageControls = {
   zsh: [
     ["packaging/homebrew/Formula/flags2env.rb", /clients\/zsh\/flags2env\.zsh/, "Homebrew installs zsh helper"],
     ["packaging/homebrew/Formula/flags2env.rb", /assert_path_exists pkgshare\/"shell\/flags2env\.zsh"/, "Homebrew test checks zsh helper installation"],
+    ["packaging/homebrew/Formula/flags2env.rb", /zsh-helper-test/, "Homebrew test exercises zsh helper when zsh is available"],
+    ["packaging/homebrew/Formula/flags2env.rb", /\/bin\/zsh/, "Homebrew zsh helper test uses the system zsh path"],
     ["scripts/publish-client.sh", /bash\|zsh\)[\s\S]*scripts\/publish-homebrew\.sh --release/, "Zsh helper publish wrapper runs Homebrew release checks"],
     ["clients/zsh/README.md", /flags2env Zsh/, "Zsh helper README"],
     ["clients/zsh/LICENSE", /MIT License/, "Zsh helper license file"],
@@ -470,11 +476,11 @@ const forbiddenPackageContent = {
   ],
   erlang: [
     ["clients/erlang/c_src/flags2env_nif.c", /\.\.\/\.\.\/src\/parser\.h/, "Erlang NIF reaches into repo source directory"],
-    ["clients/erlang/Dockerfile", /COPY src|COPY tests|src\/parser\.c|tests\/fixtures/, "Erlang Docker smoke depends on repo source or fixture tree"],
+    ["clients/erlang/Dockerfile", /COPY src|COPY tests|tests\/fixtures/, "Erlang Docker smoke depends on repo source or fixture tree"],
     ["clients/erlang/flags2env_test.erl", /tests\/fixtures|\.\.\/\.\.\/tests/, "Erlang smoke test depends on repo fixture tree"],
   ],
   gleam: [
-    ["clients/gleam/Dockerfile", /COPY src|COPY tests|src\/parser\.c|tests\/fixtures/, "Gleam Docker smoke depends on repo source or fixture tree"],
+    ["clients/gleam/Dockerfile", /COPY src|COPY tests|tests\/fixtures/, "Gleam Docker smoke depends on repo source or fixture tree"],
     ["clients/gleam/test.gleam", /\/repo\/tests|tests\/fixtures/, "Gleam smoke test depends on repo fixture tree"],
   ],
   rust: [
@@ -691,7 +697,7 @@ const matrix = [
     language: "Erlang",
     client: "erlang",
     repository: "Hex.pm",
-    controls: ["clients/erlang/rebar.config", "clients/erlang/src/flags2env.app.src", "clients/erlang/README.md", "clients/erlang/LICENSE"],
+    controls: ["clients/erlang/rebar.config", "clients/erlang/src/flags2env.app.src", "clients/erlang/README.md", "clients/erlang/LICENSE", "scripts/docker-check-new-clients.sh"],
     sources: ["clients/erlang/src/flags2env.erl", "clients/erlang/c_src/flags2env_nif.c", "clients/erlang/c_src/parser.c", "clients/erlang/c_src/parser.h"],
     tests: ["clients/erlang/flags2env_test.erl"],
     publishIncludes: ["rebar3 hex publish"],

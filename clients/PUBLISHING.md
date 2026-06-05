@@ -1,5 +1,7 @@
 # Publishing Clients
 
+`docs/plan.md` tracks the overall client coverage plan and verification gates.
+
 Each client folder has a local `publish.sh` entrypoint. It delegates to
 `../../scripts/publish-client.sh`, which defaults to dry-run output:
 
@@ -79,7 +81,9 @@ README, MIT license file, copy of the Erlang NIF source and parser sources, and
 avoids reaching into the Erlang client tree during package smoke checks. Erlang
 declares `rebar3_hex` for `rebar3 hex build/publish` and carries
 `src/flags2env.app.src` so rebar can discover a Hex-packaged OTP application.
-Gleam uses `gleam publish --yes` rather than the rebar Hex task.
+The Docker Erlang Hex check builds the package tarball and inspects it for
+`src/`, `c_src/`, README/license, and forbidden local files. Gleam uses
+`gleam publish --yes` rather than the rebar Hex task.
 
 The C# and F# NuGet packages carry package-local `native/parser.c` and
 `native/parser.h` copies, so the native source files in each `.nupkg` do not
@@ -232,8 +236,9 @@ smoke test and publish wrapper.
 
 The native C CLI has a Homebrew formula at
 `packaging/homebrew/Formula/flags2env.rb`. It builds the CLI and C library,
-installs bash/zsh helper files under `pkgshare`, and includes a formula test for
-the `shell-env` output used by shell functions. `scripts/publish-homebrew.sh`
+installs bash/zsh helper files under `pkgshare`, runs the Bash helper in the
+formula test, and also runs the Zsh helper when `/bin/zsh` is available.
+`scripts/publish-homebrew.sh`
 prints or runs the local `brew install --build-from-source`,
 `brew audit --strict --new --online`, and `brew test` checks.
 

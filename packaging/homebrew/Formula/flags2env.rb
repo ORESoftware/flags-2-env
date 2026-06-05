@@ -62,5 +62,19 @@ class Flags2env < Formula
     SH
 
     assert_equal "true", shell_output("bash #{testpath}/bash-helper-test")
+
+    if File.exist?("/bin/zsh")
+      (testpath/"zsh-helper-test").write <<~SH
+        #!/usr/bin/env zsh
+        set -euo pipefail
+        source "#{pkgshare}/shell/flags2env.zsh"
+        export FLAGS2ENV_BIN="#{bin}/flags2env"
+        export FLAGS2ENV_CONFIG="#{testpath}/.cli-flags.toml"
+        flags2env_apply --debug
+        printf "%s" "$DEBUG"
+      SH
+
+      assert_equal "true", shell_output("/bin/zsh #{testpath}/zsh-helper-test")
+    end
   end
 end

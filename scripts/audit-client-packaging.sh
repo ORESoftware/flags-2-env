@@ -322,7 +322,7 @@ audit_docker_check_plan() {
   }
 
   for label in \
-    perl dotnet java python rust golang cpp fortran zig lua php dart nim crystal r clojure solidity packaging \
+    perl dotnet java python rust golang cpp fortran zig lua php dart nim crystal r clojure erlang-hex solidity packaging \
     jvm scala haskell swift ocaml julia
   do
     if ! printf '%s\n' "$output" | grep -Fq "[dry-run] docker check $label:"; then
@@ -371,6 +371,7 @@ for path in \
   .npmignore \
   LICENSE \
   Package.swift \
+  docs/plan.md \
   package.json \
   packaging/homebrew/README.md \
   packaging/homebrew/Formula/flags2env.rb \
@@ -538,6 +539,13 @@ require_contains scripts/audit-release-matrix.mjs 'requiredClients'
 require_contains scripts/audit-release-matrix.mjs 'expectedRepositories'
 require_contains scripts/audit-release-matrix.mjs 'packageControls'
 require_contains scripts/audit-release-matrix.mjs 'missing package-control assertions'
+require_contains docs/plan.md 'scripts/audit-release-matrix\.mjs'
+require_contains docs/plan.md 'scripts/audit-client-packaging\.sh'
+require_contains docs/plan.md 'npm run pack:audit'
+require_contains docs/plan.md 'scripts/docker-check-new-clients\.sh --full'
+require_contains docs/plan.md '\.github/workflows/client-packaging\.yml'
+require_contains README.md 'docs/plan\.md'
+require_contains clients/PUBLISHING.md 'docs/plan\.md'
 require_contains scripts/publish-central-ossrh-compat.sh 'manual/upload/defaultRepository'
 require_contains scripts/publish-central-ossrh-compat.sh 'CENTRAL_NAMESPACE'
 require_contains scripts/publish-central-ossrh-compat.sh 'ossrh-staging-api\.central\.sonatype\.com'
@@ -581,6 +589,8 @@ require_contains packaging/homebrew/Formula/flags2env.rb 'shell-env'
 require_contains packaging/homebrew/Formula/flags2env.rb 'assert_path_exists pkgshare/"shell/flags2env\.bash"'
 require_contains packaging/homebrew/Formula/flags2env.rb 'assert_path_exists pkgshare/"shell/flags2env\.zsh"'
 require_contains packaging/homebrew/Formula/flags2env.rb 'bash-helper-test'
+require_contains packaging/homebrew/Formula/flags2env.rb 'zsh-helper-test'
+require_contains packaging/homebrew/Formula/flags2env.rb '/bin/zsh'
 require_contains packaging/homebrew/Formula/flags2env.rb 'flags2env_apply --debug'
 require_contains packaging/homebrew/README.md 'scripts/publish-homebrew\.sh --release'
 require_contains clients/PUBLISHING.md '@JuliaRegistrator register subdir=clients/julia'
@@ -790,14 +800,18 @@ require_contains clients/erlang/flags2env_test.erl 'file:delete\(Config\)'
 require_contains clients/erlang/c_src/flags2env_nif.c '#include "parser\.h"'
 forbid_contains clients/erlang/c_src/flags2env_nif.c '\.\./\.\./src/parser\.h'
 require_contains clients/erlang/Dockerfile 'clients/erlang/c_src/parser\.c'
-forbid_contains clients/erlang/Dockerfile 'COPY src|COPY tests|src/parser\.c|tests/fixtures'
+forbid_contains clients/erlang/Dockerfile 'COPY src|COPY tests|tests/fixtures'
 require_same_file src/parser.c clients/erlang/c_src/parser.c
 require_same_file src/parser.h clients/erlang/c_src/parser.h
+require_contains scripts/docker-check-new-clients.sh 'run erlang-hex erlang:27'
+require_contains scripts/docker-check-new-clients.sh 'rebar3 hex build package'
+require_contains scripts/docker-check-new-clients.sh 'Erlang Hex package missing'
+require_contains scripts/docker-check-new-clients.sh 'Erlang Hex package includes forbidden local file'
 require_contains clients/gleam/Dockerfile 'clients/erlang/c_src/parser\.c'
 require_contains clients/gleam/LICENSE 'MIT License'
 require_contains clients/gleam/README.md 'Gleam bindings'
 require_contains scripts/publish-client.sh 'gleam publish --yes'
-forbid_contains clients/gleam/Dockerfile 'COPY src|COPY tests|src/parser\.c|tests/fixtures'
+forbid_contains clients/gleam/Dockerfile 'COPY src|COPY tests|tests/fixtures'
 forbid_contains clients/gleam/test.gleam '/repo/tests|tests/fixtures'
 require_contains clients/haskell/flags2env.cabal '^extra-source-files:'
 require_contains clients/haskell/flags2env.cabal '^license-file: LICENSE$'
