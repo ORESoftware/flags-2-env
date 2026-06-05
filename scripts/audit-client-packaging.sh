@@ -585,6 +585,7 @@ require_contains scripts/docker-check-new-clients.sh 'dune install --prefix="\$\
 require_contains scripts/docker-check-new-clients.sh 'cd \.\./reasonml && FLAGS2ENV_NATIVE_LIB=/work/build/libflags2env\.so dune runtest'
 require_contains scripts/docker-check-new-clients.sh 'npm test && npm pack'
 require_contains packaging/homebrew/Formula/flags2env.rb 'class Flags2env < Formula'
+require_contains packaging/homebrew/Formula/flags2env.rb 'depends_on "gcc" => :build'
 require_contains packaging/homebrew/Formula/flags2env.rb 'shell-env'
 require_contains packaging/homebrew/Formula/flags2env.rb 'assert_path_exists pkgshare/"shell/flags2env\.bash"'
 require_contains packaging/homebrew/Formula/flags2env.rb 'assert_path_exists pkgshare/"shell/flags2env\.zsh"'
