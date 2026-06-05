@@ -18,8 +18,8 @@ tools to already be configured by CI.
 | Python | PyPI | `MANIFEST.in` and `pyproject.toml` |
 | Java/Kotlin/Scala/Groovy/Clojure | Maven Central/Sonatype-compatible repositories | Maven Central plugin, Gradle/sbt/tools.build publication metadata |
 | Rust | crates.io | `include` in `Cargo.toml` |
-| Go/Swift/C/C++/Fortran/Zig/Crystal/MATLAB | git tags or source archives | language package manifests where available |
-| Bash/Zsh | Homebrew-installed shell helpers or git tags | shell source files installed with the native CLI |
+| Go/Swift/C++/Fortran/Zig/Crystal/MATLAB | git tags or source archives | language package manifests where available |
+| C/Bash/Zsh | Homebrew formula or git tags | native CLI, C library, and shell helpers installed from the formula |
 | C#/F# | NuGet Gallery | `.nuspec` files plus project item rules |
 | PHP | Packagist | Composer `archive.exclude` |
 | Ruby | RubyGems.org | `spec.files` in the `.gemspec` |
@@ -66,7 +66,10 @@ the packaging audit verifies those copies match the root C parser sources.
 
 The Java Maven package carries package-local copies of the native parser under
 `clients/java/native`, and the JNI source includes the local `parser.h` instead
-of reaching back to the repository root.
+of reaching back to the repository root. The default Docker check builds the
+main jar, sources jar, and javadoc jar, then verifies the main jar includes the
+runtime class plus package-local native parser sources while rejecting local
+Docker, publish, and test files.
 
 The Erlang Hex package carries `parser.c` and `parser.h` beside the NIF source,
 and the Gleam Docker smoke uses the same package-local Erlang native sources.
@@ -84,6 +87,12 @@ The C++ package is rooted at `clients/cpp` and carries package-local parser
 sources under `clients/cpp/native`, so its CMake target can be consumed without
 repository-relative `../../src` paths. The C and C++ helper folders also carry
 package-local README and MIT license files for source archive consumers.
+
+The C, Bash, and Zsh publish wrappers surface the Homebrew formula path. The C
+wrapper creates and pushes the `v${PACKAGE_VERSION}` tag before running
+`scripts/publish-homebrew.sh --release`; the Bash and Zsh wrappers run the same
+Homebrew release checks against that tagged formula, since the formula installs
+both shell helper files alongside the native CLI.
 
 SwiftPM expects a `Package.swift` manifest in the repository root and a full
 semantic-version tag such as `0.1.0`, so the root manifest points at
@@ -106,16 +115,36 @@ README, and license.
 
 Docker-backed verification for the newer client scaffolds lives in
 `scripts/docker-check-new-clients.sh`. Run the default set for practical local
-coverage, including Perl FFI, .NET, C++, Fortran, Zig, Lua, PHP FFI, Nim,
-Crystal, R, Clojure, Solidity, and package-control audits. Pass `--full` in CI
-to include heavier Haskell, OCaml/ReasonML, Julia, Scala, Kotlin, Groovy, and
-JVM facade checks. The Haskell full check runs the Cabal smoke test suite
-against the freshly built native library, and the OCaml/ReasonML full check
-runs Dune tests after installing the OCaml package into the opam switch. The
-script also accepts `--dry-run` to print the default or full container plan
-without requiring a Docker daemon. The GitHub Actions client packaging workflow
-runs the default Docker set automatically and exposes a manual
-`full_docker_checks` input for the heavyweight set.
+coverage, including Perl FFI, .NET NuGet artifacts, Java Maven artifacts,
+Python PyPI artifacts, Rust, Go, C++, Fortran, Zig, Lua, PHP FFI, Nim, Crystal,
+R, Clojure Maven artifacts, Dart, Solidity, and package-control audits. Pass
+`--full` in CI to
+include heavier Haskell, OCaml/ReasonML, Julia, Swift, Scala, Kotlin, Groovy,
+and JVM facade checks. The full JVM checks build Kotlin/Groovy Gradle jars and
+Scala sbt jars, including main, sources, and javadoc artifacts, then inspect the
+main and sources jars for required classes, source files, and forbidden local
+files. The default Clojure check builds and inspects its main, sources, and
+javadoc jars for required namespace/POM contents and forbidden local files. The
+Python check builds the
+sdist and wheel, runs `twine check`, and inspects the archives for required
+metadata and forbidden local files. The .NET check builds, runs, packs, and
+inspects both C# and F# `.nupkg` files for README/native source contents and
+forbidden local files. The R check builds and checks the CRAN source tarball,
+then inspects it for package metadata, R/native sources, tests, README/license,
+and forbidden local files. The PHP check validates `composer.json`, builds a
+Composer archive, and inspects it for README/license/runtime contents while
+rejecting local Docker, publish, and test files. The Haskell full check runs the
+Cabal smoke test suite against the freshly built native library, builds the
+Hackage `cabal sdist` archive, and inspects that tarball for required and
+forbidden files. The OCaml/ReasonML full check runs Dune tests after installing
+the OCaml package into the opam switch. The Lua check runs the LuaJIT FFI smoke
+test and `luarocks lint` for both the stable and development rockspecs. The Nim
+check runs `nimble check` before compiling the smoke test. The script also
+accepts `--dry-run` to
+print the default or full container plan without requiring a Docker daemon. The
+GitHub Actions client packaging workflow runs the default Docker set
+automatically and exposes a manual `full_docker_checks` input for the
+heavyweight set.
 
 The registry/package-control audit is available without language toolchains:
 
@@ -165,7 +194,8 @@ the Central Portal OSSRH compatibility endpoint.
 
 The Haskell Hackage package declares `license-file: LICENSE` and includes that
 file in `extra-source-files`, so `cabal sdist` carries package-local license
-metadata alongside `README.md`.
+metadata alongside `README.md`. The full Docker check builds that sdist and
+rejects local Docker, publish, and Cabal build-output files.
 
 The Fortran fpm package carries package-local copies of `parser.c` and
 `parser.h` under `clients/fortran/src`, so the smoke build and package sources
@@ -173,16 +203,20 @@ do not depend on the repository-root C source directory.
 
 The R package also carries package-local `src/parser.c` and `src/parser.h`.
 `src/Makevars` builds those local files, which keeps `R CMD INSTALL clients/r`
-and the staged CRAN archive independent of the monorepo root.
+and the staged CRAN archive independent of the monorepo root. The Docker R check
+also builds, checks, and inspects the CRAN source tarball.
 
 The Perl CPAN package includes package-local `README.md` and `LICENSE` files,
-and the manifest audit checks that generated CPAN manifests include both while
-still excluding generated build metadata and `publish.sh`.
+and the manifest audit checks that generated CPAN manifests and `make dist`
+tarballs include both while still excluding generated build metadata,
+`publish.sh`, and the repo-local `test.pl` smoke script.
 
 The MATLAB source archive includes `+flags2env`, `native/parser.h`,
 `native/parser.c`, `README.md`, and `LICENSE`. The loader defaults to that
 package-local header for `loadlibrary`, while callers can still pass an
-explicit shared library or header path when embedding flags2env elsewhere.
+explicit shared library or header path when embedding flags2env elsewhere. The
+client packaging audit builds that zip and rejects local-only files such as the
+smoke test and publish wrapper.
 
 The native C CLI has a Homebrew formula at
 `packaging/homebrew/Formula/flags2env.rb`. It builds the CLI and C library,
@@ -199,6 +233,10 @@ Staging API compatibility endpoint and then call
 `scripts/publish-central-ossrh-compat.sh` to hand the deployment to Central
 Portal. Set `CENTRAL_NAMESPACE` plus `CENTRAL_BEARER_TOKEN`, or
 `CENTRAL_TOKEN_USERNAME` and `CENTRAL_TOKEN_PASSWORD`, for those release paths.
+The default Docker check also builds and inspects Clojure main, sources, and
+javadoc jars. The full Docker JVM checks build and inspect Kotlin/Groovy Gradle
+jars plus Scala sbt main, sources, and javadoc jars before the rest of the
+heavier full-JVM checks finish.
 Scala uses `sbt-sonatype` with `sonatypeCentralHost` and `sbt-pgp`; its build
 explicitly publishes source and doc artifacts before `publishSigned
 sonatypeBundleRelease`. The setup follows Sonatype's Central Portal Maven plugin

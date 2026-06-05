@@ -112,7 +112,13 @@ case "$client" in
   swift)
     run_root 'git status --short && git tag "${PACKAGE_VERSION:?set PACKAGE_VERSION}" && git push origin "${PACKAGE_VERSION}"'
     ;;
-  c|cpp|fortran|zig|crystal|bash|zsh)
+  c)
+    run_root 'git status --short && git tag "v${PACKAGE_VERSION:?set PACKAGE_VERSION}" && git push origin "v${PACKAGE_VERSION}" && FLAGS2ENV_VERSION="${PACKAGE_VERSION}" scripts/publish-homebrew.sh --release'
+    ;;
+  bash|zsh)
+    run_root 'FLAGS2ENV_VERSION="${PACKAGE_VERSION:?set PACKAGE_VERSION}" scripts/publish-homebrew.sh --release'
+    ;;
+  cpp|fortran|zig|crystal)
     run 'git status --short && git tag "v${PACKAGE_VERSION:?set PACKAGE_VERSION}" && git push origin "v${PACKAGE_VERSION}"'
     ;;
   solidity)

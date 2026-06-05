@@ -38,7 +38,60 @@ run perl perl:5.38-bookworm \
   'apt-get update && apt-get install -y --no-install-recommends build-essential libffi-dev cpanminus make && cpanm -n FFI::Platypus JSON::PP && make clean && make all && FLAGS2ENV_NATIVE_LIB=build/libflags2env.so perl clients/perl/test.pl'
 
 run dotnet mcr.microsoft.com/dotnet/sdk:8.0 \
-  'apt-get update && apt-get install -y --no-install-recommends build-essential && dotnet build clients/csharp/Flags2Env.csproj --nologo && dotnet build clients/fsharp/Flags2Env.FSharp.fsproj --nologo && dotnet new console --language C# --framework net8.0 --output /tmp/f2e-csharp-test --force && cp clients/csharp/Flags2EnvTest.cs /tmp/f2e-csharp-test/Program.cs && dotnet add /tmp/f2e-csharp-test/f2e-csharp-test.csproj reference clients/csharp/Flags2Env.csproj && dotnet run --project /tmp/f2e-csharp-test/f2e-csharp-test.csproj && dotnet new console --language F# --framework net8.0 --output /tmp/f2e-fsharp-test --force && cp clients/fsharp/Flags2EnvTest.fs /tmp/f2e-fsharp-test/Program.fs && dotnet add /tmp/f2e-fsharp-test/f2e-fsharp-test.fsproj reference clients/fsharp/Flags2Env.FSharp.fsproj && dotnet run --project /tmp/f2e-fsharp-test/f2e-fsharp-test.fsproj'
+  'apt-get update && apt-get install -y --no-install-recommends build-essential python3 && dotnet build clients/csharp/Flags2Env.csproj --nologo && dotnet build clients/fsharp/Flags2Env.FSharp.fsproj --nologo && dotnet new console --language C# --framework net8.0 --output /tmp/f2e-csharp-test --force && cp clients/csharp/Flags2EnvTest.cs /tmp/f2e-csharp-test/Program.cs && dotnet add /tmp/f2e-csharp-test/f2e-csharp-test.csproj reference clients/csharp/Flags2Env.csproj && dotnet run --project /tmp/f2e-csharp-test/f2e-csharp-test.csproj && dotnet new console --language F# --framework net8.0 --output /tmp/f2e-fsharp-test --force && cp clients/fsharp/Flags2EnvTest.fs /tmp/f2e-fsharp-test/Program.fs && dotnet add /tmp/f2e-fsharp-test/f2e-fsharp-test.fsproj reference clients/fsharp/Flags2Env.FSharp.fsproj && dotnet run --project /tmp/f2e-fsharp-test/f2e-fsharp-test.fsproj && dotnet pack clients/csharp/Flags2Env.csproj -c Release --nologo && dotnet pack clients/fsharp/Flags2Env.FSharp.fsproj -c Release --nologo && python3 - <<PY
+from pathlib import Path
+import zipfile
+
+packages = [
+    ("clients/csharp/bin/Release", "OreSoftware.Flags2Env.*.nupkg"),
+    ("clients/fsharp/bin/Release", "OreSoftware.Flags2Env.FSharp.*.nupkg"),
+]
+for directory, pattern in packages:
+    package = next(Path(directory).glob(pattern))
+    with zipfile.ZipFile(package) as archive:
+        names = set(archive.namelist())
+    for required in ["README.md", "native/parser.c", "native/parser.h"]:
+        if required not in names:
+            raise SystemExit(f"{package.name} missing {required}")
+    for forbidden in ["Flags2EnvTest.cs", "Flags2EnvTest.fs", "publish.sh", "Dockerfile"]:
+        if any(name.endswith(forbidden) for name in names):
+            raise SystemExit(f"{package.name} includes {forbidden}")
+    if not any(name.startswith("lib/net6.0/") and name.endswith(".dll") for name in names):
+        raise SystemExit(f"{package.name} missing net6.0 library")
+PY'
+
+run java maven:3.9-eclipse-temurin-21 \
+  'mvn -q -f clients/java/pom.xml -DskipTests package source:jar-no-fork javadoc:jar && jar tf clients/java/target/flags2env-0.1.0.jar > /tmp/flags2env-java-jar-files && jar tf clients/java/target/flags2env-0.1.0-sources.jar > /tmp/flags2env-java-sources-files && jar tf clients/java/target/flags2env-0.1.0-javadoc.jar > /tmp/flags2env-java-javadoc-files && grep -Fxq com/oresoftware/flags2env/Flags2Env.class /tmp/flags2env-java-jar-files && grep -Fxq native/parser.c /tmp/flags2env-java-jar-files && grep -Fxq native/parser.h /tmp/flags2env-java-jar-files && grep -Fxq com/oresoftware/flags2env/Flags2Env.java /tmp/flags2env-java-sources-files && grep -Eq "(index|com/oresoftware/flags2env/Flags2Env)\.html$" /tmp/flags2env-java-javadoc-files && if grep -Eq "(^|/)(Flags2EnvTest\.java|Dockerfile|publish\.sh)$" /tmp/flags2env-java-jar-files /tmp/flags2env-java-sources-files /tmp/flags2env-java-javadoc-files; then printf "Maven artifact includes forbidden local file\n" >&2; exit 1; fi'
+
+run python python:3.12-bookworm \
+  'cd clients/python && python -m pip install --no-cache-dir --upgrade build twine && rm -rf dist build *.egg-info && python -m build && python -m twine check dist/* && python - <<PY
+import tarfile, zipfile
+from pathlib import Path
+
+dist = Path("dist")
+sdist = next(dist.glob("flags2env-*.tar.gz"))
+wheel = next(dist.glob("flags2env-*-py3-none-any.whl"))
+with tarfile.open(sdist) as archive:
+    sdist_files = {"/".join(Path(member.name).parts[1:]) for member in archive.getmembers()}
+with zipfile.ZipFile(wheel) as archive:
+    wheel_files = set(archive.namelist())
+for required in ["README.md", "LICENSE", "flags2env.py", "lib.py"]:
+    if required not in sdist_files:
+        raise SystemExit(f"sdist missing {required}")
+for forbidden in ["Dockerfile", "publish.sh", "test.py"]:
+    if forbidden in sdist_files:
+        raise SystemExit(f"sdist includes {forbidden}")
+if "flags2env.py" not in wheel_files or "lib.py" not in wheel_files:
+    raise SystemExit("wheel missing runtime modules")
+if not any(path.endswith(".dist-info/licenses/LICENSE") for path in wheel_files):
+    raise SystemExit("wheel missing dist-info license")
+PY'
+
+run rust rust:1-bookworm \
+  'apt-get update && apt-get install -y --no-install-recommends build-essential && cd clients/rust && cargo test && cargo package --allow-dirty'
+
+run golang golang:1.23-bookworm \
+  'apt-get update && apt-get install -y --no-install-recommends build-essential && cd clients/golang && go test ./...'
 
 run cpp gcc:13-bookworm \
   'cc -std=c99 -Wall -Wextra -Wpedantic -O2 -fPIC -c clients/cpp/native/parser.c -Iclients/cpp/native -o /tmp/flags2env-parser.o && c++ -std=c++17 -Iclients/cpp/include -Iclients/cpp/native clients/cpp/test.cpp /tmp/flags2env-parser.o -o /tmp/flags2env-cpp-test && /tmp/flags2env-cpp-test && c++ -std=c++17 -Iclients/cpp/include -Iclients/cpp/native -x c++ -c -o /tmp/flags2env-cpp-check.o - <<EOF
@@ -56,22 +109,25 @@ run zig kassany/bookworm-ziglang:0.13.0 \
   'zig version && cd clients/zig && zig build test'
 
 run lua debian:bookworm \
-  'apt-get update && apt-get install -y --no-install-recommends build-essential make luajit && make clean && make all && FLAGS2ENV_NATIVE_LIB=build/libflags2env.so luajit clients/lua/test.lua'
+  'apt-get update && apt-get install -y --no-install-recommends build-essential make luajit luarocks && make clean && make all && FLAGS2ENV_NATIVE_LIB=build/libflags2env.so luajit clients/lua/test.lua && luarocks lint clients/lua/flags2env-0.1.0-1.rockspec && luarocks lint clients/lua/flags2env-dev-1.rockspec'
 
 run php php:8.3-cli \
-  'apt-get update && apt-get install -y --no-install-recommends build-essential libffi-dev make && docker-php-ext-install ffi && make clean && make all && php -d ffi.enable=true clients/php/test.php'
+  'apt-get update && apt-get install -y --no-install-recommends build-essential libffi-dev make composer unzip && docker-php-ext-install ffi && make clean && make all && php -d ffi.enable=true clients/php/test.php && cd clients/php && composer validate --strict && rm -f /tmp/flags2env-php-archive.zip && composer archive --format=zip --file=/tmp/flags2env-php-archive && unzip -Z1 /tmp/flags2env-php-archive.zip > /tmp/flags2env-php-archive-files && for required in lib.php README.md LICENSE composer.json; do grep -Eq "(^|/)$required$" /tmp/flags2env-php-archive-files || { printf "Composer archive missing %s\n" "$required" >&2; exit 1; }; done && if grep -Eq "(^|/)(Dockerfile|publish\.sh|test\.php)$" /tmp/flags2env-php-archive-files; then printf "Composer archive includes forbidden local file\n" >&2; exit 1; fi'
+
+run dart dart:stable \
+  'apt-get update && apt-get install -y --no-install-recommends build-essential make && make clean && make all && cd clients/dart && dart pub get && dart run test.dart && dart pub publish --dry-run'
 
 run nim nimlang/nim:2.0.10 \
-  'apt-get update && apt-get install -y --no-install-recommends build-essential make && make clean && make all && LD_LIBRARY_PATH=build nim c -r clients/nim/test.nim'
+  'apt-get update && apt-get install -y --no-install-recommends build-essential make && make clean && make all && cd clients/nim && nimble check && cd ../.. && LD_LIBRARY_PATH=build nim c -r clients/nim/test.nim'
 
 run crystal crystallang/crystal:1.13.3 \
   'apt-get update && apt-get install -y --no-install-recommends build-essential make && make clean && make all && LIBRARY_PATH=build LD_LIBRARY_PATH=build crystal clients/crystal/test.cr'
 
 run r r-base:4.4.2 \
-  'apt-get update && apt-get install -y --no-install-recommends build-essential make && Rscript -e "install.packages(\"jsonlite\", repos=\"https://cloud.r-project.org\")" && R CMD INSTALL clients/r && cd tests/fixtures && Rscript -e "library(flags2env); parsed <- parse_flags(c(\"app\", \"--debug=t\", \"--port\", \"8181\")); stopifnot(parsed[[\"DEBUG\"]] == \"true\", parsed[[\"PORT\"]] == \"8181\")"'
+  'apt-get update && apt-get install -y --no-install-recommends build-essential make && Rscript -e "install.packages(\"jsonlite\", repos=\"https://cloud.r-project.org\")" && R CMD INSTALL clients/r && cd tests/fixtures && Rscript -e "library(flags2env); parsed <- parse_flags(c(\"app\", \"--debug=t\", \"--port\", \"8181\")); stopifnot(parsed[[\"DEBUG\"]] == \"true\", parsed[[\"PORT\"]] == \"8181\")" && cd /work && R CMD build clients/r && R CMD check --no-manual flags2env_0.1.0.tar.gz && tar -tf flags2env_0.1.0.tar.gz > /tmp/flags2env-r-sdist-files && for required in DESCRIPTION NAMESPACE R/flags2env.R src/flags2env_r.c src/parser.c src/parser.h tests/smoke.R README.md LICENSE; do grep -Fxq "flags2env/$required" /tmp/flags2env-r-sdist-files || { printf "R source package missing %s\n" "$required" >&2; exit 1; }; done && if grep -Eq "/(Dockerfile|publish\.sh|.*\.Rcheck|flags2env_.*\.tar\.gz)$" /tmp/flags2env-r-sdist-files; then printf "R source package includes forbidden local file\n" >&2; exit 1; fi'
 
 run clojure clojure:temurin-21-tools-deps \
-  'apt-get update && apt-get install -y --no-install-recommends maven && mvn -q -f clients/java/pom.xml -DskipTests install && cd clients/clojure && clojure -T:build jar && clojure -T:build source-jar && clojure -T:build javadoc-jar'
+  'apt-get update && apt-get install -y --no-install-recommends maven && mvn -q -f clients/java/pom.xml -DskipTests install && cd clients/clojure && clojure -T:build jar && clojure -T:build source-jar && clojure -T:build javadoc-jar && jar tf target/flags2env-clojure-0.1.0.jar > /tmp/flags2env-clojure-jar-files && jar tf target/flags2env-clojure-0.1.0-sources.jar > /tmp/flags2env-clojure-sources-files && jar tf target/flags2env-clojure-0.1.0-javadoc.jar > /tmp/flags2env-clojure-javadoc-files && grep -Fxq com/oresoftware/flags2env.clj /tmp/flags2env-clojure-jar-files && grep -Fxq META-INF/maven/com.oresoftware/flags2env-clojure/pom.xml /tmp/flags2env-clojure-jar-files && grep -Fxq com/oresoftware/flags2env.clj /tmp/flags2env-clojure-sources-files && grep -Fxq README.md /tmp/flags2env-clojure-javadoc-files && if grep -Eq "(^|/)(Dockerfile|publish\.sh|build\.clj|deps\.edn|.*Test.*)$" /tmp/flags2env-clojure-jar-files /tmp/flags2env-clojure-sources-files /tmp/flags2env-clojure-javadoc-files; then printf "Clojure artifact includes forbidden local file\n" >&2; exit 1; fi'
 
 run solidity node:22-bookworm \
   'cd clients/solidity && npm install --no-package-lock --ignore-scripts && npm test && npm pack --dry-run --json'
@@ -81,13 +137,16 @@ run packaging debian:bookworm \
 
 if [ "$FULL" -eq 1 ]; then
   run jvm gradle:8.10-jdk21 \
-    'apt-get update && apt-get install -y --no-install-recommends maven && mvn -q -f clients/java/pom.xml -DskipTests install && gradle -p clients/kotlin compileKotlin --no-daemon && gradle -p clients/groovy compileGroovy --no-daemon'
+    'apt-get update && apt-get install -y --no-install-recommends maven && mvn -q -f clients/java/pom.xml -DskipTests install && gradle -p clients/kotlin jar sourcesJar javadocJar --no-daemon && gradle -p clients/groovy jar sourcesJar javadocJar --no-daemon && jar tf clients/kotlin/build/libs/flags2env-kotlin-0.1.0.jar > /tmp/flags2env-kotlin-jar-files && jar tf clients/kotlin/build/libs/flags2env-kotlin-0.1.0-sources.jar > /tmp/flags2env-kotlin-sources-files && jar tf clients/kotlin/build/libs/flags2env-kotlin-0.1.0-javadoc.jar >/dev/null && jar tf clients/groovy/build/libs/flags2env-groovy-0.1.0.jar > /tmp/flags2env-groovy-jar-files && jar tf clients/groovy/build/libs/flags2env-groovy-0.1.0-sources.jar > /tmp/flags2env-groovy-sources-files && jar tf clients/groovy/build/libs/flags2env-groovy-0.1.0-javadoc.jar >/dev/null && grep -Fxq com/oresoftware/flags2env/kotlin/Flags2Env.class /tmp/flags2env-kotlin-jar-files && grep -Fxq com/oresoftware/flags2env/Flags2Env.kt /tmp/flags2env-kotlin-sources-files && grep -Fxq com/oresoftware/flags2env/groovy/Flags2Env.class /tmp/flags2env-groovy-jar-files && grep -Fxq com/oresoftware/flags2env/Flags2Env.groovy /tmp/flags2env-groovy-sources-files && if grep -Eq "(^|/)(Dockerfile|publish\.sh|.*Test.*)$" /tmp/flags2env-kotlin-jar-files /tmp/flags2env-kotlin-sources-files /tmp/flags2env-groovy-jar-files /tmp/flags2env-groovy-sources-files; then printf "Gradle artifact includes forbidden local file\n" >&2; exit 1; fi'
 
   run scala sbtscala/scala-sbt:eclipse-temurin-21.0.8_9_1.11.7_2.13.17 \
-    'apt-get update && apt-get install -y --no-install-recommends maven && mvn -q -f clients/java/pom.xml -DskipTests install && cd clients/scala && sbt -batch -Dsbt.supershell=false compile'
+    'apt-get update && apt-get install -y --no-install-recommends maven && mvn -q -f clients/java/pom.xml -DskipTests install && cd clients/scala && sbt -batch -Dsbt.supershell=false package "Compile / packageSrc" "Compile / packageDoc" && jar tf target/scala-2.13/flags2env-scala_2.13-0.1.0.jar > /tmp/flags2env-scala-jar-files && jar tf target/scala-2.13/flags2env-scala_2.13-0.1.0-sources.jar > /tmp/flags2env-scala-sources-files && jar tf target/scala-2.13/flags2env-scala_2.13-0.1.0-javadoc.jar >/dev/null && grep -Fxq "com/oresoftware/flags2env/scala/Flags2Env$.class" /tmp/flags2env-scala-jar-files && grep -Fxq com/oresoftware/flags2env/Flags2Env.scala /tmp/flags2env-scala-sources-files && if grep -Eq "(^|/)(Dockerfile|publish\.sh|.*Test.*)$" /tmp/flags2env-scala-jar-files /tmp/flags2env-scala-sources-files; then printf "Scala artifact includes forbidden local file\n" >&2; exit 1; fi'
 
   run haskell haskell:latest \
-    'make clean && make all && cd clients/haskell && cabal update && cabal check && LIBRARY_PATH=/work/build LD_LIBRARY_PATH=/work/build cabal test --extra-lib-dirs=/work/build all'
+    'make clean && make all && cd clients/haskell && cabal update && cabal check && LIBRARY_PATH=/work/build LD_LIBRARY_PATH=/work/build cabal test --extra-lib-dirs=/work/build all && rm -rf dist-newstyle/sdist && cabal sdist && tar -tf dist-newstyle/sdist/flags2env-0.1.0.tar.gz > /tmp/flags2env-haskell-sdist-files && for required in flags2env.cabal LICENSE README.md src/Flags2Env.hs test.hs; do grep -Eq "/$required$" /tmp/flags2env-haskell-sdist-files || { printf "Hackage sdist missing %s\n" "$required" >&2; exit 1; }; done && if grep -Eq "/(Dockerfile|publish\.sh|dist-newstyle|cabal.project.local)$" /tmp/flags2env-haskell-sdist-files; then printf "Hackage sdist includes forbidden local file\n" >&2; exit 1; fi'
+
+  run swift swift:6.0 \
+    'apt-get update && apt-get install -y --no-install-recommends build-essential make && make clean && make all && swiftc clients/swift/lib.swift clients/swift/test.swift -o /tmp/flags2env-swift-test && cd clients/swift && /tmp/flags2env-swift-test'
 
   run ocaml debian:bookworm \
     'apt-get update && apt-get install -y --no-install-recommends build-essential make opam pkg-config libffi-dev m4 ca-certificates && opam init --disable-sandboxing --bare -y && opam switch create flags2env ocaml-base-compiler.5.1.1 -y && eval "$(opam env --switch=flags2env)" && opam install -y dune ctypes ctypes-foreign yojson reason && make clean && make all && opam lint clients/ocaml/flags2env.opam && opam lint clients/reasonml/flags2env-reason.opam && cd clients/ocaml && FLAGS2ENV_NATIVE_LIB=/work/build/libflags2env.so dune runtest && dune install --prefix="$(opam var prefix)" flags2env && cd ../reasonml && FLAGS2ENV_NATIVE_LIB=/work/build/libflags2env.so dune runtest'

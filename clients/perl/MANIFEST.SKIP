@@ -5,6 +5,7 @@
 ^MYMETA\.
 ^pm_to_blib$
 ^publish\.sh$
+^test\.pl$
 \.o$
 \.so$
 \.dylib$

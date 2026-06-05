@@ -285,7 +285,12 @@ Bash/Zsh: source packages, Homebrew-installed shell helpers, or git-tagged relea
 
 Every client folder has a `publish.sh` wrapper. It defaults to a dry-run command printout and only publishes when passed `--release`. See `clients/PUBLISHING.md` for package manifest controls such as `.npmignore`, `MANIFEST.in`, `.gemspec` file lists, Composer archive excludes, NuGet `.nuspec` files, `.pubignore`, `Package.swift` excludes, Mix package files, Cabal manifests, opam metadata, CPAN `MANIFEST.SKIP`, LuaRocks rockspecs, Nimble manifests, Julia `Project.toml`, and the Homebrew formula under `packaging/homebrew/Formula/`.
 
-The native CLI can be distributed through Homebrew with `packaging/homebrew/Formula/flags2env.rb`. Run `scripts/publish-homebrew.sh --dry-run` to see the local Homebrew install, test, and audit commands; use `--release` on a machine with Homebrew configured.
+The native CLI can be distributed through Homebrew with
+`packaging/homebrew/Formula/flags2env.rb`. Run
+`scripts/publish-homebrew.sh --dry-run` to see the local Homebrew install, test,
+and audit commands; use `--release` on a machine with Homebrew configured. The
+C, Bash, and Zsh client `publish.sh` wrappers also surface that Homebrew release
+path.
 
 BEAM clients share the Erlang NIF in `clients/erlang/flags2env_nif.c`; compile it with Erlang headers plus `src/parser.c` into `priv/flags2env_nif.so`. On macOS, add `-undefined dynamic_lookup` when linking the NIF. Gleam uses `clients/gleam/flags2env_native.erl` as a native shim so its public module can still be named `flags2env` without colliding with the NIF module. Java uses `clients/java/native/flags2env_jni.c`; Kotlin, Scala, Groovy, and Clojure build facade packages over that Java bridge.
 

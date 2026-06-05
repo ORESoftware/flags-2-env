@@ -155,14 +155,15 @@ audit_perl_manifest() {
   if ! (
     cd "$tmp_dir" &&
       perl Makefile.PL >/dev/null 2>&1 &&
-      make manifest >/dev/null 2>&1
+      make manifest >/dev/null 2>&1 &&
+      make dist >/dev/null 2>&1
   ); then
-    printf 'Perl CPAN manifest generation failed\n' >&2
+    printf 'Perl CPAN manifest/dist generation failed\n' >&2
     status=1
     rm -rf "$tmp_dir"
     return
   fi
-  for path in publish.sh MYMETA.json MYMETA.yml; do
+  for path in publish.sh test.pl MYMETA.json MYMETA.yml; do
     if grep -Fxq "$path" "$tmp_dir/MANIFEST"; then
       printf 'Perl CPAN manifest includes forbidden file: %s\n' "$path" >&2
       status=1
@@ -171,6 +172,77 @@ audit_perl_manifest() {
   for path in LICENSE README.md Makefile.PL lib/Flags2Env.pm; do
     if ! grep -Fxq "$path" "$tmp_dir/MANIFEST"; then
       printf 'Perl CPAN manifest is missing: %s\n' "$path" >&2
+      status=1
+    fi
+  done
+  dist_file=
+  for candidate in "$tmp_dir"/Flags2Env-*.tar.gz; do
+    if [ -e "$candidate" ]; then
+      dist_file="$candidate"
+      break
+    fi
+  done
+  if [ -z "$dist_file" ]; then
+    printf 'Perl CPAN dist archive was not generated\n' >&2
+    status=1
+    rm -rf "$tmp_dir"
+    return
+  fi
+  tar -tf "$dist_file" > "$tmp_dir/dist-files.txt"
+  for path in LICENSE README.md Makefile.PL lib/Flags2Env.pm; do
+    if ! grep -Eq "/$path$" "$tmp_dir/dist-files.txt"; then
+      printf 'Perl CPAN dist is missing: %s\n' "$path" >&2
+      status=1
+    fi
+  done
+  for path in publish.sh test.pl MYMETA.json MYMETA.yml; do
+    if grep -Eq "/$path$" "$tmp_dir/dist-files.txt"; then
+      printf 'Perl CPAN dist includes forbidden file: %s\n' "$path" >&2
+      status=1
+    fi
+  done
+  rm -rf "$tmp_dir"
+}
+
+audit_ruby_gem() {
+  tmp_dir="${TMPDIR:-/tmp}/flags2env-ruby-gem-audit-$$"
+  rm -rf "$tmp_dir"
+  mkdir -p "$tmp_dir"
+  cp "$ROOT_DIR/clients/ruby/flags2env.gemspec" \
+     "$ROOT_DIR/clients/ruby/lib.rb" \
+     "$ROOT_DIR/clients/ruby/README.md" \
+     "$ROOT_DIR/clients/ruby/LICENSE" \
+     "$tmp_dir/"
+  if ! (cd "$tmp_dir" && gem build flags2env.gemspec >/dev/null 2>&1); then
+    printf 'RubyGems package build failed\n' >&2
+    status=1
+    rm -rf "$tmp_dir"
+    return
+  fi
+  gem_file=
+  for candidate in "$tmp_dir"/flags2env-*.gem; do
+    if [ -e "$candidate" ]; then
+      gem_file="$candidate"
+      break
+    fi
+  done
+  if [ -z "$gem_file" ] ||
+     ! (cd "$tmp_dir" && gem unpack "$(basename "$gem_file")" >/dev/null 2>&1); then
+    printf 'RubyGems package unpack failed\n' >&2
+    status=1
+    rm -rf "$tmp_dir"
+    return
+  fi
+  unpacked_dir="${gem_file%.gem}"
+  for path in LICENSE README.md lib.rb; do
+    if [ ! -e "$unpacked_dir/$path" ]; then
+      printf 'RubyGems package is missing: %s\n' "$path" >&2
+      status=1
+    fi
+  done
+  for path in Dockerfile publish.sh test.rb flags2env.gemspec; do
+    if [ -e "$unpacked_dir/$path" ]; then
+      printf 'RubyGems package includes forbidden file: %s\n' "$path" >&2
       status=1
     fi
   done
@@ -199,6 +271,49 @@ audit_r_staging() {
   rm -rf "$tmp_dir"
 }
 
+audit_matlab_archive() {
+  tmp_dir="${TMPDIR:-/tmp}/flags2env-matlab-archive-audit-$$"
+  zip_file="$tmp_dir/flags2env-matlab.zip"
+  files_list="$tmp_dir/files.txt"
+  rm -rf "$tmp_dir"
+  mkdir -p "$tmp_dir"
+  if ! (
+    cd "$ROOT_DIR/clients/matlab" &&
+      zip -qr "$zip_file" +flags2env native README.md LICENSE
+  ); then
+    printf 'MATLAB source archive generation failed\n' >&2
+    status=1
+    rm -rf "$tmp_dir"
+    return
+  fi
+  zipinfo -1 "$zip_file" > "$files_list"
+  for path in \
+    +flags2env/apply.m \
+    +flags2env/defaultHeaderPath.m \
+    +flags2env/defaultLibraryName.m \
+    +flags2env/ensureLoaded.m \
+    +flags2env/ownedString.m \
+    +flags2env/parse.m \
+    +flags2env/parseProcess.m \
+    native/parser.c \
+    native/parser.h \
+    README.md \
+    LICENSE
+  do
+    if ! grep -Fxq "$path" "$files_list"; then
+      printf 'MATLAB source archive missing: %s\n' "$path" >&2
+      status=1
+    fi
+  done
+  for path in Dockerfile publish.sh test.m; do
+    if grep -Fxq "$path" "$files_list"; then
+      printf 'MATLAB source archive includes forbidden file: %s\n' "$path" >&2
+      status=1
+    fi
+  done
+  rm -rf "$tmp_dir"
+}
+
 audit_docker_check_plan() {
   output="$("$ROOT_DIR/scripts/docker-check-new-clients.sh" --dry-run --full 2>/dev/null)" || {
     printf 'Docker client check dry-run failed\n' >&2
@@ -207,8 +322,8 @@ audit_docker_check_plan() {
   }
 
   for label in \
-    perl dotnet cpp fortran zig lua php nim crystal r clojure solidity packaging \
-    jvm scala haskell ocaml julia
+    perl dotnet java python rust golang cpp fortran zig lua php dart nim crystal r clojure solidity packaging \
+    jvm scala haskell swift ocaml julia
   do
     if ! printf '%s\n' "$output" | grep -Fq "[dry-run] docker check $label:"; then
       printf 'Docker client check dry-run is missing label: %s\n' "$label" >&2
@@ -405,7 +520,16 @@ require_contains package.json '"license": "MIT"'
 require_contains package.json '"LICENSE"'
 require_contains package.json '"pack:audit"'
 require_contains package.json '"release:audit"'
+require_contains scripts/audit-npm-package.mjs '"README.md"'
+require_contains scripts/audit-npm-package.mjs '"src/parser.h"'
 require_contains scripts/audit-npm-package.mjs 'non-JS clients'
+require_contains scripts/audit-npm-package.mjs 'forbidden build/test/package-template files'
+require_contains scripts/audit-npm-package.mjs 'nodejs.*build'
+require_contains scripts/audit-client-packaging.sh 'make dist'
+require_contains scripts/audit-client-packaging.sh 'Perl CPAN dist includes forbidden file'
+require_contains scripts/audit-client-packaging.sh 'Flags2Env-\*\.tar\.gz'
+require_contains scripts/audit-client-packaging.sh 'audit_ruby_gem'
+require_contains scripts/audit-client-packaging.sh 'gem build flags2env\.gemspec'
 require_contains scripts/audit-release-matrix.mjs 'release matrix audit passed'
 require_contains scripts/audit-release-matrix.mjs 'requiredClients'
 require_contains scripts/audit-release-matrix.mjs 'expectedRepositories'
@@ -416,12 +540,33 @@ require_contains scripts/publish-central-ossrh-compat.sh 'CENTRAL_NAMESPACE'
 require_contains scripts/publish-central-ossrh-compat.sh 'ossrh-staging-api\.central\.sonatype\.com'
 require_contains scripts/docker-check-new-clients.sh 'clojure:temurin-21-tools-deps'
 require_contains scripts/docker-check-new-clients.sh 'sbtscala/scala-sbt'
+require_contains scripts/docker-check-new-clients.sh 'run java maven:3\.9-eclipse-temurin-21'
+require_contains scripts/docker-check-new-clients.sh 'source:jar-no-fork javadoc:jar'
+require_contains scripts/docker-check-new-clients.sh 'flags2env-0\.1\.0-sources\.jar'
+require_contains scripts/docker-check-new-clients.sh 'flags2env-0\.1\.0-javadoc\.jar'
+require_contains scripts/docker-check-new-clients.sh 'Maven artifact includes forbidden local file'
+require_contains scripts/docker-check-new-clients.sh 'run python python:3\.12-bookworm'
+require_contains scripts/docker-check-new-clients.sh 'python -m build && python -m twine check dist/\*'
+require_contains scripts/docker-check-new-clients.sh 'sdist includes'
+require_contains scripts/docker-check-new-clients.sh 'wheel missing dist-info license'
+require_contains scripts/docker-check-new-clients.sh 'run rust rust:1-bookworm'
+require_contains scripts/docker-check-new-clients.sh 'cargo test && cargo package --allow-dirty'
+require_contains scripts/docker-check-new-clients.sh 'run golang golang:1\.23-bookworm'
+require_contains scripts/docker-check-new-clients.sh 'cd clients/golang && go test \./\.\.\.'
 require_contains scripts/docker-check-new-clients.sh 'zig build test'
 require_contains scripts/docker-check-new-clients.sh 'dry-run'
 require_contains scripts/docker-check-new-clients.sh 'cabal test --extra-lib-dirs=/work/build'
+require_contains scripts/docker-check-new-clients.sh 'cabal sdist'
+require_contains scripts/docker-check-new-clients.sh 'dist-newstyle/sdist/flags2env-0\.1\.0\.tar\.gz'
+require_contains scripts/docker-check-new-clients.sh 'Hackage sdist missing'
+require_contains scripts/docker-check-new-clients.sh 'Hackage sdist includes forbidden local file'
 require_contains scripts/docker-check-new-clients.sh 'clients/reasonml/flags2env-reason\.opam'
 require_contains scripts/docker-check-new-clients.sh 'php -d ffi\.enable=true clients/php/test\.php'
 require_contains scripts/docker-check-new-clients.sh 'docker-php-ext-install ffi'
+require_contains scripts/docker-check-new-clients.sh 'run dart dart:stable'
+require_contains scripts/docker-check-new-clients.sh 'dart pub publish --dry-run'
+require_contains scripts/docker-check-new-clients.sh 'run swift swift:6\.0'
+require_contains scripts/docker-check-new-clients.sh 'swiftc clients/swift/lib\.swift clients/swift/test\.swift'
 require_contains scripts/docker-check-new-clients.sh 'clients/ocaml && FLAGS2ENV_NATIVE_LIB=/work/build/libflags2env\.so dune runtest'
 require_contains scripts/docker-check-new-clients.sh 'dune install --prefix="\$\(opam var prefix\)" flags2env'
 require_contains scripts/docker-check-new-clients.sh 'cd \.\./reasonml && FLAGS2ENV_NATIVE_LIB=/work/build/libflags2env\.so dune runtest'
@@ -496,6 +641,11 @@ require_contains clients/php/composer.json '"archive"'
 require_contains clients/php/composer.json '"license": "MIT"'
 require_contains clients/php/composer.json '"\/publish\.sh"'
 require_contains scripts/docker-check-new-clients.sh 'run php php:8\.3-cli'
+require_contains scripts/docker-check-new-clients.sh 'composer validate --strict'
+require_contains scripts/docker-check-new-clients.sh 'composer archive --format=zip'
+require_contains scripts/docker-check-new-clients.sh 'unzip -Z1 /tmp/flags2env-php-archive\.zip'
+require_contains scripts/docker-check-new-clients.sh 'Composer archive missing'
+require_contains scripts/docker-check-new-clients.sh 'Composer archive includes forbidden local file'
 require_contains clients/java/pom.xml 'central-publishing-maven-plugin'
 require_contains clients/java/pom.xml '<publishingServerId>'
 require_contains clients/java/pom.xml '<excludes>'
@@ -516,18 +666,29 @@ require_contains clients/kotlin/build.gradle.kts 'artifactId = "flags2env-kotlin
 require_contains clients/kotlin/build.gradle.kts 'exclude\("publish\.sh"\)'
 require_contains clients/kotlin/build.gradle.kts 'setRequired \{ project\.hasProperty\("release"\) \}'
 require_contains clients/kotlin/build.gradle.kts 'ossrh-staging-api\.central\.sonatype\.com'
+require_contains scripts/docker-check-new-clients.sh 'gradle -p clients/kotlin jar sourcesJar javadocJar'
+require_contains scripts/docker-check-new-clients.sh 'flags2env-kotlin-0\.1\.0-sources\.jar'
+require_contains scripts/docker-check-new-clients.sh 'com/oresoftware/flags2env/kotlin/Flags2Env\.class'
 require_contains clients/groovy/build.gradle "maven-publish"
 require_contains clients/groovy/build.gradle "java-library"
 require_contains clients/groovy/build.gradle "artifactId = 'flags2env-groovy'"
 require_contains clients/groovy/build.gradle "exclude 'publish\\.sh'"
 require_contains clients/groovy/build.gradle "required \\{ project\\.hasProperty\\('release'\\) \\}"
 require_contains clients/groovy/build.gradle 'ossrh-staging-api\.central\.sonatype\.com'
+require_contains scripts/docker-check-new-clients.sh 'gradle -p clients/groovy jar sourcesJar javadocJar'
+require_contains scripts/docker-check-new-clients.sh 'flags2env-groovy-0\.1\.0-sources\.jar'
+require_contains scripts/docker-check-new-clients.sh 'com/oresoftware/flags2env/groovy/Flags2Env\.class'
+require_contains scripts/docker-check-new-clients.sh 'Gradle artifact includes forbidden local file'
 require_contains clients/scala/build.sbt 'sonatype'
 require_contains clients/scala/build.sbt 'sonatypeCentralHost'
 require_contains clients/scala/build.sbt 'flags2env-scala'
 require_contains clients/scala/build.sbt 'Compile / packageSrc / publishArtifact := true'
 require_contains clients/scala/build.sbt 'Compile / packageDoc / publishArtifact := true'
 require_contains clients/scala/project/plugins.sbt 'sbt-pgp'
+require_contains scripts/docker-check-new-clients.sh 'sbt -batch -Dsbt\.supershell=false package "Compile / packageSrc" "Compile / packageDoc"'
+require_contains scripts/docker-check-new-clients.sh 'flags2env-scala_2\.13-0\.1\.0-sources\.jar'
+require_contains scripts/docker-check-new-clients.sh 'com/oresoftware/flags2env/scala/Flags2Env\$\.class'
+require_contains scripts/docker-check-new-clients.sh 'Scala artifact includes forbidden local file'
 require_contains clients/clojure/build.clj 'sign-and-deploy-file'
 require_contains clients/clojure/build.clj 'CENTRAL_OSSRH_DEPLOY_URL'
 require_contains clients/clojure/build.clj 'javadoc-jar-file'
@@ -535,6 +696,9 @@ require_contains clients/clojure/build.clj '\(defn javadoc-jar'
 require_contains clients/clojure/build.clj '"-Djavadoc="'
 require_contains clients/clojure/build.clj 'flags2env-clojure'
 require_contains scripts/docker-check-new-clients.sh 'clojure -T:build javadoc-jar'
+require_contains scripts/docker-check-new-clients.sh 'flags2env-clojure-0\.1\.0-sources\.jar'
+require_contains scripts/docker-check-new-clients.sh 'META-INF/maven/com\.oresoftware/flags2env-clojure/pom\.xml'
+require_contains scripts/docker-check-new-clients.sh 'Clojure artifact includes forbidden local file'
 require_contains clients/csharp/Flags2Env.nuspec '<files>'
 require_contains clients/csharp/Flags2Env.nuspec '<readme>README\.md</readme>'
 require_contains clients/csharp/Flags2Env.nuspec 'src="README\.md"'
@@ -623,6 +787,7 @@ forbid_contains clients/gleam/test.gleam '/repo/tests|tests/fixtures'
 require_contains clients/haskell/flags2env.cabal '^extra-source-files:'
 require_contains clients/haskell/flags2env.cabal '^license-file: LICENSE$'
 require_contains clients/haskell/flags2env.cabal '^  LICENSE$'
+require_contains clients/haskell/flags2env.cabal '^  README\.md$'
 require_contains clients/haskell/flags2env.cabal '^test-suite flags2env-smoke$'
 require_contains clients/haskell/flags2env.cabal '^  main-is: test\.hs$'
 require_contains clients/ocaml/dune '^\(test'
@@ -644,6 +809,7 @@ require_contains clients/reasonml/src/dune '^\(test'
 require_contains clients/reasonml/src/Test.re 'Sys\.remove\(configPath\)'
 require_contains clients/perl/MANIFEST.SKIP '^\^blib/'
 require_contains clients/perl/MANIFEST.SKIP '^\^publish\\\.sh\$'
+require_contains clients/perl/MANIFEST.SKIP '^\^test\\\.pl\$'
 require_contains clients/perl/MANIFEST.SKIP '^\^MYMETA\\\.'
 require_contains clients/lua/flags2env-dev-1.rockspec '^build ='
 require_contains clients/lua/LICENSE 'MIT License'
@@ -653,10 +819,13 @@ require_contains clients/lua/flags2env-0.1.0-1.rockspec '^version = "0\.1\.0-1"'
 require_contains clients/lua/flags2env-0.1.0-1.rockspec 'tag = "v0\.1\.0"'
 require_contains clients/lua/flags2env-0.1.0-1.rockspec 'clients/lua/flags2env\.lua'
 require_contains clients/lua/test.lua 'os\.remove\(config\)'
+require_contains scripts/docker-check-new-clients.sh 'luarocks lint clients/lua/flags2env-0\.1\.0-1\.rockspec'
+require_contains scripts/docker-check-new-clients.sh 'luarocks lint clients/lua/flags2env-dev-1\.rockspec'
 require_contains clients/nim/flags2env.nimble '^installFiles'
 require_contains clients/nim/LICENSE 'MIT License'
 require_contains clients/nim/README.md 'Nim bindings'
 require_contains clients/nim/test.nim 'removeFile\(config\)'
+require_contains scripts/docker-check-new-clients.sh 'cd clients/nim && nimble check'
 require_contains clients/r/.Rbuildignore '\^Dockerfile\$'
 require_contains clients/r/DESCRIPTION 'License: MIT \+ file LICENSE'
 require_contains clients/r/LICENSE 'COPYRIGHT HOLDER: ORESoftware'
@@ -669,6 +838,10 @@ require_same_file src/parser.c clients/r/src/parser.c
 require_same_file src/parser.h clients/r/src/parser.h
 require_contains clients/r/tests/smoke.R 'parse_flags'
 require_contains clients/r/tests/smoke.R 'on\.exit\(unlink\(config\), add = TRUE\)'
+require_contains scripts/docker-check-new-clients.sh 'R CMD build clients/r'
+require_contains scripts/docker-check-new-clients.sh 'R CMD check --no-manual flags2env_0\.1\.0\.tar\.gz'
+require_contains scripts/docker-check-new-clients.sh 'R source package missing'
+require_contains scripts/docker-check-new-clients.sh 'R source package includes forbidden local file'
 require_contains clients/matlab/test.m 'flags2env\.parse'
 require_contains clients/matlab/LICENSE 'MIT License'
 require_contains clients/matlab/README.md 'MATLAB bindings'
@@ -680,6 +853,9 @@ forbid_contains clients/matlab/+flags2env/parse.m 'fullfile\(pwd, "src", "parser
 forbid_contains clients/matlab/+flags2env/parseProcess.m 'fullfile\(pwd, "src", "parser\.h"\)'
 require_same_file src/parser.c clients/matlab/native/parser.c
 require_same_file src/parser.h clients/matlab/native/parser.h
+require_contains scripts/audit-client-packaging.sh 'audit_matlab_archive'
+require_contains scripts/audit-client-packaging.sh 'MATLAB source archive missing'
+require_contains scripts/audit-client-packaging.sh 'MATLAB source archive includes forbidden file'
 require_contains clients/julia/Project.toml '^name = "Flags2Env"'
 require_contains clients/julia/Project.toml '^uuid = "[0-9a-f-]{36}"'
 require_contains clients/julia/Project.toml '^version = "0\.1\.0"'
@@ -721,6 +897,7 @@ require_contains scripts/publish-client.sh 'twine upload'
 require_contains scripts/publish-client.sh 'clients/golang/v\$'
 require_contains scripts/publish-client.sh 'git tag "\$\{PACKAGE_VERSION:\?set PACKAGE_VERSION\}"'
 require_contains scripts/publish-client.sh 'git push origin "v\$\{PACKAGE_VERSION\}"'
+require_contains scripts/publish-client.sh 'scripts/publish-homebrew\.sh --release'
 require_contains scripts/publish-client.sh 'mvn -P release deploy'
 require_contains scripts/publish-client.sh 'gradle -Prelease publish'
 require_contains scripts/publish-client.sh 'sbt publishSigned sonatypeBundleRelease'
@@ -742,6 +919,11 @@ require_contains scripts/publish-client.sh '@JuliaRegistrator register subdir=cl
 require_contains scripts/docker-check-new-clients.sh 'dotnet run'
 require_contains scripts/docker-check-new-clients.sh 'dotnet run --project /tmp/f2e-csharp-test/f2e-csharp-test\.csproj'
 require_contains scripts/docker-check-new-clients.sh 'dotnet run --project /tmp/f2e-fsharp-test/f2e-fsharp-test\.fsproj'
+require_contains scripts/docker-check-new-clients.sh 'dotnet pack clients/csharp/Flags2Env\.csproj -c Release'
+require_contains scripts/docker-check-new-clients.sh 'dotnet pack clients/fsharp/Flags2Env\.FSharp\.fsproj -c Release'
+require_contains scripts/docker-check-new-clients.sh 'OreSoftware\.Flags2Env\.\*\.nupkg'
+require_contains scripts/docker-check-new-clients.sh 'OreSoftware\.Flags2Env\.FSharp\.\*\.nupkg'
+require_contains scripts/docker-check-new-clients.sh 'missing net6\.0 library'
 forbid_contains scripts/docker-check-new-clients.sh 'FLAGS2ENV_FIXTURE=tests/fixtures|FLAGS2ENV_NATIVE_LIB=build/libflags2env\.so.*dotnet|LD_LIBRARY_PATH=build.*dotnet'
 require_contains scripts/docker-check-new-clients.sh 'clients/cpp/native/parser\.c'
 require_contains README.md 'undefined dynamic_lookup'
@@ -811,7 +993,9 @@ audit_rendered_js_client bun package.json "native/$native_lib" lib.mjs lib.cjs l
 audit_rendered_js_client deno deno.json "native/$native_lib" mod.ts lib.ts
 audit_npm_pack_client solidity "contracts/Flags2Env.sol package.json README.md LICENSE" "test.js test.ts Dockerfile"
 audit_perl_manifest
+audit_ruby_gem
 audit_r_staging
+audit_matlab_archive
 audit_docker_check_plan
 
 if [ "$status" -eq 0 ]; then
