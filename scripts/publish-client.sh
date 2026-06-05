@@ -139,8 +139,11 @@ case "$client" in
   elixir)
     run 'mix hex.build && mix hex.publish'
     ;;
-  erlang|gleam)
+  erlang)
     run 'rebar3 hex build && rebar3 hex publish'
+    ;;
+  gleam)
+    run 'gleam publish --yes'
     ;;
   haskell)
     run 'cabal check && cabal sdist && cabal upload dist-newstyle/sdist/*.tar.gz'

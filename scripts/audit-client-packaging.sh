@@ -445,6 +445,7 @@ for path in \
   clients/elixir/native/parser.c \
   clients/elixir/native/parser.h \
   clients/erlang/rebar.config \
+  clients/erlang/src/flags2env.app.src \
   clients/erlang/LICENSE \
   clients/erlang/README.md \
   clients/erlang/parser.c \
@@ -566,6 +567,8 @@ require_contains scripts/docker-check-new-clients.sh 'docker-php-ext-install ffi
 require_contains scripts/docker-check-new-clients.sh 'run dart dart:stable'
 require_contains scripts/docker-check-new-clients.sh 'dart pub publish --dry-run'
 require_contains scripts/docker-check-new-clients.sh 'run swift swift:6\.0'
+require_contains scripts/docker-check-new-clients.sh 'swift package --disable-sandbox --scratch-path /tmp/flags2env-swift-build describe --type json'
+require_contains scripts/docker-check-new-clients.sh 'swift build --disable-sandbox --scratch-path /tmp/flags2env-swift-build -c release'
 require_contains scripts/docker-check-new-clients.sh 'swiftc clients/swift/lib\.swift clients/swift/test\.swift'
 require_contains scripts/docker-check-new-clients.sh 'clients/ocaml && FLAGS2ENV_NATIVE_LIB=/work/build/libflags2env\.so dune runtest'
 require_contains scripts/docker-check-new-clients.sh 'dune install --prefix="\$\(opam var prefix\)" flags2env'
@@ -625,6 +628,8 @@ require_contains clients/cpp/README.md 'flags2env C\+\+'
 forbid_contains clients/cpp/CMakeLists.txt '\.\./\.\./src'
 require_same_file src/parser.c clients/cpp/native/parser.c
 require_same_file src/parser.h clients/cpp/native/parser.h
+require_contains scripts/docker-check-new-clients.sh 'cmake -S clients/cpp -B /tmp/flags2env-cpp-build'
+require_contains scripts/docker-check-new-clients.sh 'ctest --test-dir /tmp/flags2env-cpp-build --output-on-failure'
 require_contains clients/golang/lib.go '#cgo CFLAGS: -I\.'
 require_contains clients/golang/lib.go '#include "parser\.h"'
 require_contains clients/golang/LICENSE 'MIT License'
@@ -766,6 +771,11 @@ require_same_file clients/erlang/flags2env_nif.c clients/elixir/native/flags2env
 require_same_file src/parser.c clients/elixir/native/parser.c
 require_same_file src/parser.h clients/elixir/native/parser.h
 require_contains clients/erlang/rebar.config '\{files,'
+require_contains clients/erlang/rebar.config '\{plugins, \[rebar3_hex\]\}'
+require_contains clients/erlang/rebar.config '\{src_dirs, \["\.", "src"\]\}'
+require_contains clients/erlang/rebar.config '"src/flags2env\.app\.src"'
+require_contains clients/erlang/src/flags2env.app.src '\{application, flags2env,'
+require_contains clients/erlang/src/flags2env.app.src '\{vsn, "0\.1\.0"\}'
 require_contains clients/erlang/rebar.config '"README\.md"'
 require_contains clients/erlang/rebar.config '"LICENSE"'
 require_contains clients/erlang/LICENSE 'MIT License'
@@ -782,6 +792,7 @@ require_same_file src/parser.h clients/erlang/parser.h
 require_contains clients/gleam/Dockerfile 'clients/erlang/parser\.c'
 require_contains clients/gleam/LICENSE 'MIT License'
 require_contains clients/gleam/README.md 'Gleam bindings'
+require_contains scripts/publish-client.sh 'gleam publish --yes'
 forbid_contains clients/gleam/Dockerfile 'COPY src|COPY tests|src/parser\.c|tests/fixtures'
 forbid_contains clients/gleam/test.gleam '/repo/tests|tests/fixtures'
 require_contains clients/haskell/flags2env.cabal '^extra-source-files:'
@@ -868,8 +879,17 @@ require_contains clients/solidity/package.json '"test"'
 require_contains clients/solidity/package.json '"solc"'
 require_contains clients/solidity/LICENSE 'MIT License'
 require_contains clients/solidity/README.md 'Solidity'
+require_contains scripts/docker-check-new-clients.sh 'Solidity npm package missing'
+require_contains scripts/docker-check-new-clients.sh 'Solidity npm package includes forbidden local file'
 require_contains clients/fortran/LICENSE 'MIT License'
 require_contains clients/fortran/README.md 'Fortran bindings'
+require_contains clients/fortran/fpm.toml '^name = "flags2env"$'
+require_contains clients/fortran/fpm.toml '^version = "0\.1\.0"$'
+require_contains clients/fortran/fpm.toml '^license = "MIT"$'
+require_contains clients/fortran/fpm.toml '^\[library\]'
+require_contains clients/fortran/fpm.toml '^source-dir = "src"$'
+require_contains clients/fortran/fpm.toml '^\[\[test\]\]'
+require_contains clients/fortran/fpm.toml '^main = "test\.f90"$'
 require_contains scripts/docker-check-new-clients.sh 'clients/fortran/src/parser\.c'
 forbid_contains scripts/docker-check-new-clients.sh ' -c src/parser\.c -o /tmp/flags2env-parser\.o'
 require_same_file src/parser.c clients/fortran/src/parser.c
@@ -886,6 +906,10 @@ require_same_file src/parser.c clients/zig/native/parser.c
 require_same_file src/parser.h clients/zig/native/parser.h
 require_contains clients/crystal/LICENSE 'MIT License'
 require_contains clients/crystal/README.md 'Crystal bindings'
+require_contains clients/crystal/shard.yml '^version: 0\.1\.0$'
+require_contains clients/crystal/shard.yml '^license: MIT$'
+require_contains clients/crystal/shard.yml '^repository: https://github\.com/ORESoftware/flags-2-env$'
+require_contains scripts/docker-check-new-clients.sh 'cd clients/crystal && shards install --production'
 require_contains clients/deno/deno.json '"native"'
 require_contains scripts/render-client.mjs 'src/parser\.c'
 require_contains scripts/render-client.mjs 'native'
@@ -907,6 +931,7 @@ require_contains scripts/publish-client.sh 'gem push'
 require_contains scripts/publish-client.sh 'dart pub publish'
 require_contains scripts/publish-client.sh 'mix hex.publish'
 require_contains scripts/publish-client.sh 'rebar3 hex publish'
+require_contains scripts/publish-client.sh 'gleam publish --yes'
 require_contains scripts/publish-client.sh 'cabal upload'
 require_contains scripts/publish-client.sh 'opam publish submit'
 require_contains scripts/publish-client.sh 'opam lint flags2env-reason\.opam'
@@ -925,7 +950,7 @@ require_contains scripts/docker-check-new-clients.sh 'OreSoftware\.Flags2Env\.\*
 require_contains scripts/docker-check-new-clients.sh 'OreSoftware\.Flags2Env\.FSharp\.\*\.nupkg'
 require_contains scripts/docker-check-new-clients.sh 'missing net6\.0 library'
 forbid_contains scripts/docker-check-new-clients.sh 'FLAGS2ENV_FIXTURE=tests/fixtures|FLAGS2ENV_NATIVE_LIB=build/libflags2env\.so.*dotnet|LD_LIBRARY_PATH=build.*dotnet'
-require_contains scripts/docker-check-new-clients.sh 'clients/cpp/native/parser\.c'
+require_contains scripts/docker-check-new-clients.sh 'cmake --build /tmp/flags2env-cpp-build --verbose'
 require_contains README.md 'undefined dynamic_lookup'
 require_contains .github/workflows/client-packaging.yml 'scripts/audit-client-packaging\.sh'
 require_contains .github/workflows/client-packaging.yml 'npm run release:audit'

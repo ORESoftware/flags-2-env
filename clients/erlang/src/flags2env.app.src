@@ -1,0 +1,8 @@
+{application, flags2env,
+ [{description, "Erlang bindings for flags2env"},
+  {vsn, "0.1.0"},
+  {registered, []},
+  {applications, [kernel, stdlib]},
+  {modules, [flags2env]},
+  {licenses, ["MIT"]},
+  {links, [{"GitHub", "https://github.com/ORESoftware/flags-2-env"}]}]}.

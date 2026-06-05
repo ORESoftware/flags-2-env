@@ -52,7 +52,8 @@ Nimble, Crystal Shards, Zig packages, and fpm package folders also include
 package-local README and MIT license files so source-index pages have the same
 basic metadata as the binary registry packages. Solidity's npm package
 allowlist includes its contract sources plus package-local README and license
-files.
+files, and the Docker Solidity check inspects the `npm pack` file list for
+required and forbidden paths.
 OCaml and ReasonML opam package folders follow the same pattern.
 Erlang and Gleam Hex packages include package-local README and MIT license files
 alongside their native parser sources.
@@ -75,7 +76,10 @@ The Erlang Hex package carries `parser.c` and `parser.h` beside the NIF source,
 and the Gleam Docker smoke uses the same package-local Erlang native sources.
 The Elixir facade publishes as `flags2env_elixir`, includes its own package-local
 README, MIT license file, copy of the Erlang NIF source and parser sources, and
-avoids reaching into the Erlang client tree during package smoke checks.
+avoids reaching into the Erlang client tree during package smoke checks. Erlang
+declares `rebar3_hex` for `rebar3 hex build/publish` and carries
+`src/flags2env.app.src` so rebar can discover a Hex-packaged OTP application.
+Gleam uses `gleam publish --yes` rather than the rebar Hex task.
 
 The C# and F# NuGet packages carry package-local `native/parser.c` and
 `native/parser.h` copies, so the native source files in each `.nupkg` do not
@@ -86,7 +90,9 @@ metadata so NuGet packages render useful package documentation.
 The C++ package is rooted at `clients/cpp` and carries package-local parser
 sources under `clients/cpp/native`, so its CMake target can be consumed without
 repository-relative `../../src` paths. The C and C++ helper folders also carry
-package-local README and MIT license files for source archive consumers.
+package-local README and MIT license files for source archive consumers. The
+Docker C++ check configures the package with CMake, builds it, and runs the
+registered CTest smoke test.
 
 The C, Bash, and Zsh publish wrappers surface the Homebrew formula path. The C
 wrapper creates and pushes the `v${PACKAGE_VERSION}` tag before running
@@ -97,6 +103,9 @@ both shell helper files alongside the native CLI.
 SwiftPM expects a `Package.swift` manifest in the repository root and a full
 semantic-version tag such as `0.1.0`, so the root manifest points at
 `clients/swift` while the Swift publish command uses an unprefixed SemVer tag.
+The full Docker Swift check runs `swift package describe`, `swift build`, and
+the native-library smoke binary so both the SwiftPM manifest and FFI path are
+covered.
 
 The Julia package is rooted at `clients/julia`, not the repository root. Its
 publish preflight runs `Pkg.test()` in that project and then prints the
@@ -139,8 +148,9 @@ Hackage `cabal sdist` archive, and inspects that tarball for required and
 forbidden files. The OCaml/ReasonML full check runs Dune tests after installing
 the OCaml package into the opam switch. The Lua check runs the LuaJIT FFI smoke
 test and `luarocks lint` for both the stable and development rockspecs. The Nim
-check runs `nimble check` before compiling the smoke test. The script also
-accepts `--dry-run` to
+check runs `nimble check` before compiling the smoke test. The Crystal check
+runs `shards install --production` before its smoke test to validate `shard.yml`.
+The script also accepts `--dry-run` to
 print the default or full container plan without requiring a Docker daemon. The
 GitHub Actions client packaging workflow runs the default Docker set
 automatically and exposes a manual `full_docker_checks` input for the
@@ -199,7 +209,9 @@ rejects local Docker, publish, and Cabal build-output files.
 
 The Fortran fpm package carries package-local copies of `parser.c` and
 `parser.h` under `clients/fortran/src`, so the smoke build and package sources
-do not depend on the repository-root C source directory.
+do not depend on the repository-root C source directory. The release audits also
+enforce its fpm name, version, license, library source directory, and smoke test
+entrypoint metadata.
 
 The R package also carries package-local `src/parser.c` and `src/parser.h`.
 `src/Makevars` builds those local files, which keeps `R CMD INSTALL clients/r`
