@@ -448,8 +448,10 @@ for path in \
   clients/erlang/src/flags2env.app.src \
   clients/erlang/LICENSE \
   clients/erlang/README.md \
-  clients/erlang/parser.c \
-  clients/erlang/parser.h \
+  clients/erlang/src/flags2env.erl \
+  clients/erlang/c_src/flags2env_nif.c \
+  clients/erlang/c_src/parser.c \
+  clients/erlang/c_src/parser.h \
   clients/gleam/LICENSE \
   clients/gleam/README.md \
   clients/gleam/gleam.toml \
@@ -766,30 +768,32 @@ require_contains clients/elixir/Dockerfile 'clients/elixir/native/parser\.c'
 forbid_contains clients/elixir/Dockerfile 'COPY src|COPY tests|src/parser\.c|tests/fixtures|clients/erlang'
 forbid_contains clients/elixir/test.exs 'tests/fixtures|\.\./\.\./tests|\.\./\.cli-flags\.toml'
 require_contains clients/elixir/test.exs 'System\.at_exit'
-require_same_file clients/erlang/flags2env.erl clients/elixir/native/flags2env.erl
-require_same_file clients/erlang/flags2env_nif.c clients/elixir/native/flags2env_nif.c
+require_same_file clients/erlang/src/flags2env.erl clients/elixir/native/flags2env.erl
+require_same_file clients/erlang/c_src/flags2env_nif.c clients/elixir/native/flags2env_nif.c
 require_same_file src/parser.c clients/elixir/native/parser.c
 require_same_file src/parser.h clients/elixir/native/parser.h
 require_contains clients/erlang/rebar.config '\{files,'
 require_contains clients/erlang/rebar.config '\{plugins, \[rebar3_hex\]\}'
-require_contains clients/erlang/rebar.config '\{src_dirs, \["\.", "src"\]\}'
+require_contains clients/erlang/rebar.config '\{src_dirs, \["src"\]\}'
+require_contains clients/erlang/rebar.config '"src/flags2env\.erl"'
 require_contains clients/erlang/rebar.config '"src/flags2env\.app\.src"'
+require_contains clients/erlang/rebar.config '"c_src/flags2env_nif\.c"'
+require_contains clients/erlang/rebar.config '"c_src/parser\.c"'
+require_contains clients/erlang/rebar.config '"c_src/parser\.h"'
 require_contains clients/erlang/src/flags2env.app.src '\{application, flags2env,'
 require_contains clients/erlang/src/flags2env.app.src '\{vsn, "0\.1\.0"\}'
 require_contains clients/erlang/rebar.config '"README\.md"'
 require_contains clients/erlang/rebar.config '"LICENSE"'
 require_contains clients/erlang/LICENSE 'MIT License'
 require_contains clients/erlang/README.md 'Erlang bindings'
-require_contains clients/erlang/rebar.config '"parser\.c"'
-require_contains clients/erlang/rebar.config '"parser\.h"'
 require_contains clients/erlang/flags2env_test.erl 'file:delete\(Config\)'
-require_contains clients/erlang/flags2env_nif.c '#include "parser\.h"'
-forbid_contains clients/erlang/flags2env_nif.c '\.\./\.\./src/parser\.h'
-require_contains clients/erlang/Dockerfile 'clients/erlang/parser\.c'
+require_contains clients/erlang/c_src/flags2env_nif.c '#include "parser\.h"'
+forbid_contains clients/erlang/c_src/flags2env_nif.c '\.\./\.\./src/parser\.h'
+require_contains clients/erlang/Dockerfile 'clients/erlang/c_src/parser\.c'
 forbid_contains clients/erlang/Dockerfile 'COPY src|COPY tests|src/parser\.c|tests/fixtures'
-require_same_file src/parser.c clients/erlang/parser.c
-require_same_file src/parser.h clients/erlang/parser.h
-require_contains clients/gleam/Dockerfile 'clients/erlang/parser\.c'
+require_same_file src/parser.c clients/erlang/c_src/parser.c
+require_same_file src/parser.h clients/erlang/c_src/parser.h
+require_contains clients/gleam/Dockerfile 'clients/erlang/c_src/parser\.c'
 require_contains clients/gleam/LICENSE 'MIT License'
 require_contains clients/gleam/README.md 'Gleam bindings'
 require_contains scripts/publish-client.sh 'gleam publish --yes'

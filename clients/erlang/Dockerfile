@@ -5,9 +5,9 @@ COPY clients/erlang ./clients/erlang
 
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential make && rm -rf /var/lib/apt/lists/*
 RUN mkdir -p /tmp/beam/ebin /tmp/beam/priv
-RUN erlc -o /tmp/beam/ebin clients/erlang/flags2env.erl clients/erlang/flags2env_test.erl
+RUN erlc -o /tmp/beam/ebin clients/erlang/src/flags2env.erl clients/erlang/flags2env_test.erl
 RUN ERL_INCLUDE="$(erl -noshell -eval 'io:format("~s/erts-~s/include", [code:root_dir(), erlang:system_info(version)]), halt().')" && \
-  cc -std=c99 -fPIC -shared -I"$ERL_INCLUDE" -Iclients/erlang clients/erlang/flags2env_nif.c clients/erlang/parser.c -o /tmp/beam/priv/flags2env_nif.so
+  cc -std=c99 -fPIC -shared -I"$ERL_INCLUDE" -Iclients/erlang/c_src clients/erlang/c_src/flags2env_nif.c clients/erlang/c_src/parser.c -o /tmp/beam/priv/flags2env_nif.so
 RUN useradd --create-home --shell /bin/sh flags2env && \
   mkdir -p /tmp/flags2env-cache && \
   chown -R flags2env:flags2env /repo /tmp/beam /tmp/flags2env-cache

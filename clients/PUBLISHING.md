@@ -72,8 +72,8 @@ main jar, sources jar, and javadoc jar, then verifies the main jar includes the
 runtime class plus package-local native parser sources while rejecting local
 Docker, publish, and test files.
 
-The Erlang Hex package carries `parser.c` and `parser.h` beside the NIF source,
-and the Gleam Docker smoke uses the same package-local Erlang native sources.
+The Erlang Hex package carries `c_src/parser.c` and `c_src/parser.h` beside the
+NIF source, and the Gleam Docker smoke uses the same package-local Erlang native sources.
 The Elixir facade publishes as `flags2env_elixir`, includes its own package-local
 README, MIT license file, copy of the Erlang NIF source and parser sources, and
 avoids reaching into the Erlang client tree during package smoke checks. Erlang

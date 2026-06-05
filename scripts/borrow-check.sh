@@ -117,9 +117,9 @@ fi
 if command -v erl >/dev/null 2>&1; then
   ERL_INCLUDE="$(erl -noshell -eval 'io:format("~s/erts-~s/include", [code:root_dir(), erlang:system_info(version)]), halt().' 2>/dev/null || true)"
   if [ -n "$ERL_INCLUDE" ] && [ -f "$ERL_INCLUDE/erl_nif.h" ]; then
-    analyze "clients/erlang/flags2env_nif.c" -I"$ERL_INCLUDE" "$ROOT_DIR/clients/erlang/flags2env_nif.c"
+    analyze "clients/erlang/c_src/flags2env_nif.c" -I"$ERL_INCLUDE" "$ROOT_DIR/clients/erlang/c_src/flags2env_nif.c"
   else
-    printf 'borrow-check: skipping clients/erlang/flags2env_nif.c; erl_nif.h not found\n'
+    printf 'borrow-check: skipping clients/erlang/c_src/flags2env_nif.c; erl_nif.h not found\n'
   fi
 fi
 
