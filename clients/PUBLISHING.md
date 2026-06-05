@@ -124,6 +124,22 @@ The OCaml opam package is `flags2env`. The ReasonML facade publishes as
 `flags2env-reason` via `clients/reasonml/flags2env-reason.opam`, and depends on
 the OCaml package instead of reusing the same opam package name.
 
+The Clojure Maven/Sonatype path builds main, sources, and javadoc jars. The
+javadoc jar contains a small documentation README because the facade is Clojure
+source over the Java native bridge rather than a Java API surface.
+
+The Kotlin and Groovy Gradle release wrappers pass `-Prelease`, which makes
+their `signing` blocks require and attach signatures before publishing through
+the Central Portal OSSRH compatibility endpoint.
+
+The Haskell Hackage package declares `license-file: LICENSE` and includes that
+file in `extra-source-files`, so `cabal sdist` carries package-local license
+metadata alongside `README.md`.
+
+The Perl CPAN package includes package-local `README.md` and `LICENSE` files,
+and the manifest audit checks that generated CPAN manifests include both while
+still excluding generated build metadata and `publish.sh`.
+
 The MATLAB source archive includes `+flags2env`, `native/parser.h`, and
 `native/parser.c`. The loader defaults to that package-local header for
 `loadlibrary`, while callers can still pass an explicit shared library or

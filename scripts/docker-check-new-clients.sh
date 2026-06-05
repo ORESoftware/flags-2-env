@@ -53,7 +53,7 @@ run r r-base:4.4.2 \
   'apt-get update && apt-get install -y --no-install-recommends build-essential make && Rscript -e "install.packages(\"jsonlite\", repos=\"https://cloud.r-project.org\")" && R CMD INSTALL clients/r && cd tests/fixtures && Rscript -e "library(flags2env); parsed <- parse_flags(c(\"app\", \"--debug=t\", \"--port\", \"8181\")); stopifnot(parsed[[\"DEBUG\"]] == \"true\", parsed[[\"PORT\"]] == \"8181\")"'
 
 run clojure clojure:temurin-21-tools-deps \
-  'apt-get update && apt-get install -y --no-install-recommends maven && mvn -q -f clients/java/pom.xml -DskipTests install && cd clients/clojure && clojure -T:build jar'
+  'apt-get update && apt-get install -y --no-install-recommends maven && mvn -q -f clients/java/pom.xml -DskipTests install && cd clients/clojure && clojure -T:build jar && clojure -T:build source-jar && clojure -T:build javadoc-jar'
 
 run solidity node:22-bookworm \
   'cd clients/solidity && npm install --no-package-lock --ignore-scripts && npm test && npm pack --dry-run --json'

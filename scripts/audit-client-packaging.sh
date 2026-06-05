@@ -145,7 +145,7 @@ audit_perl_manifest() {
       status=1
     fi
   done
-  for path in Makefile.PL lib/Flags2Env.pm; do
+  for path in LICENSE README.md Makefile.PL lib/Flags2Env.pm; do
     if ! grep -Fxq "$path" "$tmp_dir/MANIFEST"; then
       printf 'Perl CPAN manifest is missing: %s\n' "$path" >&2
       status=1
@@ -268,11 +268,14 @@ for path in \
   clients/gleam/gleam.toml \
   clients/gleam/src/flags2env.gleam \
   clients/gleam/src/flags2env_native.erl \
+  clients/haskell/LICENSE \
   clients/haskell/flags2env.cabal \
   clients/ocaml/dune \
   clients/ocaml/flags2env.opam \
   clients/reasonml/flags2env-reason.opam \
   clients/reasonml/src/dune \
+  clients/perl/LICENSE \
+  clients/perl/README.md \
   clients/lua/flags2env-0.1.0-1.rockspec \
   clients/perl/MANIFEST.SKIP \
   clients/lua/flags2env-dev-1.rockspec \
@@ -330,6 +333,12 @@ require_contains src/main.c 'shell-env'
 require_contains clients/bash/flags2env.bash 'flags2env_apply'
 require_contains clients/zsh/flags2env.zsh 'flags2env_apply'
 require_contains clients/python/MANIFEST.in '^include lib\.py$'
+require_contains clients/python/MANIFEST.in '^include flags2env\.py$'
+require_contains clients/python/MANIFEST.in '^include README\.md$'
+require_contains clients/python/MANIFEST.in '^exclude publish\.sh$'
+require_contains clients/python/pyproject.toml 'setuptools>=77'
+require_contains clients/python/pyproject.toml '^license = "MIT"$'
+forbid_contains clients/python/pyproject.toml 'license = \{ text = "MIT" \}'
 require_contains clients/rust/Cargo.toml '^include = \['
 require_contains clients/rust/Cargo.toml '"native/\*\*"'
 require_contains clients/rust/Cargo.toml '"tests/\*\*"'
@@ -373,18 +382,24 @@ require_contains clients/kotlin/build.gradle.kts 'maven-publish'
 require_contains clients/kotlin/build.gradle.kts 'java-library'
 require_contains clients/kotlin/build.gradle.kts 'artifactId = "flags2env-kotlin"'
 require_contains clients/kotlin/build.gradle.kts 'exclude\("publish\.sh"\)'
+require_contains clients/kotlin/build.gradle.kts 'setRequired \{ project\.hasProperty\("release"\) \}'
 require_contains clients/kotlin/build.gradle.kts 'ossrh-staging-api\.central\.sonatype\.com'
 require_contains clients/groovy/build.gradle "maven-publish"
 require_contains clients/groovy/build.gradle "java-library"
 require_contains clients/groovy/build.gradle "artifactId = 'flags2env-groovy'"
 require_contains clients/groovy/build.gradle "exclude 'publish\\.sh'"
+require_contains clients/groovy/build.gradle "required \\{ project\\.hasProperty\\('release'\\) \\}"
 require_contains clients/groovy/build.gradle 'ossrh-staging-api\.central\.sonatype\.com'
 require_contains clients/scala/build.sbt 'sonatype'
 require_contains clients/scala/build.sbt 'sonatypeCentralHost'
 require_contains clients/scala/build.sbt 'flags2env-scala'
 require_contains clients/clojure/build.clj 'sign-and-deploy-file'
 require_contains clients/clojure/build.clj 'CENTRAL_OSSRH_DEPLOY_URL'
+require_contains clients/clojure/build.clj 'javadoc-jar-file'
+require_contains clients/clojure/build.clj '\(defn javadoc-jar'
+require_contains clients/clojure/build.clj '"-Djavadoc="'
 require_contains clients/clojure/build.clj 'flags2env-clojure'
+require_contains scripts/docker-check-new-clients.sh 'clojure -T:build javadoc-jar'
 require_contains clients/csharp/Flags2Env.nuspec '<files>'
 require_contains clients/csharp/Flags2Env.nuspec 'exclude='
 require_contains clients/csharp/Flags2Env.nuspec 'native/parser\.c'
@@ -450,6 +465,8 @@ require_contains clients/gleam/Dockerfile 'clients/erlang/parser\.c'
 forbid_contains clients/gleam/Dockerfile 'COPY src|COPY tests|src/parser\.c|tests/fixtures'
 forbid_contains clients/gleam/test.gleam '/repo/tests|tests/fixtures'
 require_contains clients/haskell/flags2env.cabal '^extra-source-files:'
+require_contains clients/haskell/flags2env.cabal '^license-file: LICENSE$'
+require_contains clients/haskell/flags2env.cabal '^  LICENSE$'
 require_contains clients/haskell/flags2env.cabal '^test-suite flags2env-smoke$'
 require_contains clients/haskell/flags2env.cabal '^  main-is: test\.hs$'
 require_contains clients/ocaml/dune '^\(test'
@@ -503,11 +520,13 @@ require_contains scripts/render-client.mjs 'native'
 require_contains scripts/publish-client.sh 'cp src/parser\.c src/parser\.h dist/r/src/'
 require_contains scripts/publish-client.sh 'npm publish --access public'
 require_contains scripts/publish-client.sh 'node scripts/render-client\.mjs deno dist/deno'
+require_contains scripts/publish-client.sh '\$\{PYTHON:-python3\} -m build'
 require_contains scripts/publish-client.sh 'twine upload'
 require_contains scripts/publish-client.sh 'clients/golang/v\$'
 require_contains scripts/publish-client.sh 'git tag "\$\{PACKAGE_VERSION:\?set PACKAGE_VERSION\}"'
 require_contains scripts/publish-client.sh 'git push origin "v\$\{PACKAGE_VERSION\}"'
 require_contains scripts/publish-client.sh 'mvn -P release deploy'
+require_contains scripts/publish-client.sh 'gradle -Prelease publish'
 require_contains scripts/publish-client.sh 'sbt publishSigned sonatypeBundleRelease'
 require_contains scripts/publish-client.sh 'publish-central-ossrh-compat\.sh'
 require_contains scripts/publish-client.sh 'dotnet nuget push'

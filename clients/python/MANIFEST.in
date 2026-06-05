@@ -3,4 +3,5 @@ include flags2env.py
 include README.md
 recursive-exclude native *
 exclude Dockerfile
+exclude publish.sh
 exclude test.py

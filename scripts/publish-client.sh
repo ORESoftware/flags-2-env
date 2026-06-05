@@ -89,19 +89,19 @@ case "$client" in
     run_root 'node scripts/render-client.mjs deno dist/deno && cd dist/deno && deno publish --dry-run && deno publish'
     ;;
   python)
-    run 'python -m build && twine check dist/* && twine upload dist/*'
+    run '${PYTHON:-python3} -m build && twine check dist/* && twine upload dist/*'
     ;;
   java)
     run 'mvn -P release deploy'
     ;;
   kotlin|groovy)
-    run 'gradle publish && ../../scripts/publish-central-ossrh-compat.sh "${CENTRAL_NAMESPACE:?set CENTRAL_NAMESPACE}"'
+    run 'gradle -Prelease publish && ../../scripts/publish-central-ossrh-compat.sh "${CENTRAL_NAMESPACE:?set CENTRAL_NAMESPACE}"'
     ;;
   scala)
     run 'sbt publishSigned sonatypeBundleRelease'
     ;;
   clojure)
-    run 'clojure -T:build jar && clojure -T:build deploy && ../../scripts/publish-central-ossrh-compat.sh "${CENTRAL_NAMESPACE:?set CENTRAL_NAMESPACE}"'
+    run 'clojure -T:build deploy && ../../scripts/publish-central-ossrh-compat.sh "${CENTRAL_NAMESPACE:?set CENTRAL_NAMESPACE}"'
     ;;
   rust)
     run 'cargo package && cargo publish'
