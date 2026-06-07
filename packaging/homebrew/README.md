@@ -3,6 +3,9 @@
 `Formula/flags2env.rb` is the tap formula for the native `flags2env` CLI. It
 builds the C executable and library with `make all`, installs the bash/zsh shell
 helpers, and tests both JSON parsing and `shell-env` export output.
+The formula targets Homebrew on macOS and Linux/WSL. On Linux it declares
+Homebrew `gcc` as a build dependency; on macOS Homebrew uses the system developer
+toolchain compiler.
 
 Before publishing a stable formula, create and push the matching git tag
 (`v0.1.0` for the current formula), then run:

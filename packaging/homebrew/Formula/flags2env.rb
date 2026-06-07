@@ -6,7 +6,9 @@ class Flags2env < Formula
   license "MIT"
   head "https://github.com/ORESoftware/flags-2-env.git", branch: "main"
 
-  depends_on "gcc" => :build
+  on_linux do
+    depends_on "gcc" => :build
+  end
 
   def install
     system "make", "all"
