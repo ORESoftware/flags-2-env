@@ -3,6 +3,7 @@ dist/
 node_modules/
 target/
 clients/rust/Cargo.lock
+clients/*/.gradle/
 .dart_tool/
 clients/dart/pubspec.lock
 __pycache__/
