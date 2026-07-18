@@ -7,3 +7,5 @@ clients/rust/Cargo.lock
 clients/dart/pubspec.lock
 __pycache__/
 *.log
+.gradle/
+**/.gradle/
