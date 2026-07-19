@@ -243,6 +243,36 @@ case "$completion_zsh_path" in
     ;;
 esac
 
+CODEGEN_CONFIG="$ROOT_DIR/tests/codegen/.cli-flags.toml"
+generated_typescript="$("$CLI" generate typescript "$CODEGEN_CONFIG" --name CliStuff)"
+case "$generated_typescript" in
+  *'export interface CliStuff'*'PORT: number;'*'NAME?: string;'*'ITEMS: unknown[];'*'LABELS: Record<string, unknown>;'*)
+    ;;
+  *)
+    printf 'Unexpected generated TypeScript interface:\n%s\n' "$generated_typescript" >&2
+    exit 1
+    ;;
+esac
+
+generated_schema="$("$CLI" generate json-schema --config "$CODEGEN_CONFIG" --name CliStuff)"
+case "$generated_schema" in
+  *'"title": "CliStuff"'*'"RATIO": {"type":"number"'*'"ITEMS": {"type":"array"'*'"LABELS": {"type":"object"'*)
+    ;;
+  *)
+    printf 'Unexpected generated JSON Schema:\n%s\n' "$generated_schema" >&2
+    exit 1
+    ;;
+esac
+
+set +e
+"$CLI" generate unsupported "$CODEGEN_CONFIG" >/dev/null 2>/dev/null
+status=$?
+set -e
+if [ "$status" -eq 0 ]; then
+  printf 'Unsupported codegen language should fail\n' >&2
+  exit 1
+fi
+
 set +e
 "$CLI" completion bash / "$FIXTURE_DIR/.cli-flags.toml" >/dev/null 2>/dev/null
 status=$?

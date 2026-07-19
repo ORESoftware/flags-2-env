@@ -1033,6 +1033,16 @@ do
 done
 
 native_lib="$(native_library_name)"
+require_contains src/parser.h 'f2e_generate_types_from_file'
+require_contains src/parser.h 'f2e_coerce_json_from_file'
+require_contains clients/nodejs/addon.c 'coerceJson'
+require_contains clients/nodejs/addon.c 'generateTypes'
+require_contains clients/nodejs/lib.mjs 'export function coerce'
+require_contains clients/nodejs/lib.mjs 'export function parseFromArgs'
+require_contains clients/nodejs/lib.mjs 'export function generateTypes'
+require_contains clients/nodejs/lib.cjs 'CoercionError'
+require_contains clients/nodejs/lib.ts 'export function coerce'
+require_contains clients/nodejs/cli.mjs '"generate"'
 audit_rendered_js_client nodejs package.json binding.gyp addon.c src/parser.c src/parser.h lib.mjs lib.cjs lib.ts cli.mjs
 audit_rendered_js_client bun package.json "native/$native_lib" lib.mjs lib.cjs lib.ts
 audit_rendered_js_client deno deno.json "native/$native_lib" mod.ts lib.ts

@@ -1,0 +1,46 @@
+[parse]
+errors_env = "F2E_PARSE_ERRORS"
+
+[flags.port]
+env = "PORT"
+aliases = ["port"]
+type = "integer"
+default = 3000
+help = "TCP port for the listener."
+
+[flags.ratio]
+env = "RATIO"
+aliases = ["ratio"]
+type = "double"
+default = 0.5
+help = "Sampling ratio."
+
+[flags.debug]
+env = "DEBUG"
+aliases = ["debug"]
+type = "bool"
+default = false
+true_aliases = ["1", "yes"]
+false_aliases = ["0", "no"]
+
+[flags.name]
+env = "NAME"
+aliases = ["name"]
+type = "string"
+
+[flags.items]
+env = "ITEMS"
+aliases = ["items"]
+type = "array"
+default = "[1,\"two\"]"
+
+[flags.labels]
+env = "LABELS"
+aliases = ["labels"]
+type = "map"
+default = "{\"region\":\"us\"}"
+
+[flags.payload]
+env = "PAYLOAD"
+aliases = ["payload"]
+type = "json"

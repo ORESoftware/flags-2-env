@@ -1,0 +1,17 @@
+[flags.bad_float]
+env = "BAD_FLOAT"
+aliases = ["bad-float"]
+type = "double"
+default = "nan"
+
+[flags.bad_array]
+env = "BAD_ARRAY"
+aliases = ["bad-array"]
+type = "array"
+default = "{}"
+
+[flags.bad_map]
+env = "BAD_MAP"
+aliases = ["bad-map"]
+type = "map"
+default = "[]"

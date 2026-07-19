@@ -101,6 +101,22 @@ char *f2e_completion_script(const char *shell, const char *command_name) F2E_OWN
 char *f2e_completion_script_from_file(const char *config_path, const char *shell, const char *command_name) F2E_OWNED_RESULT;
 
 /*
+ * Generates importable types from .cli-flags.toml. Supported language names
+ * are typescript, python, go, rust, java, csharp, and json-schema, with common
+ * short aliases. type_name defaults to CliConfig when NULL or empty.
+ */
+char *f2e_generate_types(const char *language, const char *type_name) F2E_OWNED_RESULT;
+char *f2e_generate_types_from_file(const char *config_path, const char *language, const char *type_name) F2E_OWNED_RESULT;
+
+/*
+ * Coerces declared env keys from a JSON object according to .cli-flags.toml.
+ * Runtime flag maps remain string-valued; this explicit boundary returns a
+ * JSON report: {"ok":true,"value":{...}} or {"ok":false,"errors":[...]}.
+ */
+char *f2e_coerce_json(const char *values_json) F2E_OWNED_RESULT;
+char *f2e_coerce_json_from_file(const char *config_path, const char *values_json) F2E_OWNED_RESULT;
+
+/*
  * Audits a .env file against the env keys declared by .cli-flags.toml.
  * Unknown .env keys are errors unless ignored by config; declared TOML env
  * keys missing from .env are warnings because they may be optional or supplied

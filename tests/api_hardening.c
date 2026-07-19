@@ -13,6 +13,8 @@
 #define INVALID_ENV_ONLY_CONFIG "tests/audit-invalid-env-only/.cli-flags.toml"
 #define TYPED_CONFIG "tests/typed/.cli-flags.toml"
 #define NATIVE_SCALARS_CONFIG "tests/native-scalars/.cli-flags.toml"
+#define CODEGEN_CONFIG "tests/codegen/.cli-flags.toml"
+#define INVALID_CODEGEN_CONFIG "tests/audit-invalid-codegen/.cli-flags.toml"
 #define INVALID_TYPED_CONFIG "tests/audit-invalid-typed/.cli-flags.toml"
 #define INVALID_TYPE_CONFIG "tests/audit-invalid-type/.cli-flags.toml"
 #define ENV_AUDIT_CONFIG "tests/env-audit/.cli-flags.toml"
@@ -143,6 +145,75 @@ int main(void) {
               f2e_parse_from_file(NATIVE_SCALARS_CONFIG, 7, native_overrides),
               "{\"PORT\":\"+12\",\"DEBUG\":\"true\",\"PAYLOAD\":\"true\"}");
 
+  const char *codegen_values[] = {"app", "--ratio", "-1.25", "--items", "[3,4]", "--labels", "{\"tier\":2}", "--payload", "null"};
+  expect_json("double and JSON container values remain strings before coercion",
+              f2e_parse_from_file(CODEGEN_CONFIG, 9, codegen_values),
+              "{\"PORT\":\"3000\",\"RATIO\":\"-1.25\",\"DEBUG\":\"false\",\"ITEMS\":\"[3,4]\",\"LABELS\":\"{\\\"tier\\\":2}\",\"PAYLOAD\":\"null\"}");
+
+  const char *invalid_containers[] = {"app", "--items={\"bad\":1}", "--labels=[]"};
+  expect_json("array and map types reject the wrong JSON container",
+              f2e_parse_from_file(CODEGEN_CONFIG, 3, invalid_containers),
+              "{\"PORT\":\"3000\",\"RATIO\":\"0.5\",\"DEBUG\":\"false\",\"ITEMS\":\"[1,\\\"two\\\"]\",\"LABELS\":\"{\\\"region\\\":\\\"us\\\"}\",\"F2E_PARSE_ERRORS\":\"[\\\"flags.items value \\\\\\\"{\\\\\\\"bad\\\\\\\":1}\\\\\\\" is not a valid JSON array\\\",\\\"flags.labels value \\\\\\\"[]\\\\\\\" is not a valid JSON object\\\"]\"}");
+
+  expect_json("coerce strings and schema defaults",
+              f2e_coerce_json_from_file(CODEGEN_CONFIG,
+                                        "{\"RATIO\":\"1.25\",\"ITEMS\":\"[3,4]\",\"LABELS\":\"{\\\"tier\\\":2}\",\"PAYLOAD\":\"null\",\"IGNORED\":\"x\"}"),
+              "{\"ok\":true,\"value\":{\"PORT\":3000,\"RATIO\":1.25,\"DEBUG\":false,\"ITEMS\":[3,4],\"LABELS\":{\"tier\":2},\"PAYLOAD\":null}}");
+
+  expect_json("coerce accepts already typed JSON values",
+              f2e_coerce_json_from_file(CODEGEN_CONFIG,
+                                        "{\"PORT\":42,\"DEBUG\":true,\"ITEMS\":[1],\"LABELS\":{\"a\":1}}"),
+              "{\"ok\":true,\"value\":{\"PORT\":42,\"RATIO\":0.5,\"DEBUG\":true,\"ITEMS\":[1],\"LABELS\":{\"a\":1}}}");
+
+  expect_json("coerce aggregates type errors",
+              f2e_coerce_json_from_file(CODEGEN_CONFIG,
+                                        "{\"PORT\":\"nope\",\"RATIO\":\"nan\",\"ITEMS\":\"{}\",\"LABELS\":\"[]\"}"),
+              "{\"ok\":false,\"errors\":[\"env PORT must be an integer\",\"env RATIO must be a finite number\",\"env ITEMS must be a JSON array\",\"env LABELS must be a JSON object\"]}");
+
+  expect_json("coerce preserves parser errors",
+              f2e_coerce_json_from_file(CODEGEN_CONFIG,
+                                        "{\"F2E_PARSE_ERRORS\":\"[\\\"flags.ratio value is invalid\\\"]\"}"),
+              "{\"ok\":false,\"errors\":[\"flags.ratio value is invalid\"]}");
+
+  expect_json("coerce rejects non-object input",
+              f2e_coerce_json_from_file(CODEGEN_CONFIG, "[]"),
+              "{\"ok\":false,\"errors\":[\"values must be a valid JSON object with supported value sizes\"]}");
+
+  char *typescript_types = f2e_generate_types_from_file(CODEGEN_CONFIG, "typescript", "CliStuff");
+  expect_contains("typescript codegen interface", typescript_types, "export interface CliStuff");
+  expect_contains("typescript codegen number", typescript_types, "RATIO: number;");
+  expect_contains("typescript codegen optional string", typescript_types, "NAME?: string;");
+  expect_contains("typescript codegen map", typescript_types, "LABELS: Record<string, unknown>;");
+  f2e_free(typescript_types);
+
+  const char *languages[][2] = {
+      {"python", "class CliStuff("},
+      {"go", "type CliStuff struct"},
+      {"rust", "pub struct CliStuff"},
+      {"java", "public record CliStuff"},
+      {"csharp", "public sealed record CliStuff"},
+      {"json-schema", "\"title\": \"CliStuff\""},
+  };
+  for (size_t i = 0; i < sizeof(languages) / sizeof(languages[0]); i++) {
+    char *generated = f2e_generate_types_from_file(CODEGEN_CONFIG, languages[i][0], "CliStuff");
+    expect_contains("language codegen", generated, languages[i][1]);
+    f2e_free(generated);
+  }
+
+  char *unsupported_codegen = f2e_generate_types_from_file(CODEGEN_CONFIG, "brainfuck", "CliStuff");
+  if (unsupported_codegen) {
+    fprintf(stderr, "unsupported codegen language should return NULL\n");
+    f2e_free(unsupported_codegen);
+    exit(1);
+  }
+
+  char *invalid_name_codegen = f2e_generate_types_from_file(CODEGEN_CONFIG, "typescript", "bad-name");
+  if (invalid_name_codegen) {
+    fprintf(stderr, "invalid generated type name should return NULL\n");
+    f2e_free(invalid_name_codegen);
+    exit(1);
+  }
+
   const char *typed_valid[] = {"app", "--must-be-int", "1", "--is-json", "{\"foo\":\"bar\"}"};
   expect_json("typed integer and json valid",
               f2e_parse_from_file(TYPED_CONFIG, 5, typed_valid),
@@ -224,6 +295,11 @@ int main(void) {
   expect_json("invalid typed defaults audit report",
               f2e_audit_config_from_file(INVALID_TYPED_CONFIG),
               "{\"ok\":false,\"errorCount\":3,\"warningCount\":0,\"errors\":[\"flags.must_be_int default \\\"x\\\" is not a valid integer\",\"flags.is_json default \\\"{bad\\\" is not valid JSON\",\"flags.too_large default \\\"9223372036854775808\\\" is not a valid integer\"],\"warnings\":[]}");
+
+  expect_status("invalid codegen defaults audit", f2e_audit_config_status_from_file(INVALID_CODEGEN_CONFIG), 1);
+  expect_json("invalid codegen defaults audit report",
+              f2e_audit_config_from_file(INVALID_CODEGEN_CONFIG),
+              "{\"ok\":false,\"errorCount\":3,\"warningCount\":0,\"errors\":[\"flags.bad_float default \\\"nan\\\" is not a valid double\",\"flags.bad_array default \\\"{}\\\" is not a valid JSON array\",\"flags.bad_map default \\\"[]\\\" is not a valid JSON object\"],\"warnings\":[]}");
 
   expect_status("invalid type audit", f2e_audit_config_status_from_file(INVALID_TYPE_CONFIG), 1);
   expect_json("invalid type audit report",

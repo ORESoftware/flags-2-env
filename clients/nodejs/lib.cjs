@@ -2,6 +2,14 @@
 
 let nativeModule;
 
+class CoercionError extends TypeError {
+  constructor(errors) {
+    super(`flags2env could not coerce config: ${errors.join("; ")}`);
+    this.name = "CoercionError";
+    this.errors = [...errors];
+  }
+}
+
 function native() {
   if (!nativeModule) {
     nativeModule = require(process.env.FLAGS2ENV_NODE_ADDON || "./build/Release/flags2env.node");
@@ -66,6 +74,10 @@ function parse(argv = process.argv, options = {}) {
   return withHelpMetadata(JSON.parse(raw), argvItems, argvJson, options);
 }
 
+function parseFromArgs(argv = process.argv, options = {}) {
+  return parse(argv, options);
+}
+
 function parseProcess(options = {}) {
   const argvItems = process.argv.map(String);
   const argvJson = JSON.stringify(argvItems);
@@ -109,16 +121,44 @@ function completionScript(shell, command = "flags2env", options = {}) {
     : native().completionScript(String(shell), String(command));
 }
 
+function generateTypes(language, options = {}) {
+  return options.configPath
+    ? native().generateTypes(String(language), options.typeName, options.configPath)
+    : native().generateTypes(String(language), options.typeName);
+}
+
+function coerce(values = process.env, options = {}) {
+  if (!values || typeof values !== "object" || Array.isArray(values)) {
+    throw new TypeError("coerce values must be an object");
+  }
+  const valuesJson = JSON.stringify(values);
+  if (typeof valuesJson !== "string") {
+    throw new TypeError("coerce values must be JSON serializable");
+  }
+  const raw = options.configPath
+    ? native().coerceJson(valuesJson, options.configPath)
+    : native().coerceJson(valuesJson);
+  const report = JSON.parse(raw);
+  if (!report.ok) {
+    throw new CoercionError(report.errors);
+  }
+  return report.value;
+}
+
 module.exports = {
   parse,
+  parseFromArgs,
   parseProcess,
   apply,
   applyProcess,
+  coerce,
+  CoercionError,
   auditConfig,
   auditConfigStatus,
   auditEnv,
   auditEnvStatus,
   completionScript,
+  generateTypes,
   helpTable,
 };
 module.exports.default = module.exports;

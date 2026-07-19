@@ -45,6 +45,22 @@ aliases = ["payload"]
 type = "json"
 help = "JSON payload string."
 
+[flags.ratio]
+env = "SAMPLE_RATIO"
+aliases = ["sample-ratio"]
+type = "double"
+default = 0.5
+
+[flags.tags]
+env = "TAGS"
+aliases = ["tags"]
+type = "array"
+
+[flags.labels]
+env = "LABELS"
+aliases = ["labels"]
+type = "map"
+
 [flags.retries]
 env = "RETRIES"
 aliases = ["retries"]
@@ -100,7 +116,7 @@ Supported CLI forms:
 -dv
 ```
 
-Every parsed value is returned as a string. `type = "integer"` and `type = "json"` validate the CLI value, but they still return the accepted value as a string so each runtime can decide whether to parse it into a number, map, object, struct, or keep it as an env string. `type = "int"` is accepted as a shorthand alias for `type = "integer"`. Integers are signed base-10 values that fit in C's `long long`; invalid or out-of-range values are not applied. If a typed value is invalid, declare `errors_env = "FLAGS2ENV_PARSE_ERRORS"` in `[parse]` to receive a JSON-array string of validation errors.
+Every parsed value is returned as a string. Declared types validate CLI values without changing that env-compatible result: `integer`/`int`, `double`/`float`/`number`, `bool`, `json`, `array`/`list`, and `map`/`object` are supported. `array` and `map` values use JSON syntax and enforce the top-level container. Integers are signed base-10 values that fit in C's `long long`; doubles must be finite. Invalid or out-of-range values are not applied. If a typed value is invalid, declare `errors_env = "FLAGS2ENV_PARSE_ERRORS"` in `[parse]` to receive a JSON-array string of validation errors.
 
 Separated values do not consume the next token when it looks like another option. For example, `--port --unknown` leaves `PORT` unchanged and lets `--unknown` be ignored or reported through `unknown_options_env`. Use equals for string values that begin with `-`, such as `--host=-internal`; typed negative numbers like `--retries -1` are accepted in separated form.
 
@@ -159,6 +175,8 @@ char *f2e_help_table_from_file(const char *config_path, const char *command_name
 int f2e_print_table_from_file(const char *config_path, const char *command_name, int terminal_columns);
 char *f2e_audit_config_from_file(const char *config_path);
 char *f2e_completion_script_from_file(const char *config_path, const char *shell, const char *command_name);
+char *f2e_generate_types_from_file(const char *config_path, const char *language, const char *type_name);
+char *f2e_coerce_json_from_file(const char *config_path, const char *values_json);
 char *f2e_audit_env_file_from_file(const char *config_path, const char *env_path);
 void f2e_free(char *value);
 ```
@@ -182,6 +200,31 @@ build/flags2env completion zsh mycli .cli-flags.toml > _mycli
 ```
 
 The generated completion scripts are static. They do not invoke `flags2env`, read TOML, or do filesystem lookup while the shell is completing, so tab completion stays fast.
+
+## Typed Config Generation
+
+Generate an importable env-keyed type from `.cli-flags.toml`:
+
+```sh
+f2e generate typescript .cli-flags.toml --name CliStuff > generated/cli-interfaces.ts
+f2e generate python .cli-flags.toml --name CliStuff > generated/cli_interfaces.py
+f2e generate go .cli-flags.toml --name CliStuff > generated/cli_config.go
+```
+
+The native generator supports TypeScript (`ts`), Python (`py`), Go (`golang`), Rust (`rs`), Java, C# (`cs`/`dotnet`), and JSON Schema. Properties use the declared `env` names. A flag with a default is required in the generated type because `coerce()` can always supply it; a flag without a default is optional.
+
+For Node.js/TypeScript, merge the raw env and CLI maps first, then cross the explicit typed boundary:
+
+```ts
+import * as f2e from "@oresoftware/f2e";
+import type { CliStuff } from "../generated/cli-interfaces.js";
+
+const cli = f2e.parseFromArgs(process.argv);
+const config = { ...process.env, ...cli };
+const typedConfig: CliStuff = f2e.coerce(config);
+```
+
+`parseFromArgs()` remains string-valued. `coerce()` keeps only keys declared in `.cli-flags.toml`, applies schema defaults, converts integers, doubles, booleans, JSON, arrays, and maps, and throws `CoercionError` with all invalid keys when conversion fails. Errors already collected in the configured `[parse] errors_env` are carried into the same exception. Pass `{ configPath: "path/to/.cli-flags.toml" }` as the second argument when config discovery is not appropriate.
 
 Completion command names are reduced to a safe basename such as `mycli`, and command names, aliases, short flags, boolean value aliases, and env keys are audited for shell-safe characters before scripts are emitted.
 
@@ -368,29 +411,11 @@ const combined = getEnvMap();
 
 ```ts
 import * as f2e from "@oresoftware/f2e";
+import type { CliStuff } from "../generated/cli-interfaces.js";
 
-type AppEnv = {
-  nodeEnv: string;
-  port: number;
-  isDebug: boolean;
-};
-
-function getEnvMap(argv = process.argv): Record<string, string> {
-  return { ...process.env, ...f2e.parse(argv) };
-}
-
-const combined = getEnvMap();
-
-const toInt = (value: string | undefined, fallback: number) => {
-  const parsed = Number.parseInt(value ?? "", 10);
-  return Number.isFinite(parsed) ? parsed : fallback;
-};
-
-const appEnv: AppEnv = {
-  nodeEnv: combined.NODE_ENV ?? "development",
-  port: toInt(combined.PORT, 3000),
-  isDebug: combined.DEBUG === "true",
-};
+const cli = f2e.parseFromArgs(process.argv);
+const combined = { ...process.env, ...cli };
+const appEnv: CliStuff = f2e.coerce(combined);
 
 export default appEnv;
 ```

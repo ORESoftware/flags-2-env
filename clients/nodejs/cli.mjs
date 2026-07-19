@@ -8,6 +8,7 @@ import {
   auditEnv,
   auditEnvStatus,
   completionScript,
+  generateTypes,
   parse,
 } from "./lib.mjs";
 
@@ -17,9 +18,56 @@ function usage(stream = process.stderr) {
       "  f2e [argv...]\n" +
       "  f2e audit [config]\n" +
       "  f2e audit env [config] [env]\n" +
+      "  f2e generate <language> [config] [--name TypeName]\n" +
       "  f2e completion <bash|zsh> <command> [config]\n" +
       "  f2e completion install <bash|zsh> <command> [config]\n",
   );
+}
+
+function runGenerate(args) {
+  if (args.length === 0 || args[0] === "--help" || args[0] === "-h") {
+    usage(args.length === 0 ? process.stderr : process.stdout);
+    return args.length === 0 ? 2 : 0;
+  }
+
+  const language = args[0];
+  let configPath;
+  let typeName;
+  for (let index = 1; index < args.length; index += 1) {
+    const token = args[index];
+    if (token === "--name" || token === "-n") {
+      if (index + 1 >= args.length) {
+        usage();
+        return 2;
+      }
+      typeName = args[index += 1];
+      continue;
+    }
+    if (token.startsWith("--name=")) {
+      typeName = token.slice("--name=".length);
+      continue;
+    }
+    if (token === "--config" || token === "-c") {
+      if (index + 1 >= args.length) {
+        usage();
+        return 2;
+      }
+      configPath = args[index += 1];
+      continue;
+    }
+    if (token.startsWith("--config=")) {
+      configPath = token.slice("--config=".length);
+      continue;
+    }
+    if (token.startsWith("-") || configPath) {
+      usage();
+      return 2;
+    }
+    configPath = token;
+  }
+
+  process.stdout.write(generateTypes(language, { configPath, typeName }));
+  return 0;
 }
 
 function printJson(value) {
@@ -103,6 +151,10 @@ function installCompletion(shell, command, configPath) {
 function main(argv) {
   const [command, ...rest] = argv;
   let parsedForCli;
+
+  if (["generate", "gen", "codegen"].includes(command)) {
+    return runGenerate(rest);
+  }
 
   if (command) {
     parsedForCli = parse([process.argv[1], ...argv]);

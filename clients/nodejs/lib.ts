@@ -10,6 +10,10 @@ export type HelpTableOptions = Flags2EnvOptions & {
   terminalColumns?: number;
 };
 
+export type GenerateTypesOptions = Flags2EnvOptions & {
+  typeName?: string;
+};
+
 export type TableWriter = {
   columns?: number;
   write(chunk: string): unknown;
@@ -32,6 +36,22 @@ export type AuditReport = {
   warnings: string[];
 };
 
+export type CoerceInput = Readonly<Record<string, unknown>>;
+
+type CoerceReport =
+  | { ok: true; value: Record<string, unknown> }
+  | { ok: false; errors: string[] };
+
+export class CoercionError extends TypeError {
+  readonly errors: readonly string[];
+
+  constructor(errors: readonly string[]) {
+    super(`flags2env could not coerce config: ${errors.join("; ")}`);
+    this.name = "CoercionError";
+    this.errors = [...errors];
+  }
+}
+
 type NativeModule = {
   parseJson(argvJson: string, configPath?: string): string;
   parseProcessJson(configPath?: string): string;
@@ -40,6 +60,8 @@ type NativeModule = {
   auditEnvJson(configPath?: string, envPath?: string): string;
   auditEnvStatus(configPath?: string, envPath?: string): number;
   completionScript(shell: string, command?: string, configPath?: string): string;
+  generateTypes(language: string, typeName?: string, configPath?: string): string;
+  coerceJson(valuesJson: string, configPath?: string): string;
   isHelpJson(argvJson: string): boolean;
   helpTable(command?: string, terminalColumns?: number, configPath?: string): string;
 };
@@ -115,6 +137,10 @@ export function parse(argv: readonly unknown[] = process.argv, options: Flags2En
   return withHelpMetadata(JSON.parse(raw) as EnvMap, argvItems, argvJson, options);
 }
 
+export function parseFromArgs(argv: readonly unknown[] = process.argv, options: Flags2EnvOptions = {}): ParseResult {
+  return parse(argv, options);
+}
+
 export function parseProcess(options: Flags2EnvOptions = {}): ParseResult {
   const argvItems = process.argv.map(String);
   const argvJson = JSON.stringify(argvItems);
@@ -158,15 +184,46 @@ export function completionScript(shell: "bash" | "zsh" | string, command = "flag
     : native().completionScript(String(shell), String(command));
 }
 
+export function generateTypes(language: string, options: GenerateTypesOptions = {}): string {
+  return options.configPath
+    ? native().generateTypes(String(language), options.typeName, options.configPath)
+    : native().generateTypes(String(language), options.typeName);
+}
+
+export function coerce<T extends object = Record<string, unknown>>(
+  values: CoerceInput = process.env,
+  options: Flags2EnvOptions = {},
+): T {
+  if (!values || typeof values !== "object" || Array.isArray(values)) {
+    throw new TypeError("coerce values must be an object");
+  }
+  const valuesJson = JSON.stringify(values);
+  if (typeof valuesJson !== "string") {
+    throw new TypeError("coerce values must be JSON serializable");
+  }
+  const raw = options.configPath
+    ? native().coerceJson(valuesJson, options.configPath)
+    : native().coerceJson(valuesJson);
+  const report = JSON.parse(raw) as CoerceReport;
+  if (!report.ok) {
+    throw new CoercionError(report.errors);
+  }
+  return report.value as T;
+}
+
 export default {
   parse,
+  parseFromArgs,
   parseProcess,
   apply,
   applyProcess,
+  coerce,
+  CoercionError,
   auditConfig,
   auditConfigStatus,
   auditEnv,
   auditEnvStatus,
   completionScript,
+  generateTypes,
   helpTable,
 };

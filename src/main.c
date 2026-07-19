@@ -632,6 +632,67 @@ static int f2e_cli_run_completion(const char *shell, const char *command, const 
   return ok ? 0 : 1;
 }
 
+static void f2e_cli_generate_usage(void) {
+  f2e_cli_stderr_locked(
+      "%s",
+      "usage: flags2env generate <language> [config] [--name TypeName]\n"
+      "languages: typescript, python, go, rust, java, csharp, json-schema\n");
+}
+
+static int f2e_cli_run_generate(int argc, const char *const argv[]) {
+  if (argc < 3 || f2e_cli_streq(argv[2], "--help") || f2e_cli_streq(argv[2], "-h")) {
+    f2e_cli_generate_usage();
+    return argc < 3 ? 2 : 0;
+  }
+
+  const char *language = argv[2];
+  const char *config_path = NULL;
+  const char *type_name = NULL;
+  for (int i = 3; i < argc; i++) {
+    const char *token = argv[i];
+    if (f2e_cli_streq(token, "--name") || f2e_cli_streq(token, "-n")) {
+      if (i + 1 >= argc) {
+        f2e_cli_generate_usage();
+        return 2;
+      }
+      type_name = argv[++i];
+      continue;
+    }
+    if (strncmp(token, "--name=", 7) == 0) {
+      type_name = token + 7;
+      continue;
+    }
+    if (f2e_cli_streq(token, "--config") || f2e_cli_streq(token, "-c")) {
+      if (i + 1 >= argc) {
+        f2e_cli_generate_usage();
+        return 2;
+      }
+      config_path = argv[++i];
+      continue;
+    }
+    if (strncmp(token, "--config=", 9) == 0) {
+      config_path = token + 9;
+      continue;
+    }
+    if (token[0] == '-' || config_path) {
+      f2e_cli_generate_usage();
+      return 2;
+    }
+    config_path = token;
+  }
+
+  char *source = config_path ? f2e_generate_types_from_file(config_path, language, type_name)
+                             : f2e_generate_types(language, type_name);
+  if (!source) {
+    f2e_cli_stderr_locked("flags2env: could not generate %s types; check the language, type name, and config audit\n",
+                          language ? language : "");
+    return 1;
+  }
+  int ok = f2e_cli_stdout_write_locked(source);
+  f2e_free(source);
+  return ok ? 0 : 1;
+}
+
 static int f2e_cli_install_completion(const char *shell, const char *command, const char *config_path) {
   if (!f2e_cli_streq(shell, "bash") && !f2e_cli_streq(shell, "zsh")) {
     f2e_cli_stderr_locked("flags2env: unsupported completion shell: %s\n", shell ? shell : "");
@@ -717,6 +778,12 @@ static int f2e_cli_run_shell_env(int argc, const char *const argv[]) {
 }
 
 int main(int argc, const char *const argv[]) {
+  if (argc >= 2 && (f2e_cli_streq(argv[1], "generate") ||
+                    f2e_cli_streq(argv[1], "gen") ||
+                    f2e_cli_streq(argv[1], "codegen"))) {
+    return f2e_cli_run_generate(argc, argv);
+  }
+
   if (f2e_is_help_requested(argc, argv)) {
     const char *command = f2e_cli_help_command_name(argc, argv);
     if (f2e_print_table(command, 0) != 0) {

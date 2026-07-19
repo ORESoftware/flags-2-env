@@ -47,7 +47,10 @@ typedef enum {
   F2E_TYPE_STRING = 0,
   F2E_TYPE_BOOL = 1,
   F2E_TYPE_INT = 2,
-  F2E_TYPE_JSON = 3
+  F2E_TYPE_FLOAT = 3,
+  F2E_TYPE_JSON = 4,
+  F2E_TYPE_ARRAY = 5,
+  F2E_TYPE_MAP = 6
 } F2EValueType;
 
 typedef struct {
@@ -592,8 +595,23 @@ static int f2e_parse_type(const char *value, F2EValueType *type) {
     *type = F2E_TYPE_INT;
     return 1;
   }
+  if (f2e_streq(parsed, "float") || f2e_streq(parsed, "double") ||
+      f2e_streq(parsed, "number") || f2e_streq(parsed, "decimal")) {
+    *type = F2E_TYPE_FLOAT;
+    return 1;
+  }
   if (f2e_streq(parsed, "json")) {
     *type = F2E_TYPE_JSON;
+    return 1;
+  }
+  if (f2e_streq(parsed, "array") || f2e_streq(parsed, "list") ||
+      f2e_streq(parsed, "json-array")) {
+    *type = F2E_TYPE_ARRAY;
+    return 1;
+  }
+  if (f2e_streq(parsed, "map") || f2e_streq(parsed, "object") ||
+      f2e_streq(parsed, "dictionary") || f2e_streq(parsed, "json-object")) {
+    *type = F2E_TYPE_MAP;
     return 1;
   }
   return 0;
@@ -1543,14 +1561,78 @@ static int f2e_int_value_is_valid(const char *value) {
   return errno != ERANGE && end && *end == '\0';
 }
 
+static int f2e_float_value_is_valid(const char *value) {
+  if (!value || value[0] == '\0') {
+    return 0;
+  }
+  const char *cursor = value;
+  if (*cursor == '+' || *cursor == '-') {
+    cursor++;
+  }
+  if (!isdigit((unsigned char)*cursor)) {
+    return 0;
+  }
+  while (isdigit((unsigned char)*cursor)) {
+    cursor++;
+  }
+  if (*cursor == '.') {
+    cursor++;
+    if (!isdigit((unsigned char)*cursor)) {
+      return 0;
+    }
+    while (isdigit((unsigned char)*cursor)) {
+      cursor++;
+    }
+  }
+  if (*cursor == 'e' || *cursor == 'E') {
+    cursor++;
+    if (*cursor == '+' || *cursor == '-') {
+      cursor++;
+    }
+    if (!isdigit((unsigned char)*cursor)) {
+      return 0;
+    }
+    while (isdigit((unsigned char)*cursor)) {
+      cursor++;
+    }
+  }
+  if (*cursor != '\0') {
+    return 0;
+  }
+
+  errno = 0;
+  char *end = NULL;
+  (void)strtod(value, &end);
+  return errno != ERANGE && end && *end == '\0';
+}
+
+static int f2e_json_container_is_valid(const char *value, char opening) {
+  if (!value) {
+    return 0;
+  }
+  const char *cursor = value;
+  f2e_json_skip_ws(&cursor);
+  if (*cursor != opening || !f2e_json_parse_value(&cursor, 0)) {
+    return 0;
+  }
+  f2e_json_skip_ws(&cursor);
+  return *cursor == '\0';
+}
+
 static const char *f2e_value_type_name(F2EValueType type) {
   switch (type) {
     case F2E_TYPE_BOOL:
       return "bool";
     case F2E_TYPE_INT:
       return "integer";
+    case F2E_TYPE_FLOAT:
+      return "double";
     case F2E_TYPE_JSON:
       return "JSON";
+    case F2E_TYPE_ARRAY:
+      return "array";
+    case F2E_TYPE_MAP:
+      return "map";
     case F2E_TYPE_STRING:
     default:
       return "string";
@@ -1576,8 +1658,26 @@ static int f2e_normalize_flag_value(const F2EFlag *flag, const char *value, char
       }
       f2e_strlcpy(out, value, out_size);
       return 1;
+    case F2E_TYPE_FLOAT:
+      if (!f2e_float_value_is_valid(value)) {
+        return 0;
+      }
+      f2e_strlcpy(out, value, out_size);
+      return 1;
     case F2E_TYPE_JSON:
       if (!f2e_json_value_is_valid(value)) {
+        return 0;
+      }
+      f2e_strlcpy(out, value, out_size);
+      return 1;
+    case F2E_TYPE_ARRAY:
+      if (!f2e_json_container_is_valid(value, '[')) {
+        return 0;
+      }
+      f2e_strlcpy(out, value, out_size);
+      return 1;
+    case F2E_TYPE_MAP:
+      if (!f2e_json_container_is_valid(value, '{')) {
         return 0;
       }
       f2e_strlcpy(out, value, out_size);
@@ -1594,7 +1694,11 @@ static void f2e_report_invalid_value(F2EJsonList *errors, const F2EFlag *flag, c
     return;
   }
   char message[512];
-  if (flag->type == F2E_TYPE_JSON) {
+  if (flag->type == F2E_TYPE_ARRAY) {
+    snprintf(message, sizeof(message), "flags.%s value \"%s\" is not a valid JSON array", f2e_audit_flag_name(flag), value ? value : "");
+  } else if (flag->type == F2E_TYPE_MAP) {
+    snprintf(message, sizeof(message), "flags.%s value \"%s\" is not a valid JSON object", f2e_audit_flag_name(flag), value ? value : "");
+  } else if (flag->type == F2E_TYPE_JSON) {
     snprintf(message, sizeof(message), "flags.%s value \"%s\" is not valid JSON", f2e_audit_flag_name(flag), value ? value : "");
   } else {
     snprintf(message, sizeof(message), "flags.%s value \"%s\" is not a valid %s",
@@ -1662,7 +1766,10 @@ static int f2e_can_consume_separated_value(const F2EFlag *flag, const char *toke
   if (flag && flag->type == F2E_TYPE_INT) {
     return f2e_int_value_is_valid(token);
   }
-  if (flag && flag->type == F2E_TYPE_JSON) {
+  if (flag && flag->type == F2E_TYPE_FLOAT) {
+    return f2e_float_value_is_valid(token);
+  }
+  if (flag && (flag->type == F2E_TYPE_JSON || flag->type == F2E_TYPE_ARRAY || flag->type == F2E_TYPE_MAP)) {
     return f2e_json_value_is_valid(token);
   }
   return 0;
@@ -1886,8 +1993,23 @@ static void f2e_audit_bool_value_aliases(const F2EFlag *flag, F2EAudit *audit) {
                     f2e_audit_flag_name(flag),
                     flag->default_value);
     }
+    if (flag->has_default && flag->type == F2E_TYPE_FLOAT && !f2e_float_value_is_valid(flag->default_value)) {
+      f2e_audit_add(audit, 1, "flags.%s default \"%s\" is not a valid double",
+                    f2e_audit_flag_name(flag),
+                    flag->default_value);
+    }
     if (flag->has_default && flag->type == F2E_TYPE_JSON && !f2e_json_value_is_valid(flag->default_value)) {
       f2e_audit_add(audit, 1, "flags.%s default \"%s\" is not valid JSON",
+                    f2e_audit_flag_name(flag),
+                    flag->default_value);
+    }
+    if (flag->has_default && flag->type == F2E_TYPE_ARRAY && !f2e_json_container_is_valid(flag->default_value, '[')) {
+      f2e_audit_add(audit, 1, "flags.%s default \"%s\" is not a valid JSON array",
+                    f2e_audit_flag_name(flag),
+                    flag->default_value);
+    }
+    if (flag->has_default && flag->type == F2E_TYPE_MAP && !f2e_json_container_is_valid(flag->default_value, '{')) {
+      f2e_audit_add(audit, 1, "flags.%s default \"%s\" is not a valid JSON object",
                     f2e_audit_flag_name(flag),
                     flag->default_value);
     }
@@ -2804,6 +2926,556 @@ char *f2e_completion_script(const char *shell, const char *command_name) {
   char *script = f2e_completion_script_from_file(path, shell, command_name);
   free(path);
   return script;
+}
+
+static int f2e_codegen_identifier_is_valid(const char *value) {
+  if (!value || !(isalpha((unsigned char)value[0]) || value[0] == '_')) {
+    return 0;
+  }
+  for (const char *cursor = value + 1; *cursor; cursor++) {
+    if (!(isalnum((unsigned char)*cursor) || *cursor == '_')) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static const char *f2e_codegen_typescript_type(F2EValueType type) {
+  switch (type) {
+    case F2E_TYPE_BOOL:
+      return "boolean";
+    case F2E_TYPE_INT:
+    case F2E_TYPE_FLOAT:
+      return "number";
+    case F2E_TYPE_JSON:
+      return "unknown";
+    case F2E_TYPE_ARRAY:
+      return "unknown[]";
+    case F2E_TYPE_MAP:
+      return "Record<string, unknown>";
+    case F2E_TYPE_STRING:
+    default:
+      return "string";
+  }
+}
+
+static const char *f2e_codegen_python_type(F2EValueType type) {
+  switch (type) {
+    case F2E_TYPE_BOOL:
+      return "bool";
+    case F2E_TYPE_INT:
+      return "int";
+    case F2E_TYPE_FLOAT:
+      return "float";
+    case F2E_TYPE_JSON:
+      return "Any";
+    case F2E_TYPE_ARRAY:
+      return "List[Any]";
+    case F2E_TYPE_MAP:
+      return "Dict[str, Any]";
+    case F2E_TYPE_STRING:
+    default:
+      return "str";
+  }
+}
+
+static const char *f2e_codegen_go_type(F2EValueType type) {
+  switch (type) {
+    case F2E_TYPE_BOOL:
+      return "bool";
+    case F2E_TYPE_INT:
+      return "int64";
+    case F2E_TYPE_FLOAT:
+      return "float64";
+    case F2E_TYPE_JSON:
+      return "any";
+    case F2E_TYPE_ARRAY:
+      return "[]any";
+    case F2E_TYPE_MAP:
+      return "map[string]any";
+    case F2E_TYPE_STRING:
+    default:
+      return "string";
+  }
+}
+
+static const char *f2e_codegen_rust_type(F2EValueType type) {
+  switch (type) {
+    case F2E_TYPE_BOOL:
+      return "bool";
+    case F2E_TYPE_INT:
+      return "i64";
+    case F2E_TYPE_FLOAT:
+      return "f64";
+    case F2E_TYPE_JSON:
+      return "serde_json::Value";
+    case F2E_TYPE_ARRAY:
+      return "Vec<serde_json::Value>";
+    case F2E_TYPE_MAP:
+      return "std::collections::HashMap<String, serde_json::Value>";
+    case F2E_TYPE_STRING:
+    default:
+      return "String";
+  }
+}
+
+static const char *f2e_codegen_java_type(F2EValueType type, int optional) {
+  switch (type) {
+    case F2E_TYPE_BOOL:
+      return optional ? "Boolean" : "boolean";
+    case F2E_TYPE_INT:
+      return optional ? "Long" : "long";
+    case F2E_TYPE_FLOAT:
+      return optional ? "Double" : "double";
+    case F2E_TYPE_JSON:
+      return "Object";
+    case F2E_TYPE_ARRAY:
+      return "List<Object>";
+    case F2E_TYPE_MAP:
+      return "Map<String, Object>";
+    case F2E_TYPE_STRING:
+    default:
+      return "String";
+  }
+}
+
+static const char *f2e_codegen_csharp_type(F2EValueType type) {
+  switch (type) {
+    case F2E_TYPE_BOOL:
+      return "bool";
+    case F2E_TYPE_INT:
+      return "long";
+    case F2E_TYPE_FLOAT:
+      return "double";
+    case F2E_TYPE_JSON:
+      return "JsonElement";
+    case F2E_TYPE_ARRAY:
+      return "IReadOnlyList<JsonElement>";
+    case F2E_TYPE_MAP:
+      return "IReadOnlyDictionary<string, JsonElement>";
+    case F2E_TYPE_STRING:
+    default:
+      return "string";
+  }
+}
+
+static char *f2e_codegen_typescript(const F2EConfig *config, const char *type_name) {
+  F2EBuffer source;
+  if (!f2e_buffer_init(&source) ||
+      !f2e_buffer_append(&source, "/* Generated by flags2env from .cli-flags.toml. Do not edit. */\n\nexport interface ") ||
+      !f2e_buffer_append(&source, type_name) ||
+      !f2e_buffer_append(&source, " {\n")) {
+    free(source.data);
+    return NULL;
+  }
+  for (size_t i = 0; i < config->flag_count; i++) {
+    const F2EFlag *flag = &config->flags[i];
+    if (!f2e_buffer_append(&source, "  ") ||
+        !f2e_buffer_append(&source, flag->env) ||
+        (!flag->has_default && !f2e_buffer_append_char(&source, '?')) ||
+        !f2e_buffer_append(&source, ": ") ||
+        !f2e_buffer_append(&source, f2e_codegen_typescript_type(flag->type)) ||
+        !f2e_buffer_append(&source, ";\n")) {
+      free(source.data);
+      return NULL;
+    }
+  }
+  if (!f2e_buffer_append(&source, "}\n")) {
+    free(source.data);
+    return NULL;
+  }
+  return source.data;
+}
+
+static char *f2e_codegen_python(const F2EConfig *config, const char *type_name) {
+  size_t optional_count = 0;
+  for (size_t i = 0; i < config->flag_count; i++) {
+    optional_count += config->flags[i].has_default ? 0u : 1u;
+  }
+
+  F2EBuffer source;
+  if (!f2e_buffer_init(&source) ||
+      !f2e_buffer_append(&source, "# Generated by flags2env from .cli-flags.toml. Do not edit.\n\nfrom typing import Any, Dict, List, TypedDict\n\n")) {
+    free(source.data);
+    return NULL;
+  }
+
+  if (optional_count > 0) {
+    if (!f2e_buffer_append(&source, "class _") ||
+        !f2e_buffer_append(&source, type_name) ||
+        !f2e_buffer_append(&source, "Optional(TypedDict, total=False):\n")) {
+      free(source.data);
+      return NULL;
+    }
+    for (size_t i = 0; i < config->flag_count; i++) {
+      const F2EFlag *flag = &config->flags[i];
+      if (flag->has_default) {
+        continue;
+      }
+      if (!f2e_buffer_append(&source, "    ") ||
+          !f2e_buffer_append(&source, flag->env) ||
+          !f2e_buffer_append(&source, ": ") ||
+          !f2e_buffer_append(&source, f2e_codegen_python_type(flag->type)) ||
+          !f2e_buffer_append_char(&source, '\n')) {
+        free(source.data);
+        return NULL;
+      }
+    }
+    if (!f2e_buffer_append_char(&source, '\n') ||
+        !f2e_buffer_append(&source, "class ") ||
+        !f2e_buffer_append(&source, type_name) ||
+        !f2e_buffer_append(&source, "(_") ||
+        !f2e_buffer_append(&source, type_name) ||
+        !f2e_buffer_append(&source, "Optional):\n")) {
+      free(source.data);
+      return NULL;
+    }
+  } else if (!f2e_buffer_append(&source, "class ") ||
+             !f2e_buffer_append(&source, type_name) ||
+             !f2e_buffer_append(&source, "(TypedDict):\n")) {
+    free(source.data);
+    return NULL;
+  }
+
+  size_t required_count = 0;
+  for (size_t i = 0; i < config->flag_count; i++) {
+    const F2EFlag *flag = &config->flags[i];
+    if (!flag->has_default) {
+      continue;
+    }
+    required_count++;
+    if (!f2e_buffer_append(&source, "    ") ||
+        !f2e_buffer_append(&source, flag->env) ||
+        !f2e_buffer_append(&source, ": ") ||
+        !f2e_buffer_append(&source, f2e_codegen_python_type(flag->type)) ||
+        !f2e_buffer_append_char(&source, '\n')) {
+      free(source.data);
+      return NULL;
+    }
+  }
+  if (required_count == 0 && !f2e_buffer_append(&source, "    pass\n")) {
+    free(source.data);
+    return NULL;
+  }
+  return source.data;
+}
+
+static char *f2e_codegen_go(const F2EConfig *config, const char *type_name) {
+  F2EBuffer source;
+  if (!f2e_buffer_init(&source) ||
+      !f2e_buffer_append(&source, "// Code generated by flags2env from .cli-flags.toml. DO NOT EDIT.\n\npackage generated\n\ntype ") ||
+      !f2e_buffer_append(&source, type_name) ||
+      !f2e_buffer_append(&source, " struct {\n")) {
+    free(source.data);
+    return NULL;
+  }
+  for (size_t i = 0; i < config->flag_count; i++) {
+    const F2EFlag *flag = &config->flags[i];
+    if (!f2e_buffer_append(&source, "\t") ||
+        !f2e_buffer_append(&source, flag->env) ||
+        !f2e_buffer_append_char(&source, ' ') ||
+        (!flag->has_default && !f2e_buffer_append_char(&source, '*')) ||
+        !f2e_buffer_append(&source, f2e_codegen_go_type(flag->type)) ||
+        !f2e_buffer_append(&source, " `json:\"") ||
+        !f2e_buffer_append(&source, flag->env) ||
+        (!flag->has_default && !f2e_buffer_append(&source, ",omitempty")) ||
+        !f2e_buffer_append(&source, "\"`\n")) {
+      free(source.data);
+      return NULL;
+    }
+  }
+  if (!f2e_buffer_append(&source, "}\n")) {
+    free(source.data);
+    return NULL;
+  }
+  return source.data;
+}
+
+static char *f2e_codegen_rust(const F2EConfig *config, const char *type_name) {
+  F2EBuffer source;
+  if (!f2e_buffer_init(&source) ||
+      !f2e_buffer_append(&source, "// Generated by flags2env from .cli-flags.toml. Do not edit.\n\n#[allow(non_snake_case)]\n#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]\npub struct ") ||
+      !f2e_buffer_append(&source, type_name) ||
+      !f2e_buffer_append(&source, " {\n")) {
+    free(source.data);
+    return NULL;
+  }
+  for (size_t i = 0; i < config->flag_count; i++) {
+    const F2EFlag *flag = &config->flags[i];
+    if (!flag->has_default && !f2e_buffer_append(&source, "    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n")) {
+      free(source.data);
+      return NULL;
+    }
+    if (!f2e_buffer_append(&source, "    pub ") ||
+        !f2e_buffer_append(&source, flag->env) ||
+        !f2e_buffer_append(&source, ": ") ||
+        (!flag->has_default && !f2e_buffer_append(&source, "Option<")) ||
+        !f2e_buffer_append(&source, f2e_codegen_rust_type(flag->type)) ||
+        (!flag->has_default && !f2e_buffer_append_char(&source, '>')) ||
+        !f2e_buffer_append(&source, ",\n")) {
+      free(source.data);
+      return NULL;
+    }
+  }
+  if (!f2e_buffer_append(&source, "}\n")) {
+    free(source.data);
+    return NULL;
+  }
+  return source.data;
+}
+
+static char *f2e_codegen_java(const F2EConfig *config, const char *type_name) {
+  F2EBuffer source;
+  if (!f2e_buffer_init(&source) ||
+      !f2e_buffer_append(&source, "// Generated by flags2env from .cli-flags.toml. Do not edit.\npackage generated;\n\nimport java.util.List;\nimport java.util.Map;\n\npublic record ") ||
+      !f2e_buffer_append(&source, type_name) ||
+      !f2e_buffer_append(&source, "(\n")) {
+    free(source.data);
+    return NULL;
+  }
+  for (size_t i = 0; i < config->flag_count; i++) {
+    const F2EFlag *flag = &config->flags[i];
+    if (!f2e_buffer_append(&source, "    ") ||
+        !f2e_buffer_append(&source, f2e_codegen_java_type(flag->type, !flag->has_default)) ||
+        !f2e_buffer_append_char(&source, ' ') ||
+        !f2e_buffer_append(&source, flag->env) ||
+        (i + 1 < config->flag_count && !f2e_buffer_append_char(&source, ',')) ||
+        !f2e_buffer_append_char(&source, '\n')) {
+      free(source.data);
+      return NULL;
+    }
+  }
+  if (!f2e_buffer_append(&source, ") {}\n")) {
+    free(source.data);
+    return NULL;
+  }
+  return source.data;
+}
+
+static char *f2e_codegen_csharp(const F2EConfig *config, const char *type_name) {
+  F2EBuffer source;
+  if (!f2e_buffer_init(&source) ||
+      !f2e_buffer_append(&source, "// Generated by flags2env from .cli-flags.toml. Do not edit.\nusing System.Collections.Generic;\nusing System.Text.Json;\n\nnamespace Generated;\n\npublic sealed record ") ||
+      !f2e_buffer_append(&source, type_name) ||
+      !f2e_buffer_append(&source, "(\n")) {
+    free(source.data);
+    return NULL;
+  }
+  for (size_t i = 0; i < config->flag_count; i++) {
+    const F2EFlag *flag = &config->flags[i];
+    if (!f2e_buffer_append(&source, "    ") ||
+        !f2e_buffer_append(&source, f2e_codegen_csharp_type(flag->type)) ||
+        (!flag->has_default && !f2e_buffer_append_char(&source, '?')) ||
+        !f2e_buffer_append_char(&source, ' ') ||
+        !f2e_buffer_append(&source, flag->env) ||
+        (i + 1 < config->flag_count && !f2e_buffer_append_char(&source, ',')) ||
+        !f2e_buffer_append_char(&source, '\n')) {
+      free(source.data);
+      return NULL;
+    }
+  }
+  if (!f2e_buffer_append(&source, ");\n")) {
+    free(source.data);
+    return NULL;
+  }
+  return source.data;
+}
+
+static int f2e_codegen_append_default_json(F2EBuffer *buffer, const F2EFlag *flag) {
+  if (!buffer || !flag || !flag->has_default) {
+    return 0;
+  }
+  switch (flag->type) {
+    case F2E_TYPE_STRING:
+      return f2e_buffer_append_json_string(buffer, flag->default_value);
+    case F2E_TYPE_BOOL: {
+      const char *canonical = NULL;
+      return f2e_bool_value_alias(flag, flag->default_value, &canonical) && f2e_buffer_append(buffer, canonical);
+    }
+    case F2E_TYPE_INT: {
+      char canonical[64];
+      snprintf(canonical, sizeof(canonical), "%lld", strtoll(flag->default_value, NULL, 10));
+      return f2e_buffer_append(buffer, canonical);
+    }
+    case F2E_TYPE_FLOAT: {
+      char canonical[128];
+      snprintf(canonical, sizeof(canonical), "%.17g", strtod(flag->default_value, NULL));
+      return f2e_buffer_append(buffer, canonical);
+    }
+    case F2E_TYPE_JSON:
+    case F2E_TYPE_ARRAY:
+    case F2E_TYPE_MAP:
+      return f2e_buffer_append(buffer, flag->default_value);
+    default:
+      return 0;
+  }
+}
+
+static int f2e_codegen_append_json_schema_type(F2EBuffer *source, F2EValueType type, int *wrote) {
+  const char *schema = NULL;
+  switch (type) {
+    case F2E_TYPE_STRING:
+      schema = "\"type\":\"string\"";
+      break;
+    case F2E_TYPE_BOOL:
+      schema = "\"type\":\"boolean\"";
+      break;
+    case F2E_TYPE_INT:
+      schema = "\"type\":\"integer\"";
+      break;
+    case F2E_TYPE_FLOAT:
+      schema = "\"type\":\"number\"";
+      break;
+    case F2E_TYPE_ARRAY:
+      schema = "\"type\":\"array\",\"items\":{}";
+      break;
+    case F2E_TYPE_MAP:
+      schema = "\"type\":\"object\",\"additionalProperties\":true";
+      break;
+    case F2E_TYPE_JSON:
+    default:
+      break;
+  }
+  if (!schema) {
+    return 1;
+  }
+  if ((*wrote && !f2e_buffer_append_char(source, ',')) || !f2e_buffer_append(source, schema)) {
+    return 0;
+  }
+  *wrote = 1;
+  return 1;
+}
+
+static char *f2e_codegen_json_schema(const F2EConfig *config, const char *type_name) {
+  F2EBuffer source;
+  if (!f2e_buffer_init(&source) ||
+      !f2e_buffer_append(&source, "{\n  \"$schema\": \"https://json-schema.org/draft/2020-12/schema\",\n  \"title\": ") ||
+      !f2e_buffer_append_json_string(&source, type_name) ||
+      !f2e_buffer_append(&source, ",\n  \"type\": \"object\",\n  \"additionalProperties\": false,\n  \"properties\": {")) {
+    free(source.data);
+    return NULL;
+  }
+
+  for (size_t i = 0; i < config->flag_count; i++) {
+    const F2EFlag *flag = &config->flags[i];
+    if (!f2e_buffer_append(&source, i == 0 ? "\n    " : ",\n    ") ||
+        !f2e_buffer_append_json_string(&source, flag->env) ||
+        !f2e_buffer_append(&source, ": {")) {
+      free(source.data);
+      return NULL;
+    }
+    int wrote = 0;
+    if (!f2e_codegen_append_json_schema_type(&source, flag->type, &wrote)) {
+      free(source.data);
+      return NULL;
+    }
+    if (flag->help[0] != '\0') {
+      if ((wrote && !f2e_buffer_append_char(&source, ',')) ||
+          !f2e_buffer_append(&source, "\"description\":") ||
+          !f2e_buffer_append_json_string(&source, flag->help)) {
+        free(source.data);
+        return NULL;
+      }
+      wrote = 1;
+    }
+    if (flag->has_default) {
+      if ((wrote && !f2e_buffer_append_char(&source, ',')) ||
+          !f2e_buffer_append(&source, "\"default\":") ||
+          !f2e_codegen_append_default_json(&source, flag)) {
+        free(source.data);
+        return NULL;
+      }
+      wrote = 1;
+    }
+    if ((wrote && !f2e_buffer_append_char(&source, ',')) ||
+        !f2e_buffer_append(&source, "\"x-flags2env-flag\":") ||
+        !f2e_buffer_append_json_string(&source, f2e_audit_flag_name(flag)) ||
+        !f2e_buffer_append_char(&source, '}')) {
+      free(source.data);
+      return NULL;
+    }
+  }
+  if (config->flag_count > 0 && !f2e_buffer_append_char(&source, '\n')) {
+    free(source.data);
+    return NULL;
+  }
+  if (!f2e_buffer_append(&source, "  },\n  \"required\": [")) {
+    free(source.data);
+    return NULL;
+  }
+  int wrote_required = 0;
+  for (size_t i = 0; i < config->flag_count; i++) {
+    const F2EFlag *flag = &config->flags[i];
+    if (!flag->has_default) {
+      continue;
+    }
+    if ((wrote_required && !f2e_buffer_append(&source, ", ")) ||
+        !f2e_buffer_append_json_string(&source, flag->env)) {
+      free(source.data);
+      return NULL;
+    }
+    wrote_required = 1;
+  }
+  if (!f2e_buffer_append(&source, "]\n}\n")) {
+    free(source.data);
+    return NULL;
+  }
+  return source.data;
+}
+
+static char *f2e_generate_types_from_config(const F2EConfig *config, const char *language, const char *type_name) {
+  const char *name = type_name && type_name[0] ? type_name : "CliConfig";
+  if (!config || !language || !f2e_codegen_identifier_is_valid(name)) {
+    return NULL;
+  }
+  if (f2e_streq(language, "typescript") || f2e_streq(language, "ts")) {
+    return f2e_codegen_typescript(config, name);
+  }
+  if (f2e_streq(language, "python") || f2e_streq(language, "py")) {
+    return f2e_codegen_python(config, name);
+  }
+  if (f2e_streq(language, "go") || f2e_streq(language, "golang")) {
+    return f2e_codegen_go(config, name);
+  }
+  if (f2e_streq(language, "rust") || f2e_streq(language, "rs")) {
+    return f2e_codegen_rust(config, name);
+  }
+  if (f2e_streq(language, "java")) {
+    return f2e_codegen_java(config, name);
+  }
+  if (f2e_streq(language, "csharp") || f2e_streq(language, "c#") ||
+      f2e_streq(language, "cs") || f2e_streq(language, "dotnet")) {
+    return f2e_codegen_csharp(config, name);
+  }
+  if (f2e_streq(language, "json-schema") || f2e_streq(language, "jsonschema") ||
+      f2e_streq(language, "schema")) {
+    return f2e_codegen_json_schema(config, name);
+  }
+  return NULL;
+}
+
+char *f2e_generate_types_from_file(const char *config_path, const char *language, const char *type_name) {
+  F2EConfig *config = (F2EConfig *)malloc(sizeof(F2EConfig));
+  if (!config) {
+    return NULL;
+  }
+  if (!config_path || !f2e_load_config(config_path, config) || f2e_config_has_audit_errors(config)) {
+    free(config);
+    return NULL;
+  }
+  char *source = f2e_generate_types_from_config(config, language, type_name);
+  free(config);
+  return source;
+}
+
+char *f2e_generate_types(const char *language, const char *type_name) {
+  char *path = f2e_default_config_path();
+  if (!path) {
+    return NULL;
+  }
+  char *source = f2e_generate_types_from_file(path, language, type_name);
+  free(path);
+  return source;
 }
 
 typedef struct {
@@ -3726,6 +4398,7 @@ static int f2e_json_array_append(char ***items, int *count, int *cap, const char
 static int f2e_parse_json_string_token(const char **cursor_ref, char *out, size_t out_size) {
   const char *cursor = f2e_trim_left((char *)*cursor_ref);
   size_t len = 0;
+  int overflow = 0;
   if (*cursor != '"') {
     return 0;
   }
@@ -3768,6 +4441,8 @@ static int f2e_parse_json_string_token(const char **cursor_ref, char *out, size_
     }
     if (len + 1 < out_size) {
       out[len++] = ch;
+    } else {
+      overflow = 1;
     }
   }
   if (*cursor != '"') {
@@ -3778,7 +4453,440 @@ static int f2e_parse_json_string_token(const char **cursor_ref, char *out, size_
     out[len] = '\0';
   }
   *cursor_ref = cursor;
+  return !overflow;
+}
+
+typedef enum {
+  F2E_JSON_INPUT_STRING = 0,
+  F2E_JSON_INPUT_NUMBER = 1,
+  F2E_JSON_INPUT_BOOL = 2,
+  F2E_JSON_INPUT_ARRAY = 3,
+  F2E_JSON_INPUT_OBJECT = 4,
+  F2E_JSON_INPUT_NULL = 5
+} F2EJsonInputKind;
+
+typedef struct {
+  int present;
+  F2EJsonInputKind kind;
+  char text[F2E_MAX_VALUE];
+  char raw[F2E_MAX_LINE];
+} F2ECoerceValue;
+
+static size_t f2e_find_flag_index_by_env(const F2EConfig *config, const char *env) {
+  if (!config || !env) {
+    return SIZE_MAX;
+  }
+  for (size_t i = 0; i < config->flag_count; i++) {
+    if (f2e_streq(config->flags[i].env, env)) {
+      return i;
+    }
+  }
+  return SIZE_MAX;
+}
+
+static int f2e_copy_json_span(char *out, size_t out_size, const char *start, const char *end) {
+  if (!out || out_size == 0 || !start || !end || end < start) {
+    return 0;
+  }
+  size_t len = (size_t)(end - start);
+  if (len >= out_size) {
+    return 0;
+  }
+  memcpy(out, start, len);
+  out[len] = '\0';
   return 1;
+}
+
+static int f2e_parse_coerce_input(const F2EConfig *config,
+                                  const char *values_json,
+                                  F2ECoerceValue *values,
+                                  F2ECoerceValue *parse_errors) {
+  if (!config || !values_json || !values || !parse_errors) {
+    return 0;
+  }
+  const char *cursor = values_json;
+  f2e_json_skip_ws(&cursor);
+  if (*cursor != '{') {
+    return 0;
+  }
+  cursor++;
+  f2e_json_skip_ws(&cursor);
+  if (*cursor == '}') {
+    cursor++;
+    f2e_json_skip_ws(&cursor);
+    return *cursor == '\0';
+  }
+
+  while (*cursor) {
+    char key[F2E_MAX_LINE];
+    if (!f2e_parse_json_string_token(&cursor, key, sizeof(key))) {
+      return 0;
+    }
+    size_t index = f2e_find_flag_index_by_env(config, key);
+    int is_parse_errors = config->errors_env[0] != '\0' && f2e_streq(config->errors_env, key);
+    f2e_json_skip_ws(&cursor);
+    if (*cursor != ':') {
+      return 0;
+    }
+    cursor++;
+    f2e_json_skip_ws(&cursor);
+
+    const char *start = cursor;
+    if (index == SIZE_MAX && !is_parse_errors) {
+      if (!f2e_json_parse_value(&cursor, 0)) {
+        return 0;
+      }
+    }
+    F2EJsonInputKind kind;
+    char text[F2E_MAX_VALUE] = "";
+    if (index == SIZE_MAX && !is_parse_errors) {
+      kind = F2E_JSON_INPUT_NULL;
+    } else if (*cursor == '"') {
+      kind = F2E_JSON_INPUT_STRING;
+      if (!f2e_parse_json_string_token(&cursor, text, sizeof(text))) {
+        return 0;
+      }
+    } else {
+      switch (*cursor) {
+        case '{':
+          kind = F2E_JSON_INPUT_OBJECT;
+          break;
+        case '[':
+          kind = F2E_JSON_INPUT_ARRAY;
+          break;
+        case 't':
+        case 'f':
+          kind = F2E_JSON_INPUT_BOOL;
+          break;
+        case 'n':
+          kind = F2E_JSON_INPUT_NULL;
+          break;
+        default:
+          kind = F2E_JSON_INPUT_NUMBER;
+          break;
+      }
+      if (!f2e_json_parse_value(&cursor, 0)) {
+        return 0;
+      }
+    }
+
+    if (index != SIZE_MAX) {
+      F2ECoerceValue *value = &values[index];
+      value->present = 1;
+      value->kind = kind;
+      f2e_strlcpy(value->text, text, sizeof(value->text));
+      if (!f2e_copy_json_span(value->raw, sizeof(value->raw), start, cursor)) {
+        return 0;
+      }
+    } else if (is_parse_errors) {
+      parse_errors->present = 1;
+      parse_errors->kind = kind;
+      f2e_strlcpy(parse_errors->text, text, sizeof(parse_errors->text));
+      if (!f2e_copy_json_span(parse_errors->raw, sizeof(parse_errors->raw), start, cursor)) {
+        return 0;
+      }
+    }
+
+    f2e_json_skip_ws(&cursor);
+    if (*cursor == ',') {
+      cursor++;
+      f2e_json_skip_ws(&cursor);
+      if (*cursor == '}') {
+        return 0;
+      }
+      continue;
+    }
+    if (*cursor == '}') {
+      cursor++;
+      f2e_json_skip_ws(&cursor);
+      return *cursor == '\0';
+    }
+    return 0;
+  }
+  return 0;
+}
+
+static int f2e_coerce_append_parse_errors(F2EJsonList *errors, const char *json) {
+  if (!errors || !json || !f2e_json_container_is_valid(json, '[')) {
+    return 0;
+  }
+  const char *cursor = json;
+  f2e_json_skip_ws(&cursor);
+  cursor++;
+  f2e_json_skip_ws(&cursor);
+  if (*cursor == ']') {
+    return 1;
+  }
+  while (*cursor) {
+    char message[F2E_MAX_VALUE];
+    if (!f2e_parse_json_string_token(&cursor, message, sizeof(message)) ||
+        !f2e_json_list_append(errors, message)) {
+      return 0;
+    }
+    f2e_json_skip_ws(&cursor);
+    if (*cursor == ',') {
+      cursor++;
+      f2e_json_skip_ws(&cursor);
+      continue;
+    }
+    if (*cursor == ']') {
+      cursor++;
+      f2e_json_skip_ws(&cursor);
+      return *cursor == '\0';
+    }
+    return 0;
+  }
+  return 0;
+}
+
+static void f2e_coerce_add_error(F2EJsonList *errors, const F2EFlag *flag, const char *expected) {
+  char message[512];
+  snprintf(message, sizeof(message), "env %s must be %s", flag && flag->env[0] ? flag->env : "<unknown>", expected);
+  f2e_json_list_append(errors, message);
+}
+
+static int f2e_coerce_value_to_json(const F2EFlag *flag,
+                                    const F2ECoerceValue *input,
+                                    const char *default_value,
+                                    F2EBuffer *out,
+                                    F2EJsonList *errors) {
+  if (!flag || !out || !errors || !f2e_buffer_init(out)) {
+    if (errors) {
+      errors->failed = 1;
+    }
+    return 0;
+  }
+
+  F2EJsonInputKind kind = input ? input->kind : F2E_JSON_INPUT_STRING;
+  const char *text = input ? input->text : default_value;
+  const char *raw = input ? input->raw : NULL;
+  int valid = 0;
+
+  switch (flag->type) {
+    case F2E_TYPE_STRING:
+      valid = kind == F2E_JSON_INPUT_STRING && f2e_buffer_append_json_string(out, text ? text : "");
+      if (!valid) {
+        f2e_coerce_add_error(errors, flag, "a string");
+      }
+      break;
+
+    case F2E_TYPE_BOOL:
+      if (kind == F2E_JSON_INPUT_BOOL && raw) {
+        valid = f2e_buffer_append(out, raw);
+      } else if (kind == F2E_JSON_INPUT_STRING) {
+        const char *canonical = NULL;
+        if (f2e_bool_value_alias(flag, text, &canonical)) {
+          valid = f2e_buffer_append(out, canonical);
+        }
+      }
+      if (!valid) {
+        f2e_coerce_add_error(errors, flag, "a boolean");
+      }
+      break;
+
+    case F2E_TYPE_INT:
+      if ((kind == F2E_JSON_INPUT_STRING || kind == F2E_JSON_INPUT_NUMBER) &&
+          f2e_int_value_is_valid(kind == F2E_JSON_INPUT_STRING ? text : raw)) {
+        char canonical[64];
+        long long parsed = strtoll(kind == F2E_JSON_INPUT_STRING ? text : raw, NULL, 10);
+        snprintf(canonical, sizeof(canonical), "%lld", parsed);
+        valid = f2e_buffer_append(out, canonical);
+      }
+      if (!valid) {
+        f2e_coerce_add_error(errors, flag, "an integer");
+      }
+      break;
+
+    case F2E_TYPE_FLOAT:
+      if ((kind == F2E_JSON_INPUT_STRING || kind == F2E_JSON_INPUT_NUMBER) &&
+          f2e_float_value_is_valid(kind == F2E_JSON_INPUT_STRING ? text : raw)) {
+        char canonical[128];
+        double parsed = strtod(kind == F2E_JSON_INPUT_STRING ? text : raw, NULL);
+        snprintf(canonical, sizeof(canonical), "%.17g", parsed);
+        valid = f2e_json_value_is_valid(canonical) && f2e_buffer_append(out, canonical);
+      }
+      if (!valid) {
+        f2e_coerce_add_error(errors, flag, "a finite number");
+      }
+      break;
+
+    case F2E_TYPE_JSON: {
+      const char *json = kind == F2E_JSON_INPUT_STRING ? text : raw;
+      if (json && f2e_json_value_is_valid(json)) {
+        valid = f2e_buffer_append(out, json);
+      }
+      if (!valid) {
+        f2e_coerce_add_error(errors, flag, "valid JSON");
+      }
+      break;
+    }
+
+    case F2E_TYPE_ARRAY: {
+      const char *json = kind == F2E_JSON_INPUT_STRING ? text : raw;
+      if ((kind == F2E_JSON_INPUT_STRING || kind == F2E_JSON_INPUT_ARRAY) &&
+          json && f2e_json_container_is_valid(json, '[')) {
+        valid = f2e_buffer_append(out, json);
+      }
+      if (!valid) {
+        f2e_coerce_add_error(errors, flag, "a JSON array");
+      }
+      break;
+    }
+
+    case F2E_TYPE_MAP: {
+      const char *json = kind == F2E_JSON_INPUT_STRING ? text : raw;
+      if ((kind == F2E_JSON_INPUT_STRING || kind == F2E_JSON_INPUT_OBJECT) &&
+          json && f2e_json_container_is_valid(json, '{')) {
+        valid = f2e_buffer_append(out, json);
+      }
+      if (!valid) {
+        f2e_coerce_add_error(errors, flag, "a JSON object");
+      }
+      break;
+    }
+
+    default:
+      f2e_coerce_add_error(errors, flag, "a supported value");
+      break;
+  }
+
+  if (!valid) {
+    free(out->data);
+    memset(out, 0, sizeof(*out));
+  }
+  return valid;
+}
+
+static char *f2e_coerce_error_report(const char *message) {
+  F2EBuffer report;
+  if (!f2e_buffer_init(&report)) {
+    return NULL;
+  }
+  if (!f2e_buffer_append(&report, "{\"ok\":false,\"errors\":[") ||
+      !f2e_buffer_append_json_string(&report, message ? message : "coercion failed") ||
+      !f2e_buffer_append(&report, "]}")) {
+    free(report.data);
+    return NULL;
+  }
+  return report.data;
+}
+
+static char *f2e_coerce_report_from_config(const F2EConfig *config, const char *values_json) {
+  if (!config || !values_json) {
+    return f2e_coerce_error_report("values must be a JSON object");
+  }
+
+  F2ECoerceValue *values = (F2ECoerceValue *)calloc(config->flag_count, sizeof(F2ECoerceValue));
+  if (!values) {
+    return NULL;
+  }
+  F2ECoerceValue parse_errors = {0};
+  if (!f2e_parse_coerce_input(config, values_json, values, &parse_errors)) {
+    free(values);
+    return f2e_coerce_error_report("values must be a valid JSON object with supported value sizes");
+  }
+
+  F2EJsonList errors = {0};
+  F2EBuffer output = {0};
+  if (!f2e_json_list_init(&errors) || !f2e_buffer_init(&output) || !f2e_buffer_append_char(&output, '{')) {
+    free(values);
+    f2e_json_list_discard(&errors);
+    free(output.data);
+    return NULL;
+  }
+
+  if (parse_errors.present) {
+    const char *json = parse_errors.kind == F2E_JSON_INPUT_STRING ? parse_errors.text : parse_errors.raw;
+    if ((parse_errors.kind != F2E_JSON_INPUT_STRING && parse_errors.kind != F2E_JSON_INPUT_ARRAY) ||
+        !f2e_coerce_append_parse_errors(&errors, json)) {
+      char message[512];
+      snprintf(message, sizeof(message), "env %s must be a JSON array of error strings", config->errors_env);
+      f2e_json_list_append(&errors, message);
+    }
+  }
+
+  int wrote = 0;
+  for (size_t i = 0; i < config->flag_count; i++) {
+    const F2EFlag *flag = &config->flags[i];
+    const F2ECoerceValue *input = values[i].present ? &values[i] : NULL;
+    if (!input && !flag->has_default) {
+      continue;
+    }
+
+    F2EBuffer coerced = {0};
+    if (!f2e_coerce_value_to_json(flag, input, flag->default_value, &coerced, &errors)) {
+      continue;
+    }
+    if ((wrote && !f2e_buffer_append_char(&output, ',')) ||
+        !f2e_buffer_append_json_string(&output, flag->env) ||
+        !f2e_buffer_append_char(&output, ':') ||
+        !f2e_buffer_append(&output, coerced.data)) {
+      errors.failed = 1;
+    } else {
+      wrote = 1;
+    }
+    free(coerced.data);
+  }
+  free(values);
+
+  if (!f2e_buffer_append_char(&output, '}') || errors.failed) {
+    free(output.data);
+    f2e_json_list_discard(&errors);
+    return NULL;
+  }
+
+  F2EBuffer report;
+  if (!f2e_buffer_init(&report)) {
+    free(output.data);
+    f2e_json_list_discard(&errors);
+    return NULL;
+  }
+  int ok = 1;
+  if (errors.count > 0) {
+    ok = f2e_buffer_append_char(&errors.buffer, ']') &&
+         f2e_buffer_append(&report, "{\"ok\":false,\"errors\":") &&
+         f2e_buffer_append(&report, errors.buffer.data) &&
+         f2e_buffer_append_char(&report, '}');
+  } else {
+    ok = f2e_buffer_append(&report, "{\"ok\":true,\"value\":") &&
+         f2e_buffer_append(&report, output.data) &&
+         f2e_buffer_append_char(&report, '}');
+  }
+  free(output.data);
+  f2e_json_list_discard(&errors);
+  if (!ok) {
+    free(report.data);
+    return NULL;
+  }
+  return report.data;
+}
+
+char *f2e_coerce_json_from_file(const char *config_path, const char *values_json) {
+  F2EConfig *config = (F2EConfig *)malloc(sizeof(F2EConfig));
+  if (!config) {
+    return NULL;
+  }
+  if (!config_path || !f2e_load_config(config_path, config)) {
+    free(config);
+    return f2e_coerce_error_report("could not read .cli-flags.toml");
+  }
+  if (f2e_config_has_audit_errors(config)) {
+    free(config);
+    return f2e_coerce_error_report(".cli-flags.toml failed audit");
+  }
+  char *report = f2e_coerce_report_from_config(config, values_json);
+  free(config);
+  return report;
+}
+
+char *f2e_coerce_json(const char *values_json) {
+  char *path = f2e_default_config_path();
+  if (!path) {
+    return f2e_coerce_error_report("no usable .cli-flags.toml found before HOME");
+  }
+  char *report = f2e_coerce_json_from_file(path, values_json);
+  free(path);
+  return report;
 }
 
 static void f2e_free_json_items(char **items, int count);

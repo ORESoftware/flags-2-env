@@ -219,6 +219,65 @@ static napi_value f2e_node_completion_script(napi_env env, napi_callback_info in
   return f2e_node_string_result(env, result, "failed to generate completion script");
 }
 
+static napi_value f2e_node_generate_types(napi_env env, napi_callback_info info) {
+  size_t argc = 3;
+  napi_value args[3];
+  napi_get_cb_info(env, info, &argc, args, NULL, NULL);
+
+  if (argc < 1) {
+    return f2e_node_throw(env, "generateTypes(language, typeName?, configPath?) requires language");
+  }
+
+  char *language = NULL;
+  char *type_name = NULL;
+  char *config_path = NULL;
+  if (!f2e_node_read_string(env, args[0], &language)) {
+    return f2e_node_throw(env, "language must be a string");
+  }
+  if (argc >= 2 && !f2e_node_read_optional_string(env, args[1], &type_name)) {
+    free(language);
+    return f2e_node_throw(env, "typeName must be a string");
+  }
+  if (argc >= 3 && !f2e_node_read_optional_string(env, args[2], &config_path)) {
+    free(language);
+    free(type_name);
+    return f2e_node_throw(env, "configPath must be a string");
+  }
+
+  char *result = config_path ? f2e_generate_types_from_file(config_path, language, type_name)
+                             : f2e_generate_types(language, type_name);
+  free(language);
+  free(type_name);
+  free(config_path);
+  return f2e_node_string_result(env, result, "failed to generate types");
+}
+
+static napi_value f2e_node_coerce_json(napi_env env, napi_callback_info info) {
+  size_t argc = 2;
+  napi_value args[2];
+  napi_get_cb_info(env, info, &argc, args, NULL, NULL);
+
+  if (argc < 1) {
+    return f2e_node_throw(env, "coerceJson(valuesJson, configPath?) requires valuesJson");
+  }
+
+  char *values_json = NULL;
+  char *config_path = NULL;
+  if (!f2e_node_read_string(env, args[0], &values_json)) {
+    return f2e_node_throw(env, "valuesJson must be a string");
+  }
+  if (argc >= 2 && !f2e_node_read_optional_string(env, args[1], &config_path)) {
+    free(values_json);
+    return f2e_node_throw(env, "configPath must be a string");
+  }
+
+  char *result = config_path ? f2e_coerce_json_from_file(config_path, values_json)
+                             : f2e_coerce_json(values_json);
+  free(values_json);
+  free(config_path);
+  return f2e_node_string_result(env, result, "failed to coerce values");
+}
+
 static napi_value f2e_node_is_help_json(napi_env env, napi_callback_info info) {
   size_t argc = 1;
   napi_value args[1];
@@ -324,6 +383,14 @@ static napi_value f2e_node_init(napi_env env, napi_value exports) {
   napi_value completion_script;
   napi_create_function(env, "completionScript", NAPI_AUTO_LENGTH, f2e_node_completion_script, NULL, &completion_script);
   napi_set_named_property(env, exports, "completionScript", completion_script);
+
+  napi_value generate_types;
+  napi_create_function(env, "generateTypes", NAPI_AUTO_LENGTH, f2e_node_generate_types, NULL, &generate_types);
+  napi_set_named_property(env, exports, "generateTypes", generate_types);
+
+  napi_value coerce_json;
+  napi_create_function(env, "coerceJson", NAPI_AUTO_LENGTH, f2e_node_coerce_json, NULL, &coerce_json);
+  napi_set_named_property(env, exports, "coerceJson", coerce_json);
 
   napi_value is_help_json;
   napi_create_function(env, "isHelpJson", NAPI_AUTO_LENGTH, f2e_node_is_help_json, NULL, &is_help_json);

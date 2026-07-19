@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { chdir } from "node:process";
 
-import { apply, auditConfig, auditConfigStatus, auditEnv, auditEnvStatus, completionScript, helpTable, parse } from "./lib.ts";
+import { apply, auditConfig, auditConfigStatus, auditEnv, auditEnvStatus, coerce, CoercionError, completionScript, generateTypes, helpTable, parse, parseFromArgs } from "./lib.ts";
 
 chdir("../../tests/fixtures/nested/deeper");
 
@@ -13,6 +13,40 @@ assert.equal(parsed.COLOR, "true");
 const explicit = parse(["app", "--debug=f"], { configPath: "../../.cli-flags.toml" });
 assert.equal(explicit.DEBUG, "false");
 assert.equal(explicit.PORT, "3000");
+
+const fromArgs = parseFromArgs(["app", "--port", "8182"], { configPath: "../../.cli-flags.toml" });
+assert.equal(fromArgs.PORT, "8182");
+
+type CliStuff = {
+  PORT: number;
+  DEBUG: boolean;
+  COLOR: boolean;
+};
+const typedConfig: CliStuff = coerce({ ...process.env, ...explicit }, { configPath: "../../.cli-flags.toml" });
+assert.equal(typedConfig.PORT, 3000);
+assert.equal(typedConfig.DEBUG, false);
+
+const codegenConfig = "../../../codegen/.cli-flags.toml";
+const richTypes = coerce({ RATIO: "1.25", ITEMS: "[3,4]", LABELS: '{"tier":2}' }, { configPath: codegenConfig });
+assert.deepEqual(richTypes, {
+  PORT: 3000,
+  RATIO: 1.25,
+  DEBUG: false,
+  ITEMS: [3, 4],
+  LABELS: { tier: 2 },
+});
+assert.throws(
+  () => coerce({ PORT: "bad", DEBUG: "maybe" }, { configPath: codegenConfig }),
+  (error: unknown) => error instanceof CoercionError && error.errors.length === 2,
+);
+const invalidCli = parseFromArgs(["app", "--ratio=nan"], { configPath: codegenConfig });
+assert.throws(
+  () => coerce(invalidCli, { configPath: codegenConfig }),
+  (error: unknown) => error instanceof CoercionError && error.errors.some((message) => message.includes("flags.ratio")),
+);
+const generated = generateTypes("typescript", { configPath: codegenConfig, typeName: "CliStuff" });
+assert.match(generated, /export interface CliStuff/);
+assert.match(generated, /LABELS: Record<string, unknown>/);
 
 const combined = apply({ PORT: "env", KEEP: "1" }, ["app", "--port", "8181"]);
 assert.equal(combined.PORT, "8181");
