@@ -246,10 +246,20 @@ esac
 CODEGEN_CONFIG="$ROOT_DIR/tests/codegen/.cli-flags.toml"
 generated_typescript="$("$CLI" generate typescript "$CODEGEN_CONFIG" --name CliStuff)"
 case "$generated_typescript" in
-  *'export interface CliStuff'*'PORT: number;'*'NAME?: string;'*'ITEMS: unknown[];'*'LABELS: Record<string, unknown>;'*)
+  *'export interface CliStuff'*'PORT: number;'*'NAME?: string;'*'ITEMS: unknown[];'*'LABELS: Record<string, unknown>;'*'UNTYPED: string;'*)
     ;;
   *)
     printf 'Unexpected generated TypeScript interface:\n%s\n' "$generated_typescript" >&2
+    exit 1
+    ;;
+esac
+
+generated_dart="$("$CLI" generate dart "$CODEGEN_CONFIG" --name CliStuff)"
+case "$generated_dart" in
+  *'final class CliStuff'*'final int PORT;'*'final String UNTYPED;'*'factory CliStuff.fromJson'*)
+    ;;
+  *)
+    printf 'Unexpected generated Dart class:\n%s\n' "$generated_dart" >&2
     exit 1
     ;;
 esac

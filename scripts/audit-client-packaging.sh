@@ -378,6 +378,9 @@ for path in \
   scripts/audit-npm-package.mjs \
   scripts/audit-release-matrix.mjs \
   scripts/docker-check-new-clients.sh \
+  tests/codegen-docker/Dockerfile \
+  tests/codegen-docker/README.md \
+  tests/codegen-docker/run.sh \
   scripts/publish-central-ossrh-compat.sh \
   scripts/publish-homebrew.sh \
   clients/bash/LICENSE \
@@ -590,11 +593,16 @@ require_contains packaging/homebrew/Formula/flags2env.rb 'depends_on "gcc" => :b
 require_contains packaging/homebrew/Formula/flags2env.rb 'shell-env'
 require_contains packaging/homebrew/Formula/flags2env.rb 'assert_path_exists pkgshare/"shell/flags2env\.bash"'
 require_contains packaging/homebrew/Formula/flags2env.rb 'assert_path_exists pkgshare/"shell/flags2env\.zsh"'
+require_contains packaging/homebrew/Formula/flags2env.rb 'refute_path_exists prefix/"tests"'
+require_contains packaging/homebrew/Formula/flags2env.rb 'refute_path_exists pkgshare/"tests"'
+require_contains packaging/homebrew/Formula/flags2env.rb 'generate typescript \.cli-flags\.toml --name CliStuff'
 require_contains packaging/homebrew/Formula/flags2env.rb 'bash-helper-test'
 require_contains packaging/homebrew/Formula/flags2env.rb 'zsh-helper-test'
 require_contains packaging/homebrew/Formula/flags2env.rb '/bin/zsh'
 require_contains packaging/homebrew/Formula/flags2env.rb 'flags2env_apply --debug'
 require_contains packaging/homebrew/README.md 'scripts/publish-homebrew\.sh --release'
+require_contains packaging/homebrew/README.md "Docker generated-code matrix"
+require_contains packaging/homebrew/README.md "is not installed"
 require_contains clients/PUBLISHING.md '@JuliaRegistrator register subdir=clients/julia'
 require_contains clients/PUBLISHING.md 'clients/zig/native'
 require_contains scripts/publish-homebrew.sh 'brew audit --strict --new --online'
@@ -977,6 +985,11 @@ require_contains .github/workflows/client-packaging.yml 'npm run release:audit'
 require_contains .github/workflows/client-packaging.yml 'scripts/docker-check-new-clients\.sh'
 require_contains .github/workflows/client-packaging.yml 'full_docker_checks'
 require_contains .github/workflows/client-packaging.yml 'tests/run\.sh'
+require_contains .github/workflows/client-packaging.yml 'tests/codegen-docker/run\.sh'
+require_contains tests/codegen-docker/Dockerfile 'FROM dart:stable AS test-dart'
+require_contains tests/codegen-docker/Dockerfile 'FROM node:22-bookworm AS test-nodejs'
+require_contains tests/codegen-docker/nodejs/main.ts 'f2e\.coerce'
+require_contains tests/codegen-docker/run.sh 'json-schema'
 require_contains .github/workflows/cli-flags-audit.yml 'scripts/audit-changed-cli-flags\.sh'
 require_contains .github/workflows/cli-flags-audit.yml '\*\*/\.cli-flags\.toml'
 require_contains .github/workflows/cli-flags-audit.yml '\*\*/\.env'

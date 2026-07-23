@@ -83,3 +83,27 @@ jobs:
           else
             scripts/docker-check-new-clients.sh
           fi
+
+  generated-code:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime:
+          - nodejs
+          - typescript
+          - bun
+          - deno
+          - golang
+          - rust
+          - dart
+          - java
+          - python
+          - csharp
+          - json-schema
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compile and run generated interface
+        run: tests/codegen-docker/run.sh "${{ matrix.runtime }}"

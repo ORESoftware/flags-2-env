@@ -1,3 +1,7 @@
+#if defined(__linux__) && !defined(_POSIX_C_SOURCE)
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #include "parser.h"
 
 #include <ctype.h>
@@ -636,7 +640,7 @@ static void f2e_cli_generate_usage(void) {
   f2e_cli_stderr_locked(
       "%s",
       "usage: flags2env generate <language> [config] [--name TypeName]\n"
-      "languages: typescript, python, go, rust, java, csharp, json-schema\n");
+      "languages: typescript, python, go, rust, java, csharp, dart, json-schema\n");
 }
 
 static int f2e_cli_run_generate(int argc, const char *const argv[]) {

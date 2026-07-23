@@ -29,10 +29,13 @@ assert.deepEqual(richTypes, {
   DEBUG: false,
   ITEMS: [3, 4],
   LABELS: { tier: 2 },
+  UNTYPED: "123",
 });
 assert.throws(
   () => coerce({ PORT: "bad", DEBUG: "maybe" }, { configPath: codegenConfig }),
-  (error) => error instanceof CoercionError && error.errors.length === 2,
+  (error) => error instanceof CoercionError
+    && error.errors.length === 2
+    && error.errors[0].includes("flags.port.type"),
 );
 const invalidCli = parseFromArgs(["app", "--ratio=nan"], { configPath: codegenConfig });
 assert.throws(
@@ -42,6 +45,7 @@ assert.throws(
 const generated = generateTypes("typescript", { configPath: codegenConfig, typeName: "CliStuff" });
 assert.match(generated, /export interface CliStuff/);
 assert.match(generated, /LABELS: Record<string, unknown>/);
+assert.match(generated, /UNTYPED: string/);
 
 const combined = apply({ PORT: "env", KEEP: "1" }, ["app", "--port", "8181"]);
 assert.equal(combined.PORT, "8181");

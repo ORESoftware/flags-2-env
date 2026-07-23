@@ -102,8 +102,8 @@ char *f2e_completion_script_from_file(const char *config_path, const char *shell
 
 /*
  * Generates importable types from .cli-flags.toml. Supported language names
- * are typescript, python, go, rust, java, csharp, and json-schema, with common
- * short aliases. type_name defaults to CliConfig when NULL or empty.
+ * are typescript, python, go, rust, java, csharp, dart, and json-schema, with
+ * common short aliases. type_name defaults to CliConfig when NULL or empty.
  */
 char *f2e_generate_types(const char *language, const char *type_name) F2E_OWNED_RESULT;
 char *f2e_generate_types_from_file(const char *config_path, const char *language, const char *type_name) F2E_OWNED_RESULT;

@@ -148,27 +148,27 @@ int main(void) {
   const char *codegen_values[] = {"app", "--ratio", "-1.25", "--items", "[3,4]", "--labels", "{\"tier\":2}", "--payload", "null"};
   expect_json("double and JSON container values remain strings before coercion",
               f2e_parse_from_file(CODEGEN_CONFIG, 9, codegen_values),
-              "{\"PORT\":\"3000\",\"RATIO\":\"-1.25\",\"DEBUG\":\"false\",\"ITEMS\":\"[3,4]\",\"LABELS\":\"{\\\"tier\\\":2}\",\"PAYLOAD\":\"null\"}");
+              "{\"PORT\":\"3000\",\"RATIO\":\"-1.25\",\"DEBUG\":\"false\",\"ITEMS\":\"[3,4]\",\"LABELS\":\"{\\\"tier\\\":2}\",\"UNTYPED\":\"123\",\"PAYLOAD\":\"null\"}");
 
   const char *invalid_containers[] = {"app", "--items={\"bad\":1}", "--labels=[]"};
   expect_json("array and map types reject the wrong JSON container",
               f2e_parse_from_file(CODEGEN_CONFIG, 3, invalid_containers),
-              "{\"PORT\":\"3000\",\"RATIO\":\"0.5\",\"DEBUG\":\"false\",\"ITEMS\":\"[1,\\\"two\\\"]\",\"LABELS\":\"{\\\"region\\\":\\\"us\\\"}\",\"F2E_PARSE_ERRORS\":\"[\\\"flags.items value \\\\\\\"{\\\\\\\"bad\\\\\\\":1}\\\\\\\" is not a valid JSON array\\\",\\\"flags.labels value \\\\\\\"[]\\\\\\\" is not a valid JSON object\\\"]\"}");
+              "{\"PORT\":\"3000\",\"RATIO\":\"0.5\",\"DEBUG\":\"false\",\"ITEMS\":\"[1,\\\"two\\\"]\",\"LABELS\":\"{\\\"region\\\":\\\"us\\\"}\",\"UNTYPED\":\"123\",\"F2E_PARSE_ERRORS\":\"[\\\"flags.items value \\\\\\\"{\\\\\\\"bad\\\\\\\":1}\\\\\\\" is not a valid JSON array\\\",\\\"flags.labels value \\\\\\\"[]\\\\\\\" is not a valid JSON object\\\"]\"}");
 
   expect_json("coerce strings and schema defaults",
               f2e_coerce_json_from_file(CODEGEN_CONFIG,
                                         "{\"RATIO\":\"1.25\",\"ITEMS\":\"[3,4]\",\"LABELS\":\"{\\\"tier\\\":2}\",\"PAYLOAD\":\"null\",\"IGNORED\":\"x\"}"),
-              "{\"ok\":true,\"value\":{\"PORT\":3000,\"RATIO\":1.25,\"DEBUG\":false,\"ITEMS\":[3,4],\"LABELS\":{\"tier\":2},\"PAYLOAD\":null}}");
+              "{\"ok\":true,\"value\":{\"PORT\":3000,\"RATIO\":1.25,\"DEBUG\":false,\"ITEMS\":[3,4],\"LABELS\":{\"tier\":2},\"PAYLOAD\":null,\"UNTYPED\":\"123\"}}");
 
   expect_json("coerce accepts already typed JSON values",
               f2e_coerce_json_from_file(CODEGEN_CONFIG,
                                         "{\"PORT\":42,\"DEBUG\":true,\"ITEMS\":[1],\"LABELS\":{\"a\":1}}"),
-              "{\"ok\":true,\"value\":{\"PORT\":42,\"RATIO\":0.5,\"DEBUG\":true,\"ITEMS\":[1],\"LABELS\":{\"a\":1}}}");
+              "{\"ok\":true,\"value\":{\"PORT\":42,\"RATIO\":0.5,\"DEBUG\":true,\"ITEMS\":[1],\"LABELS\":{\"a\":1},\"UNTYPED\":\"123\"}}");
 
   expect_json("coerce aggregates type errors",
               f2e_coerce_json_from_file(CODEGEN_CONFIG,
                                         "{\"PORT\":\"nope\",\"RATIO\":\"nan\",\"ITEMS\":\"{}\",\"LABELS\":\"[]\"}"),
-              "{\"ok\":false,\"errors\":[\"env PORT must be an integer\",\"env RATIO must be a finite number\",\"env ITEMS must be a JSON array\",\"env LABELS must be a JSON object\"]}");
+              "{\"ok\":false,\"errors\":[\"env PORT (flags.port) must be an integer because .cli-flags.toml declares type = \\\"integer\\\"; received a string. Set PORT to an integer or update flags.port.type\",\"env RATIO (flags.ratio) must be a finite number because .cli-flags.toml declares type = \\\"double\\\"; received a string. Set RATIO to a finite number or update flags.ratio.type\",\"env ITEMS (flags.items) must be a JSON array because .cli-flags.toml declares type = \\\"array\\\"; received a string. Set ITEMS to a JSON array or update flags.items.type\",\"env LABELS (flags.labels) must be a JSON object because .cli-flags.toml declares type = \\\"map\\\"; received a string. Set LABELS to a JSON object or update flags.labels.type\"]}");
 
   expect_json("coerce preserves parser errors",
               f2e_coerce_json_from_file(CODEGEN_CONFIG,
@@ -184,6 +184,7 @@ int main(void) {
   expect_contains("typescript codegen number", typescript_types, "RATIO: number;");
   expect_contains("typescript codegen optional string", typescript_types, "NAME?: string;");
   expect_contains("typescript codegen map", typescript_types, "LABELS: Record<string, unknown>;");
+  expect_contains("typescript omitted type defaults to string", typescript_types, "UNTYPED: string;");
   f2e_free(typescript_types);
 
   const char *languages[][2] = {
@@ -192,6 +193,7 @@ int main(void) {
       {"rust", "pub struct CliStuff"},
       {"java", "public record CliStuff"},
       {"csharp", "public sealed record CliStuff"},
+      {"dart", "final class CliStuff"},
       {"json-schema", "\"title\": \"CliStuff\""},
   };
   for (size_t i = 0; i < sizeof(languages) / sizeof(languages[0]); i++) {
@@ -199,6 +201,15 @@ int main(void) {
     expect_contains("language codegen", generated, languages[i][1]);
     f2e_free(generated);
   }
+
+  char *json_schema = f2e_generate_types_from_file(CODEGEN_CONFIG, "json-schema", "CliStuff");
+  expect_contains("json schema is post-coercion contract", json_schema,
+                  "\"x-flags2env-stage\": \"coerced\"");
+  expect_contains("json schema preserves declared type metadata", json_schema,
+                  "\"x-flags2env-type\":\"integer\"");
+  expect_contains("json schema preserves omitted type string fallback", json_schema,
+                  "\"UNTYPED\": {\"type\":\"string\",\"default\":\"123\",\"x-flags2env-type\":\"string\"");
+  f2e_free(json_schema);
 
   char *unsupported_codegen = f2e_generate_types_from_file(CODEGEN_CONFIG, "brainfuck", "CliStuff");
   if (unsupported_codegen) {

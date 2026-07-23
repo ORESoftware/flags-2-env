@@ -44,3 +44,8 @@ default = "{\"region\":\"us\"}"
 env = "PAYLOAD"
 aliases = ["payload"]
 type = "json"
+
+[flags.untyped]
+env = "UNTYPED"
+aliases = ["untyped"]
+default = 123

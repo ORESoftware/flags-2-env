@@ -13,6 +13,7 @@ class Flags2env < Formula
   def install
     system "make", "all"
 
+    # Keep the Cellar payload intentionally small; repository tests are never installed.
     bin.install "build/flags2env"
     include.install "src/parser.h" => "flags2env/parser.h"
     lib.install "build/libflags2env.a"
@@ -51,9 +52,13 @@ class Flags2env < Formula
 
     assert_match "\"PORT\":\"8181\"", shell_output("#{bin}/flags2env --port 8181")
     assert_match "export DEBUG='true'", shell_output("#{bin}/flags2env shell-env -- --debug")
+    assert_match "export interface CliStuff",
+                 shell_output("#{bin}/flags2env generate typescript .cli-flags.toml --name CliStuff")
 
     assert_path_exists pkgshare/"shell/flags2env.bash"
     assert_path_exists pkgshare/"shell/flags2env.zsh"
+    refute_path_exists prefix/"tests"
+    refute_path_exists pkgshare/"tests"
 
     (testpath/"bash-helper-test").write <<~SH
       #!/usr/bin/env bash

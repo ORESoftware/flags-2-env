@@ -209,9 +209,10 @@ Generate an importable env-keyed type from `.cli-flags.toml`:
 f2e generate typescript .cli-flags.toml --name CliStuff > generated/cli-interfaces.ts
 f2e generate python .cli-flags.toml --name CliStuff > generated/cli_interfaces.py
 f2e generate go .cli-flags.toml --name CliStuff > generated/cli_config.go
+f2e generate dart .cli-flags.toml --name CliStuff > generated/cli_stuff.dart
 ```
 
-The native generator supports TypeScript (`ts`), Python (`py`), Go (`golang`), Rust (`rs`), Java, C# (`cs`/`dotnet`), and JSON Schema. Properties use the declared `env` names. A flag with a default is required in the generated type because `coerce()` can always supply it; a flag without a default is optional.
+The native generator supports TypeScript (`ts`), Python (`py`), Go (`golang`), Rust (`rs`), Java, C# (`cs`/`dotnet`), Dart, and JSON Schema. Properties use the declared `env` names. A flag with a default is required in the generated type because `coerce()` can always supply it; a flag without a default is optional.
 
 For Node.js/TypeScript, merge the raw env and CLI maps first, then cross the explicit typed boundary:
 
@@ -224,7 +225,13 @@ const config = { ...process.env, ...cli };
 const typedConfig: CliStuff = f2e.coerce(config);
 ```
 
-`parseFromArgs()` remains string-valued. `coerce()` keeps only keys declared in `.cli-flags.toml`, applies schema defaults, converts integers, doubles, booleans, JSON, arrays, and maps, and throws `CoercionError` with all invalid keys when conversion fails. Errors already collected in the configured `[parse] errors_env` are carried into the same exception. Pass `{ configPath: "path/to/.cli-flags.toml" }` as the second argument when config discovery is not appropriate.
+`parseFromArgs()` remains string-valued. `coerce()` reads the same `.cli-flags.toml` used by generation, keeps only declared env keys, applies schema defaults, converts integers, doubles, booleans, JSON, arrays, and maps, and throws `CoercionError` with all invalid keys when conversion fails. Each conversion error identifies the env key, its `[flags.*]` table, the declared type, the received JSON kind, and how to repair either the value or declaration.
+
+The generated TypeScript interface is erased at runtime; it does not tell `coerce()` what to do. The TOML `type` field is the runtime source of truth. When `type` is omitted, flags2env deterministically treats the value as a string, even if a default such as `123` looks numeric. It never guesses independently from each process value, because that could make generated types disagree with runtime values. Errors already collected in the configured `[parse] errors_env` are carried into the same exception. Pass `{ configPath: "path/to/.cli-flags.toml" }` as the second argument when config discovery is not appropriate.
+
+The JSON Schema target is a Draft 2020-12 description of the post-`coerce()` object, not the raw `process.env` input. Its `default` keywords document the defaults that `coerce()` applies; JSON Schema validators do not insert those values themselves. The schema rejects undeclared properties, marks default-backed output keys as required, and includes `x-flags2env-*` metadata that maps properties back to their TOML declarations.
+
+The generated-code Docker matrix under `tests/codegen-docker/` compiles and runs these interfaces in Node.js, TypeScript, Bun, Deno, Go, Rust, Dart, Java, Python, and C#. It also checks the generated JSON Schema against the official Draft 2020-12 meta-schema before exercising valid and invalid instances.
 
 Completion command names are reduced to a safe basename such as `mycli`, and command names, aliases, short flags, boolean value aliases, and env keys are audited for shell-safe characters before scripts are emitted.
 
