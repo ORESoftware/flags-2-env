@@ -35,11 +35,11 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
     });
     tests_module.addImport("flags2env", module);
+    tests_module.linkLibrary(parser);
 
     const tests = b.addTest(.{
         .root_module = tests_module,
     });
-    tests.linkLibrary(parser);
 
     const run_tests = b.addRunArtifact(tests);
     const test_step = b.step("test", "Run Zig smoke tests");
