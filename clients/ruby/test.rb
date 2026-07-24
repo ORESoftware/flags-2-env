@@ -33,3 +33,25 @@ unless top_help.include?("Commands:") && top_help.include?("remote add")
 end
 
 puts "ruby client tests passed"
+
+coerced = Flags2Env.coerce(
+  { "GITISH_COMMAND" => "remote add", "GITISH_CMD_ADD" => "true", "GITISH_REMOTE_ADD_FETCH" => "true" },
+  config_path: subcommands_config
+)
+unless coerced["GITISH_COMMAND"] == "remote add" && coerced["GITISH_CMD_ADD"] == true && coerced["GITISH_REMOTE_ADD_FETCH"] == true
+  raise "unexpected coerced map: #{coerced.inspect}"
+end
+
+begin
+  Flags2Env.coerce({ "GITISH_COMMAND" => 42 }, config_path: subcommands_config)
+  raise "expected CoercionError"
+rescue Flags2Env::CoercionError => e
+  raise "unexpected coercion error: #{e.message}" unless e.message.include?("command_env")
+end
+
+generated = Flags2Env.generate_types("typescript", type_name: "GitishConfig", config_path: subcommands_config)
+unless generated.include?("GITISH_COMMAND?: string;") && generated.include?("GITISH_CMD_ADD?: boolean;")
+  raise "unexpected generated types:\n#{generated}"
+end
+
+puts "ruby client extended tests passed"

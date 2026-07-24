@@ -30,6 +30,18 @@ let parse_process_from_file_native =
 let is_help_requested_json_argv_native =
   foreign ~from:lib "f2e_is_help_requested_json_argv" (string @-> returning int)
 
+let coerce_json_native =
+  foreign ~from:lib "f2e_coerce_json" (string @-> returning (ptr char))
+
+let coerce_json_from_file_native =
+  foreign ~from:lib "f2e_coerce_json_from_file" (string @-> string @-> returning (ptr char))
+
+let generate_types_native =
+  foreign ~from:lib "f2e_generate_types" (string @-> string_opt @-> returning (ptr char))
+
+let generate_types_from_file_native =
+  foreign ~from:lib "f2e_generate_types_from_file" (string @-> string @-> string_opt @-> returning (ptr char))
+
 let help_table_for_json_argv_native =
   foreign ~from:lib "f2e_help_table_for_json_argv" (string @-> string @-> int @-> returning (ptr char))
 
