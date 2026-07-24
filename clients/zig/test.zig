@@ -2,10 +2,9 @@ const std = @import("std");
 const flags2env = @import("flags2env");
 
 test "parse JSON argv through the C core" {
+    const io = std.testing.io;
     const config_path = "flags2env-zig-smoke.toml";
-    var config_file = try std.fs.cwd().createFile(config_path, .{ .truncate = true });
-    defer config_file.close();
-    try config_file.writeAll(
+    try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = config_path, .data =
         \\[flags.port]
         \\env = "PORT"
         \\aliases = ["port"]
@@ -17,8 +16,8 @@ test "parse JSON argv through the C core" {
         \\type = "bool"
         \\true_aliases = ["t"]
         \\
-    );
-    defer std.fs.cwd().deleteFile(config_path) catch {};
+    });
+    defer std.Io.Dir.cwd().deleteFile(io, config_path) catch {};
 
     const parsed = try flags2env.parseJsonArgvFromFile(
         std.testing.allocator,
@@ -32,10 +31,9 @@ test "parse JSON argv through the C core" {
 }
 
 test "subcommands, scoped help, coercion, and codegen through the C core" {
+    const io = std.testing.io;
     const config_path = "flags2env-zig-subcommands.toml";
-    var config_file = try std.fs.cwd().createFile(config_path, .{ .truncate = true });
-    defer config_file.close();
-    try config_file.writeAll(
+    try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = config_path, .data =
         \\[flags.verbose]
         \\env = "GITISH_VERBOSE"
         \\aliases = ["verbose"]
@@ -53,8 +51,8 @@ test "subcommands, scoped help, coercion, and codegen through the C core" {
         \\short = "f"
         \\type = "bool"
         \\
-    );
-    defer std.fs.cwd().deleteFile(config_path) catch {};
+    });
+    defer std.Io.Dir.cwd().deleteFile(io, config_path) catch {};
 
     const allocator = std.testing.allocator;
 

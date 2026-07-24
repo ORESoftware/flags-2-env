@@ -14,6 +14,29 @@ typedef _ParseProcessDefaultNative = Pointer<Utf8> Function();
 typedef _ParseProcessDefaultDart = Pointer<Utf8> Function();
 typedef _FreeNative = Void Function(Pointer<Utf8>);
 typedef _FreeDart = void Function(Pointer<Utf8>);
+typedef _IsHelpNative = Int32 Function(Pointer<Utf8>);
+typedef _IsHelpDart = int Function(Pointer<Utf8>);
+typedef _HelpForArgvNative = Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>, Int32);
+typedef _HelpForArgvDart = Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>, int);
+typedef _HelpForArgvFromFileNative = Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>, Int32);
+typedef _HelpForArgvFromFileDart = Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>, int);
+typedef _CoerceNative = Pointer<Utf8> Function(Pointer<Utf8>);
+typedef _CoerceDart = Pointer<Utf8> Function(Pointer<Utf8>);
+typedef _CoerceFromFileNative = Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>);
+typedef _CoerceFromFileDart = Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>);
+typedef _GenerateNative = Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>);
+typedef _GenerateDart = Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>);
+typedef _GenerateFromFileNative = Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>);
+typedef _GenerateFromFileDart = Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>);
+
+class CoercionError extends Error {
+  CoercionError(this.errors);
+
+  final List<String> errors;
+
+  @override
+  String toString() => 'flags2env could not coerce config: ${errors.join('; ')}';
+}
 
 class Flags2Env {
   Flags2Env._(DynamicLibrary library)
