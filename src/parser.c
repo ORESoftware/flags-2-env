@@ -4632,7 +4632,111 @@ static const char *f2e_help_column_value(unsigned column,
   }
 }
 
-static char *f2e_help_table_from_config(const F2EConfig *config, const char *command_name, int terminal_columns) {
+/*
+ * Collects the flags reachable from a command scope for the help table:
+ * the scope's own flags first, then ancestor/global flags that are not
+ * shadowed by a nearer definition.
+ */
+static size_t f2e_help_collect_scope_flags(const F2EConfig *config, int scope, size_t out[F2E_MAX_FLAGS]) {
+  size_t count = 0;
+  int level = scope;
+  for (;;) {
+    for (size_t i = 0; i < config->flag_count && count < F2E_MAX_FLAGS; i++) {
+      const F2EFlag *flag = &config->flags[i];
+      if (flag->command != level) {
+        continue;
+      }
+      int reachable = level == scope;
+      for (size_t j = 0; !reachable && j < flag->alias_count; j++) {
+        reachable = f2e_find_flag_by_alias_const(config, scope, flag->aliases[j]) == flag;
+      }
+      if (!reachable && flag->short_name != '\0') {
+        reachable = f2e_find_flag_by_short((F2EConfig *)config, scope, flag->short_name) == flag;
+      }
+      if (reachable) {
+        out[count++] = i;
+      }
+    }
+    if (level < 0) {
+      break;
+    }
+    level = f2e_scope_parent(config, level);
+  }
+  return count;
+}
+
+static char *f2e_help_command_row_name(const F2ECommand *command, size_t depth) {
+  F2EBuffer names;
+  if (!f2e_buffer_init(&names)) {
+    return NULL;
+  }
+  for (size_t i = 0; i < depth * 2; i++) {
+    if (!f2e_buffer_append_char(&names, ' ')) {
+      free(names.data);
+      return NULL;
+    }
+  }
+  if (!f2e_buffer_append(&names, command->name)) {
+    free(names.data);
+    return NULL;
+  }
+  for (size_t i = 0; i < command->alias_count; i++) {
+    if (!f2e_buffer_append(&names, ", ") || !f2e_buffer_append(&names, command->aliases[i])) {
+      free(names.data);
+      return NULL;
+    }
+  }
+  return names.data;
+}
+
+static size_t f2e_help_commands_name_width(const F2EConfig *config, int scope, size_t depth) {
+  size_t width = 0;
+  if (depth >= F2E_MAX_COMMAND_DEPTH) {
+    return width;
+  }
+  for (size_t i = 0; i < config->command_count; i++) {
+    const F2ECommand *command = &config->commands[i];
+    if (command->parent != scope) {
+      continue;
+    }
+    size_t row = depth * 2 + strlen(command->name);
+    for (size_t j = 0; j < command->alias_count; j++) {
+      row += 2 + strlen(command->aliases[j]);
+    }
+    width = f2e_size_max(width, row);
+    width = f2e_size_max(width, f2e_help_commands_name_width(config, (int)i, depth + 1));
+  }
+  return width;
+}
+
+static int f2e_help_append_command_rows(const F2EConfig *config,
+                                        int scope,
+                                        size_t depth,
+                                        F2EBuffer *table,
+                                        const size_t *widths) {
+  if (depth >= F2E_MAX_COMMAND_DEPTH) {
+    return 1;
+  }
+  for (size_t i = 0; i < config->command_count; i++) {
+    const F2ECommand *command = &config->commands[i];
+    if (command->parent != scope) {
+      continue;
+    }
+    char *names = f2e_help_command_row_name(command, depth);
+    if (!names) {
+      return 0;
+    }
+    const char *row[] = {names, command->help[0] != '\0' ? command->help : "-"};
+    int ok = f2e_help_append_row(table, row, widths, 2);
+    free(names);
+    if (!ok || !f2e_help_append_command_rows(config, (int)i, depth + 1, table, widths)) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static char *f2e_help_table_scoped(const F2EConfig *config, const char *command_name, int terminal_columns, int scope) {
   if (!config) {
     return NULL;
   }
