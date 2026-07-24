@@ -5294,7 +5294,8 @@ char *f2e_parse_from_file(const char *config_path, int argc, const char *const a
   int track_positionals = config->positionals_env[0] != '\0' && f2e_json_list_init(&positionals);
   int track_unknown_options = config->unknown_options_env[0] != '\0' && f2e_json_list_init(&unknown_options);
   int track_errors = config->errors_env[0] != '\0' && f2e_json_list_init(&errors);
-  int allow_unknown = f2e_resolve_allow_unknown(config, argc, argv);
+  int allow_unknown_forced = 0;
+  int allow_unknown = f2e_resolve_allow_unknown(config, argc, argv, &allow_unknown_forced);
 
   if (config->command_count > 0) {
     F2ECommandPath path;
