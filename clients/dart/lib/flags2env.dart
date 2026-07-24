@@ -117,6 +117,101 @@ class Flags2Env {
     }
   }
 
+  bool isHelpRequested(List<String> argv) {
+    final encodedArgv = jsonEncode(argv.map((value) => value.toString()).toList()).toNativeUtf8();
+    final requested = _isHelpJsonArgv(encodedArgv);
+    calloc.free(encodedArgv);
+    return requested != 0;
+  }
+
+  /// Renders the help table for the `[commands.*]` path selected by [argv];
+  /// with no matching command this renders the top-level menu, including the
+  /// Commands section when subcommands are declared.
+  String helpTableForArgv(String command, List<String> argv, {String? configPath, int terminalColumns = 0}) {
+    final encodedCommand = command.toNativeUtf8();
+    final encodedArgv = jsonEncode(argv.map((value) => value.toString()).toList()).toNativeUtf8();
+    final Pointer<Utf8> result;
+
+    if (configPath == null) {
+      result = _helpTableForJsonArgv(encodedCommand, encodedArgv, terminalColumns);
+    } else {
+      final config = configPath.toNativeUtf8();
+      result = _helpTableForJsonArgvFromFile(config, encodedCommand, encodedArgv, terminalColumns);
+      calloc.free(config);
+    }
+    calloc.free(encodedCommand);
+    calloc.free(encodedArgv);
+
+    if (result == nullptr) {
+      return '';
+    }
+    try {
+      return result.toDartString();
+    } finally {
+      _free(result);
+    }
+  }
+
+  /// Coerces declared env keys (including subcommand flag envs, command
+  /// marker envs, and the command path env) to their declared types.
+  Map<String, Object?> coerce(Map<String, Object?> values, {String? configPath}) {
+    final payload = jsonEncode(values).toNativeUtf8();
+    final Pointer<Utf8> result;
+
+    if (configPath == null) {
+      result = _coerceJson(payload);
+    } else {
+      final config = configPath.toNativeUtf8();
+      result = _coerceJsonFromFile(config, payload);
+      calloc.free(config);
+    }
+    calloc.free(payload);
+
+    if (result == nullptr) {
+      throw CoercionError(const ['coercion failed']);
+    }
+    final Map<String, dynamic> report;
+    try {
+      report = jsonDecode(result.toDartString()) as Map<String, dynamic>;
+    } finally {
+      _free(result);
+    }
+    if (report['ok'] != true) {
+      final errors = (report['errors'] as List<dynamic>? ?? const []).map((error) => error.toString()).toList();
+      throw CoercionError(errors);
+    }
+    return (report['value'] as Map<String, dynamic>? ?? const {}).map(MapEntry.new);
+  }
+
+  /// Generates importable types; subcommand flag envs and command envs are
+  /// included as optional fields.
+  String generateTypes(String language, {String? typeName, String? configPath}) {
+    final encodedLanguage = language.toNativeUtf8();
+    final encodedTypeName = typeName?.toNativeUtf8();
+    final Pointer<Utf8> result;
+
+    if (configPath == null) {
+      result = _generateTypes(encodedLanguage, encodedTypeName ?? nullptr);
+    } else {
+      final config = configPath.toNativeUtf8();
+      result = _generateTypesFromFile(config, encodedLanguage, encodedTypeName ?? nullptr);
+      calloc.free(config);
+    }
+    calloc.free(encodedLanguage);
+    if (encodedTypeName != null) {
+      calloc.free(encodedTypeName);
+    }
+
+    if (result == nullptr) {
+      throw ArgumentError('could not generate $language types; check the language, type name, and config audit');
+    }
+    try {
+      return result.toDartString();
+    } finally {
+      _free(result);
+    }
+  }
+
   Map<String, String> parseProcess({String? configPath}) {
     final Pointer<Utf8> result;
 
