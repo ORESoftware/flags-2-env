@@ -3010,6 +3010,26 @@ static int f2e_completion_add_bool_values(F2EBuffer *bool_values, const F2EFlag 
   return 1;
 }
 
+static int f2e_completion_collect_commands(const F2EConfig *config, F2EBuffer *command_words) {
+  for (size_t i = 0; i < config->command_count; i++) {
+    const F2ECommand *command = &config->commands[i];
+    if (command->parent != F2E_SCOPE_ROOT) {
+      continue;
+    }
+    if (!f2e_option_name_is_valid(command->name) ||
+        !f2e_completion_append_word(command_words, command->name)) {
+      return 0;
+    }
+    for (size_t j = 0; j < command->alias_count; j++) {
+      if (!f2e_option_name_is_valid(command->aliases[j]) ||
+          !f2e_completion_append_word(command_words, command->aliases[j])) {
+        return 0;
+      }
+    }
+  }
+  return 1;
+}
+
 static int f2e_completion_collect_bash_words(const F2EConfig *config,
                                              F2EBuffer *all_options,
                                              F2EBuffer *value_options,
@@ -3024,7 +3044,9 @@ static int f2e_completion_collect_bash_words(const F2EConfig *config,
 
   for (size_t i = 0; i < config->flag_count; i++) {
     const F2EFlag *flag = &config->flags[i];
-    if (flag->env[0] == '\0') {
+    /* completion scripts are static; only global options and top-level
+       command names are offered */
+    if (flag->env[0] == '\0' || flag->command != F2E_SCOPE_ROOT) {
       continue;
     }
     for (size_t j = 0; j < flag->alias_count; j++) {
