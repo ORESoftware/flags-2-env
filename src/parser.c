@@ -5832,6 +5832,60 @@ static char *f2e_coerce_report_from_config(const F2EConfig *config, const char *
     }
     free(coerced.data);
   }
+
+  for (size_t i = 0; i < config->command_count; i++) {
+    const F2ECoerceValue *input = &values[config->flag_count + i];
+    const char *env = config->commands[i].env;
+    if (!input->present || env[0] == '\0') {
+      continue;
+    }
+    const char *emitted = NULL;
+    if (input->kind == F2E_JSON_INPUT_BOOL) {
+      emitted = input->raw;
+    } else if (input->kind == F2E_JSON_INPUT_STRING &&
+               (f2e_streq(input->text, "true") || f2e_streq(input->text, "false"))) {
+      emitted = f2e_streq(input->text, "true") ? "true" : "false";
+    }
+    if (!emitted) {
+      char message[F2E_MAX_VALUE];
+      snprintf(message, sizeof(message),
+               "env %s (commands.%s) must be a boolean command marker; received %s",
+               env,
+               config->commands[i].name,
+               f2e_coerce_input_kind_name(input->kind));
+      f2e_json_list_append(&errors, message);
+      continue;
+    }
+    if ((wrote && !f2e_buffer_append_char(&output, ',')) ||
+        !f2e_buffer_append_json_string(&output, env) ||
+        !f2e_buffer_append_char(&output, ':') ||
+        !f2e_buffer_append(&output, emitted)) {
+      errors.failed = 1;
+    } else {
+      wrote = 1;
+    }
+  }
+
+  {
+    const F2ECoerceValue *input = &values[config->flag_count + config->command_count];
+    if (input->present && config->command_env[0] != '\0') {
+      if (input->kind != F2E_JSON_INPUT_STRING) {
+        char message[F2E_MAX_VALUE];
+        snprintf(message, sizeof(message),
+                 "env %s (parse.command_env) must be a string command path; received %s",
+                 config->command_env,
+                 f2e_coerce_input_kind_name(input->kind));
+        f2e_json_list_append(&errors, message);
+      } else if ((wrote && !f2e_buffer_append_char(&output, ',')) ||
+                 !f2e_buffer_append_json_string(&output, config->command_env) ||
+                 !f2e_buffer_append_char(&output, ':') ||
+                 !f2e_buffer_append_json_string(&output, input->text)) {
+        errors.failed = 1;
+      } else {
+        wrote = 1;
+      }
+    }
+  }
   free(values);
 
   if (!f2e_buffer_append_char(&output, '}') || errors.failed) {
