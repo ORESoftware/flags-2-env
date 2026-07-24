@@ -5528,6 +5528,75 @@ char *f2e_parse(int argc, const char *const argv[]) {
   return result;
 }
 
+/*
+ * Returns the resolved command path as its own JSON report, independent of
+ * the env map (whose keys can be shadowed by real environment variables):
+ *   {"path":["remote","add"],"label":"remote add"}
+ * An empty path means argv selected no command (or none are declared).
+ */
+char *f2e_resolve_commands_from_file(const char *config_path, int argc, const char *const argv[]) {
+  if (argc < 0 || !argv) {
+    argc = 0;
+  }
+
+  F2EConfig *config = (F2EConfig *)malloc(sizeof(F2EConfig));
+  if (!config) {
+    return NULL;
+  }
+  if (!config_path || !f2e_load_config(config_path, config)) {
+    free(config);
+    return NULL;
+  }
+
+  F2ECommandPath path;
+  memset(&path, 0, sizeof(path));
+  if (config->command_count > 0) {
+    f2e_resolve_command_path(config, argc, argv, &path);
+  }
+
+  F2EBuffer out;
+  if (!f2e_buffer_init(&out)) {
+    free(config);
+    return NULL;
+  }
+
+  int ok = f2e_buffer_append(&out, "{\"path\":[");
+  for (size_t i = 0; ok && i < path.depth; i++) {
+    if (i > 0) {
+      ok = f2e_buffer_append_char(&out, ',');
+    }
+    ok = ok && f2e_buffer_append_json_string(&out, config->commands[path.commands[i]].name);
+  }
+  char label[F2E_MAX_VALUE];
+  label[0] = '\0';
+  if (path.depth > 0) {
+    if (!f2e_command_path_label(config, path.commands[path.depth - 1], label, sizeof(label))) {
+      label[0] = '\0';
+    }
+  }
+  ok = ok &&
+       f2e_buffer_append(&out, "],\"label\":") &&
+       f2e_buffer_append_json_string(&out, label) &&
+       f2e_buffer_append_char(&out, '}');
+
+  free(config);
+  if (!ok) {
+    free(out.data);
+    return NULL;
+  }
+  return out.data;
+}
+
+char *f2e_resolve_commands(int argc, const char *const argv[]) {
+  char *path = f2e_default_config_path();
+  if (!path) {
+    return NULL;
+  }
+  char *result = f2e_resolve_commands_from_file(path, argc, argv);
+  free(path);
+  return result;
+}
+
 static int f2e_json_array_append(char ***items, int *count, int *cap, const char *value) {
   if (*count >= *cap) {
     int next = *cap == 0 ? 8 : *cap * 2;
