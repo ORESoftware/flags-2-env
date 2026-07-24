@@ -4746,6 +4746,94 @@ int f2e_print_table(const char *command_name, int terminal_columns) {
   return ok ? 0 : 1;
 }
 
+/*
+ * Walks argv once: matches subcommand tokens, resolves flags in the active
+ * command scope, and (when pairs is non-NULL) records the parsed values.
+ * A NULL pairs pointer makes this a dry run used to discover the command
+ * path before defaults are applied; both passes consume tokens identically.
+ *
+ * Command matching skips leading positionals (program or wrapper names) until
+ * the first token matches a top-level command; after that, each positional
+ * must match a subcommand of the current scope or matching stops for good.
+ */
+static void f2e_scan_argv(F2EConfig *config,
+                          F2EPair *pairs,
+                          size_t pair_count,
+                          int argc,
+                          const char *const argv[],
+                          F2EJsonList *positionals,
+                          F2EJsonList *unknown_options,
+                          F2EJsonList *errors,
+                          int allow_unknown,
+                          F2ECommandPath *path_out) {
+  int scope = F2E_SCOPE_ROOT;
+  int matching = config->command_count > 0;
+  int matched_any = 0;
+
+  for (int i = 0; i < argc; i++) {
+    const char *token = argv[i];
+    if (!token || token[0] != '-' || token[1] == '\0') {
+      if (matching && token && token[0] != '\0') {
+        int next = f2e_find_command_by_token(config, scope, token);
+        if (next >= 0) {
+          scope = next;
+          matched_any = 1;
+          if (path_out && path_out->depth < F2E_MAX_COMMAND_DEPTH) {
+            path_out->commands[path_out->depth++] = next;
+          }
+          continue;
+        }
+        if (!matched_any) {
+          if (positionals) {
+            f2e_json_list_append(positionals, token);
+          }
+          continue;
+        }
+        matching = 0;
+      }
+      if (positionals) {
+        if (config->stop_at_first_positional) {
+          for (int j = i; j < argc; j++) {
+            f2e_json_list_append(positionals, argv[j]);
+          }
+          break;
+        }
+        f2e_json_list_append(positionals, token);
+      } else if (config->stop_at_first_positional) {
+        break;
+      }
+      continue;
+    }
+    if (strcmp(token, "--") == 0) {
+      if (positionals) {
+        for (int j = i + 1; j < argc; j++) {
+          f2e_json_list_append(positionals, argv[j]);
+        }
+      }
+      break;
+    }
+    if (!f2e_token_looks_like_known_option(config, scope, token)) {
+      int parsed_allow_unknown = 0;
+      if (f2e_token_sets_allow_unknown(token, &parsed_allow_unknown)) {
+        allow_unknown = parsed_allow_unknown;
+      } else if (!allow_unknown && unknown_options) {
+        f2e_json_list_append(unknown_options, token);
+      }
+      continue;
+    }
+    if (token[1] == '-') {
+      f2e_apply_long_arg(config, scope, pairs, pair_count, token, &i, argc, argv, errors);
+    } else {
+      f2e_apply_short_arg(config, scope, pairs, pair_count, token, &i, argc, argv, errors);
+    }
+  }
+}
+
+/* Dry-run scan that only resolves the command path selected by argv. */
+static void f2e_resolve_command_path(F2EConfig *config, int argc, const char *const argv[], F2ECommandPath *path_out) {
+  f2e_scan_argv(config, NULL, 0, argc, argv, NULL, NULL, NULL, 1, path_out);
+}
+
 char *f2e_parse_from_file(const char *config_path, int argc, const char *const argv[]) {
   if (argc < 0 || !argv) {
     argc = 0;
@@ -4775,47 +4863,36 @@ char *f2e_parse_from_file(const char *config_path, int argc, const char *const a
   int track_errors = config->errors_env[0] != '\0' && f2e_json_list_init(&errors);
   int allow_unknown = f2e_resolve_allow_unknown(config, argc, argv);
 
-  f2e_apply_defaults(config, pairs, F2E_MAX_PAIRS);
-
-  for (int i = 0; i < argc; i++) {
-    const char *token = argv[i];
-    if (!token || token[0] != '-' || token[1] == '\0') {
-      if (track_positionals) {
-        if (config->stop_at_first_positional) {
-          for (int j = i; j < argc; j++) {
-            f2e_json_list_append(&positionals, argv[j]);
-          }
-          break;
-        }
-        f2e_json_list_append(&positionals, token);
-      } else if (config->stop_at_first_positional) {
-        break;
+  if (config->command_count > 0) {
+    F2ECommandPath path;
+    memset(&path, 0, sizeof(path));
+    f2e_resolve_command_path(config, argc, argv);
+    char joined[F2E_MAX_VALUE];
+    int tail = path.depth > 0 ? path.commands[path.depth - 1] : F2E_SCOPE_ROOT;
+    if (f2e_command_path_label(config, tail, joined, sizeof(joined))) {
+      f2e_set_pair(pairs, F2E_MAX_PAIRS, config->command_env, joined);
+    }
+    for (size_t i = 0; i < path.depth; i++) {
+      const F2ECommand *command = &config->commands[path.commands[i]];
+      if (command->env[0] != '\0') {
+        f2e_set_pair(pairs, F2E_MAX_PAIRS, command->env, "true");
       }
-      continue;
     }
-    if (strcmp(token, "--") == 0) {
-      if (track_positionals) {
-        for (int j = i + 1; j < argc; j++) {
-          f2e_json_list_append(&positionals, argv[j]);
-        }
-      }
-      break;
-    }
-    if (!f2e_token_looks_like_known_option(config, token)) {
-      int parsed_allow_unknown = 0;
-      if (f2e_token_sets_allow_unknown(token, &parsed_allow_unknown)) {
-        allow_unknown = parsed_allow_unknown;
-      } else if (!allow_unknown && track_unknown_options) {
-        f2e_json_list_append(&unknown_options, token);
-      }
-      continue;
-    }
-    if (token[1] == '-') {
-      f2e_apply_long_arg(config, pairs, F2E_MAX_PAIRS, token, &i, argc, argv, track_errors ? &errors : NULL);
-    } else {
-      f2e_apply_short_arg(config, pairs, F2E_MAX_PAIRS, token, &i, argc, argv, track_errors ? &errors : NULL);
-    }
+    f2e_apply_defaults_for_path(config, pairs, F2E_MAX_PAIRS, &path);
+  } else {
+    f2e_apply_defaults(config, pairs, F2E_MAX_PAIRS);
   }
+
+  f2e_scan_argv(config,
+                pairs,
+                F2E_MAX_PAIRS,
+                argc,
+                argv,
+                track_positionals ? &positionals : NULL,
+                track_unknown_options ? &unknown_options : NULL,
+                track_errors ? &errors : NULL,
+                allow_unknown,
+                NULL);
 
   if (track_positionals && positionals.count > 0) {
     char value[F2E_MAX_VALUE];
