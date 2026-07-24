@@ -38,6 +38,19 @@ export function helpTable(command = "flags2env", options = {}) {
     : native().helpTable(String(command), options.terminalColumns || 0);
 }
 
+export function helpTableForArgv(command = "flags2env", argv = process.argv, options = {}) {
+  if (!Array.isArray(argv)) {
+    throw new TypeError("argv must be an array of strings");
+  }
+  const argvJson = JSON.stringify(argv.map(String));
+  if (typeof native().helpTableForArgv !== "function") {
+    return helpTable(command, options);
+  }
+  return options.configPath
+    ? native().helpTableForArgv(String(command), argvJson, options.terminalColumns || 0, options.configPath)
+    : native().helpTableForArgv(String(command), argvJson, options.terminalColumns || 0);
+}
+
 function withHelpMetadata(result, argvItems, argvJson, options) {
   const command = argvItems[0] || "flags2env";
   const isHelpMenu = native().isHelpJson(argvJson);
@@ -52,7 +65,7 @@ function withHelpMetadata(result, argvItems, argvJson, options) {
         if (!target || typeof target.write !== "function") {
           throw new TypeError("printTable target must expose write(chunk)");
         }
-        const table = helpTable(command, {
+        const table = helpTableForArgv(command, argvItems, {
           configPath: options.configPath,
           terminalColumns: resolveTerminalColumns(target),
         });
