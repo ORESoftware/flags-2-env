@@ -1107,8 +1107,15 @@ static int f2e_load_config(const char *config_path, F2EConfig *config) {
       char *table = f2e_trim(trimmed + 1);
       current_command = F2E_SCOPE_ROOT;
       const char prefix[] = "flags.";
+      const char global_prefix[] = "global.flags.";
       if (strncmp(table, prefix, sizeof(prefix) - 1) == 0) {
         char *name = f2e_trim(table + sizeof(prefix) - 1);
+        current = f2e_add_flag(config, name);
+        section = F2E_SECTION_FLAG;
+      } else if (strncmp(table, global_prefix, sizeof(global_prefix) - 1) == 0) {
+        /* explicit spelling of the global namespace: [global.flags.x] is the
+           same as [flags.x] and applies to every subcommand scope */
+        char *name = f2e_trim(table + sizeof(global_prefix) - 1);
         current = f2e_add_flag(config, name);
         section = F2E_SECTION_FLAG;
       } else if (f2e_load_commands_table(config, table, &section, &current, &current_command)) {
