@@ -374,6 +374,39 @@ int main(void) {
   }
   expect_status("missing print table config returns failure", f2e_print_table_from_file(NULL, "app", 80), 1);
 
+  const char *scoped_help_argv[] = {"gitish", "remote", "add", "--help"};
+  char *scoped_help = f2e_help_table_for_argv_from_file(SUBCOMMANDS_CONFIG, "gitish", 4, scoped_help_argv, 100);
+  expect_contains("scoped help renders command path", scoped_help, "Command: gitish remote add [OPTIONS]");
+  expect_contains("scoped help renders command description", scoped_help, "Add a remote.");
+  expect_contains("scoped help renders scoped flag", scoped_help, "--fetch");
+  expect_contains("scoped help renders inherited global flag", scoped_help, "--author");
+  if (strstr(scoped_help, "--chmod")) {
+    fprintf(stderr, "scoped help should not render sibling command flags:\n%s\n", scoped_help);
+    f2e_free(scoped_help);
+    exit(1);
+  }
+  f2e_free(scoped_help);
+
+  const char *top_help_argv[] = {"gitish", "--help"};
+  char *top_help = f2e_help_table_for_argv_from_file(SUBCOMMANDS_CONFIG, "gitish", 2, top_help_argv, 100);
+  expect_contains("top help lists commands section", top_help, "Commands:");
+  expect_contains("top help lists nested command path", top_help, "remote add");
+  f2e_free(top_help);
+
+  char *null_argv_help = f2e_help_table_for_argv_from_file(SUBCOMMANDS_CONFIG, "gitish", -1, NULL, 100);
+  expect_contains("null argv help falls back to top-level table", null_argv_help, "Commands:");
+  f2e_free(null_argv_help);
+
+  char *missing_argv_help = f2e_help_table_for_argv_from_file(NULL, "gitish", 2, top_help_argv, 100);
+  if (missing_argv_help) {
+    fprintf(stderr, "missing argv-help config should return NULL\n");
+    f2e_free(missing_argv_help);
+    exit(1);
+  }
+  expect_status("missing print argv table config returns failure",
+                f2e_print_table_for_argv_from_file(NULL, "gitish", 2, top_help_argv, 100),
+                1);
+
   char *sanitized_help = f2e_help_table_from_file(HELP_HARDENING_CONFIG, "app", 80);
   expect_contains("sanitized help preserves visible text", sanitized_help, "Alpha beta");
   expect_contains("sanitized help url preserves visible text", sanitized_help, "https://example.com/help with-tab");
