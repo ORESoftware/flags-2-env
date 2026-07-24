@@ -4,6 +4,7 @@ url = "https://example.com/gitish/help"
 [parse]
 command_env = "GITISH_COMMAND"
 positionals_env = "GITISH_POSITIONALS"
+unknown_options_env = "GITISH_UNKNOWN_OPTIONS"
 
 [flags.verbose]
 env = "GITISH_VERBOSE"
