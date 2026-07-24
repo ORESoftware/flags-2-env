@@ -5326,6 +5326,7 @@ char *f2e_parse_from_file(const char *config_path, int argc, const char *const a
                 track_unknown_options ? &unknown_options : NULL,
                 track_errors ? &errors : NULL,
                 allow_unknown,
+                allow_unknown_forced,
                 NULL);
 
   if (track_positionals && positionals.count > 0) {
