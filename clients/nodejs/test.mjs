@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { chdir } from "node:process";
 
-import { apply, auditConfig, auditConfigStatus, auditEnv, auditEnvStatus, coerce, CoercionError, completionScript, generateTypes, helpTable, parse, parseFromArgs } from "./lib.mjs";
+import { apply, auditConfig, auditConfigStatus, auditEnv, auditEnvStatus, coerce, CoercionError, completionScript, generateTypes, helpTable, helpTableForArgv, parse, parseFromArgs } from "./lib.mjs";
 
 chdir("../../tests/fixtures/nested/deeper");
 
@@ -72,6 +72,24 @@ assert.throws(() => help.printTable(null), /write\(chunk\)/);
 const wideTable = helpTable("app", { configPath: "../../.cli-flags.toml", terminalColumns: 132 });
 assert.match(wideTable, /\| Description/);
 assert.match(wideTable, /TCP port for the app listener\./);
+
+const subcommandsConfig = "../../../subcommands/.cli-flags.toml";
+const scopedTable = helpTableForArgv("gitish", ["gitish", "remote", "add", "--help"], {
+  configPath: subcommandsConfig,
+  terminalColumns: 100,
+});
+assert.match(scopedTable, /Command: gitish remote add \[OPTIONS\]/);
+assert.match(scopedTable, /Add a remote\./);
+assert.match(scopedTable, /--fetch/);
+const topTable = helpTableForArgv("gitish", ["gitish", "--help"], {
+  configPath: subcommandsConfig,
+  terminalColumns: 100,
+});
+assert.match(topTable, /Commands:/);
+assert.match(topTable, /remote add/);
+const scopedParse = parse(["gitish", "add", "-A"], { configPath: subcommandsConfig });
+assert.equal(scopedParse.GITISH_COMMAND, "add");
+assert.equal(scopedParse.GITISH_ADD_ALL, "true");
 
 const bashCompletion = completionScript("bash", "mycli", { configPath: "../../.cli-flags.toml" });
 assert.match(bashCompletion, /_flags2env_complete_mycli/);

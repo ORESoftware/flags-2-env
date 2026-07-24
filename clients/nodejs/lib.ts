@@ -245,4 +245,5 @@ export default {
   completionScript,
   generateTypes,
   helpTable,
+  helpTableForArgv,
 };

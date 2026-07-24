@@ -397,6 +397,17 @@ int main(void) {
   expect_contains("null argv help falls back to top-level table", null_argv_help, "Commands:");
   f2e_free(null_argv_help);
 
+  char *json_argv_help = f2e_help_table_for_json_argv_from_file(SUBCOMMANDS_CONFIG,
+                                                                "gitish",
+                                                                "[\"gitish\",\"remote\",\"add\",\"--help\"]",
+                                                                100);
+  expect_contains("json argv help renders command path", json_argv_help, "Command: gitish remote add [OPTIONS]");
+  f2e_free(json_argv_help);
+
+  char *bad_json_argv_help = f2e_help_table_for_json_argv_from_file(SUBCOMMANDS_CONFIG, "gitish", "[not-json", 100);
+  expect_contains("invalid json argv falls back to top-level help", bad_json_argv_help, "Commands:");
+  f2e_free(bad_json_argv_help);
+
   char *missing_argv_help = f2e_help_table_for_argv_from_file(NULL, "gitish", 2, top_help_argv, 100);
   if (missing_argv_help) {
     fprintf(stderr, "missing argv-help config should return NULL\n");

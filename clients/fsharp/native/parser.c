@@ -6021,6 +6021,35 @@ int f2e_is_help_requested_json_argv(const char *argv_json) {
   return requested;
 }
 
+char *f2e_help_table_for_json_argv_from_file(const char *config_path,
+                                             const char *command_name,
+                                             const char *argv_json,
+                                             int terminal_columns) {
+  char **items = NULL;
+  int count = 0;
+  if (!argv_json || !f2e_parse_json_argv_items(argv_json, &items, &count)) {
+    f2e_free_json_items(items, count);
+    return f2e_help_table_from_file(config_path, command_name, terminal_columns);
+  }
+  char *table = f2e_help_table_for_argv_from_file(config_path,
+                                                  command_name,
+                                                  count,
+                                                  (const char *const *)items,
+                                                  terminal_columns);
+  f2e_free_json_items(items, count);
+  return table;
+}
+
+char *f2e_help_table_for_json_argv(const char *command_name, const char *argv_json, int terminal_columns) {
+  char *path = f2e_default_config_path();
+  if (!path) {
+    return NULL;
+  }
+  char *table = f2e_help_table_for_json_argv_from_file(path, command_name, argv_json, terminal_columns);
+  free(path);
+  return table;
+}
+
 static void f2e_free_json_items(char **items, int count) {
   if (!items) {
     return;

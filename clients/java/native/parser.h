@@ -94,6 +94,13 @@ int f2e_print_table_for_argv(const char *command_name, int argc, const char *con
 int f2e_print_table_for_argv_from_file(const char *config_path, const char *command_name, int argc, const char *const argv[], int terminal_columns) F2E_WARN_UNUSED_RESULT;
 
 /*
+ * FFI-friendly variants: argv_json must be a JSON array of strings. Invalid
+ * argv_json falls back to the top-level help table.
+ */
+char *f2e_help_table_for_json_argv(const char *command_name, const char *argv_json, int terminal_columns) F2E_OWNED_RESULT;
+char *f2e_help_table_for_json_argv_from_file(const char *config_path, const char *command_name, const char *argv_json, int terminal_columns) F2E_OWNED_RESULT;
+
+/*
  * Audits .cli-flags.toml for parse issues, ambiguous aliases, duplicate short
  * flags, env collisions, and boolean value alias conflicts. Returns a
  * heap-allocated JSON report. Call f2e_free().
