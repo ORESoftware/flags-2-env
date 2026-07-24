@@ -390,42 +390,152 @@ static F2EFlag *f2e_add_flag(F2EConfig *config, const char *name) {
   F2EFlag *flag = &config->flags[config->flag_count++];
   memset(flag, 0, sizeof(*flag));
   flag->type = F2E_TYPE_STRING;
+  flag->command = F2E_SCOPE_ROOT;
   f2e_strlcpy(flag->name, name, sizeof(flag->name));
   f2e_add_alias(flag, name);
   return flag;
 }
 
-static F2EFlag *f2e_find_flag_by_alias(F2EConfig *config, const char *alias) {
-  for (size_t i = 0; i < config->flag_count; i++) {
-    F2EFlag *flag = &config->flags[i];
-    for (size_t j = 0; j < flag->alias_count; j++) {
-      if (f2e_streq(flag->aliases[j], alias)) {
-        return flag;
+static int f2e_scope_parent(const F2EConfig *config, int scope) {
+  if (scope < 0 || (size_t)scope >= config->command_count) {
+    return F2E_SCOPE_ROOT;
+  }
+  return config->commands[scope].parent;
+}
+
+/*
+ * Flag lookups resolve against a command scope: the scope's own flags win,
+ * then each ancestor up to the global (root) flags. A subcommand can thereby
+ * reuse an alias or short flag that means something else elsewhere.
+ */
+static const F2EFlag *f2e_find_flag_by_alias_const(const F2EConfig *config, int scope, const char *alias) {
+  for (;;) {
+    for (size_t i = 0; i < config->flag_count; i++) {
+      const F2EFlag *flag = &config->flags[i];
+      if (flag->command != scope) {
+        continue;
+      }
+      for (size_t j = 0; j < flag->alias_count; j++) {
+        if (f2e_streq(flag->aliases[j], alias)) {
+          return flag;
+        }
+      }
+    }
+    if (scope < 0) {
+      return NULL;
+    }
+    scope = f2e_scope_parent(config, scope);
+  }
+}
+
+static F2EFlag *f2e_find_flag_by_alias(F2EConfig *config, int scope, const char *alias) {
+  return (F2EFlag *)f2e_find_flag_by_alias_const(config, scope, alias);
+}
+
+static F2EFlag *f2e_find_flag_by_short(F2EConfig *config, int scope, char short_name) {
+  for (;;) {
+    for (size_t i = 0; i < config->flag_count; i++) {
+      if (config->flags[i].command == scope && config->flags[i].short_name == short_name) {
+        return &config->flags[i];
+      }
+    }
+    if (scope < 0) {
+      return NULL;
+    }
+    scope = f2e_scope_parent(config, scope);
+  }
+}
+
+static int f2e_find_command_by_name(const F2EConfig *config, int parent, const char *name) {
+  for (size_t i = 0; i < config->command_count; i++) {
+    if (config->commands[i].parent == parent && f2e_streq(config->commands[i].name, name)) {
+      return (int)i;
+    }
+  }
+  return -1;
+}
+
+static int f2e_find_command_by_token(const F2EConfig *config, int parent, const char *token) {
+  for (size_t i = 0; i < config->command_count; i++) {
+    const F2ECommand *command = &config->commands[i];
+    if (command->parent != parent) {
+      continue;
+    }
+    if (f2e_streq(command->name, token)) {
+      return (int)i;
+    }
+    for (size_t j = 0; j < command->alias_count; j++) {
+      if (f2e_streq(command->aliases[j], token)) {
+        return (int)i;
       }
     }
   }
-  return NULL;
+  return -1;
 }
 
-static const F2EFlag *f2e_find_flag_by_alias_const(const F2EConfig *config, const char *alias) {
-  for (size_t i = 0; i < config->flag_count; i++) {
-    const F2EFlag *flag = &config->flags[i];
-    for (size_t j = 0; j < flag->alias_count; j++) {
-      if (f2e_streq(flag->aliases[j], alias)) {
-        return flag;
-      }
+static int f2e_command_has_children(const F2EConfig *config, int scope) {
+  for (size_t i = 0; i < config->command_count; i++) {
+    if (config->commands[i].parent == scope) {
+      return 1;
     }
   }
-  return NULL;
+  return 0;
 }
 
-static F2EFlag *f2e_find_flag_by_short(F2EConfig *config, char short_name) {
-  for (size_t i = 0; i < config->flag_count; i++) {
-    if (config->flags[i].short_name == short_name) {
-      return &config->flags[i];
-    }
+static size_t f2e_command_depth(const F2EConfig *config, int index) {
+  size_t depth = 0;
+  while (index >= 0 && (size_t)index < config->command_count && depth <= F2E_MAX_COMMANDS) {
+    depth++;
+    index = config->commands[index].parent;
   }
-  return NULL;
+  return depth;
+}
+
+static int f2e_command_path_label(const F2EConfig *config, int index, char *out, size_t out_size) {
+  if (!out || out_size == 0) {
+    return 0;
+  }
+  out[0] = '\0';
+  int chain[F2E_MAX_COMMANDS];
+  size_t depth = 0;
+  while (index >= 0 && (size_t)index < config->command_count && depth < F2E_MAX_COMMANDS) {
+    chain[depth++] = index;
+    index = config->commands[index].parent;
+  }
+  size_t used = 0;
+  for (size_t i = depth; i > 0; i--) {
+    const char *name = config->commands[chain[i - 1]].name;
+    size_t name_len = strlen(name);
+    if (used + name_len + (used > 0 ? 1 : 0) + 1 > out_size) {
+      return 0;
+    }
+    if (used > 0) {
+      out[used++] = ' ';
+    }
+    memcpy(out + used, name, name_len);
+    used += name_len;
+  }
+  out[used] = '\0';
+  return 1;
+}
+
+static int f2e_find_or_add_command(F2EConfig *config, int parent, const char *name) {
+  if (!name || name[0] == '\0') {
+    return -1;
+  }
+  int existing = f2e_find_command_by_name(config, parent, name);
+  if (existing >= 0) {
+    return existing;
+  }
+  if (config->command_count >= F2E_MAX_COMMANDS) {
+    config->too_many_commands = 1;
+    return -1;
+  }
+  F2ECommand *command = &config->commands[config->command_count];
+  memset(command, 0, sizeof(*command));
+  f2e_strlcpy(command->name, name, sizeof(command->name));
+  command->parent = parent;
+  return (int)config->command_count++;
 }
 
 static int f2e_parse_alias_list(char aliases[][F2E_MAX_NAME], size_t *alias_count, const char *value) {
