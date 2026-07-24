@@ -82,6 +82,36 @@ module Flags2Env
     Native.f2e_free(result) if result && !result.null?
   end
 
+  # Coerces declared env keys (including subcommand flag envs, command marker
+  # envs, and the command path env) to their declared types.
+  def coerce(values = ENV.to_h, config_path: nil)
+    payload = JSON.generate(values)
+    result = config_path ? Native.f2e_coerce_json_from_file(config_path, payload) : Native.f2e_coerce_json(payload)
+    raise CoercionError, ["coercion failed"] if result.null?
+
+    report = JSON.parse(result.to_s)
+    raise CoercionError, report.fetch("errors", []) unless report["ok"]
+
+    report.fetch("value", {})
+  ensure
+    Native.f2e_free(result) if result && !result.null?
+  end
+
+  # Generates importable types; subcommand flag envs and command envs are
+  # included as optional fields.
+  def generate_types(language, type_name: nil, config_path: nil)
+    result = if config_path
+               Native.f2e_generate_types_from_file(config_path, language.to_s, type_name)
+             else
+               Native.f2e_generate_types(language.to_s, type_name)
+             end
+    raise ArgumentError, "could not generate #{language} types; check the language, type name, and config audit" if result.null?
+
+    result.to_s
+  ensure
+    Native.f2e_free(result) if result && !result.null?
+  end
+
   def apply(env = ENV.to_h, argv = ARGV, config_path: nil)
     env.merge(parse(argv, config_path: config_path))
   end
