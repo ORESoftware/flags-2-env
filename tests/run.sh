@@ -617,6 +617,16 @@ run_deep_case "{\"TOOL_COMMAND\":\"ws\",\"TOOL_DRY_RUN\":\"false\",\"TOOL_POSITI
 run_deep_case "{\"TOOL_COMMAND\":\"\",\"TOOL_DRY_RUN\":\"false\",\"TOOL_POSITIONALS\":\"[\\\"$CLI\\\",\\\"tool\\\",\\\"ws\\\"]\"}" tool -- ws
 # unknown options are collected without ending command matching
 run_deep_case "{\"TOOL_COMMAND\":\"ws remote\",\"TOOL_DRY_RUN\":\"false\",$DEEP_BASE_POSITIONALS,\"TOOL_UNKNOWN_OPTIONS\":\"[\\\"--wat\\\"]\"}" tool --wat ws remote
+# [commands.ws.commands.remote] sets allow_unknown = true: unknown flags are
+# collected before that scope is entered and tolerated after (including in
+# nested subcommands, which inherit the setting)
+run_deep_case "{\"TOOL_COMMAND\":\"ws remote\",\"TOOL_DRY_RUN\":\"false\",$DEEP_BASE_POSITIONALS,\"TOOL_UNKNOWN_OPTIONS\":\"[\\\"--wat\\\"]\"}" tool ws --wat remote --wat2
+run_deep_case "{\"TOOL_COMMAND\":\"ws remote add\",\"TOOL_DRY_RUN\":\"false\",$DEEP_BASE_POSITIONALS}" tool ws remote add --wat3
+# a runtime --no-allow-unknown override beats the per-command setting
+run_deep_case "{\"TOOL_COMMAND\":\"ws remote\",\"TOOL_DRY_RUN\":\"false\",$DEEP_BASE_POSITIONALS,\"TOOL_UNKNOWN_OPTIONS\":\"[\\\"--wat4\\\"]\"}" tool --no-allow-unknown ws remote --wat4
+# lenient fallback with stop_at_first_positional: a deeply scoped unique flag
+# still applies when the wrapper stripped the command tokens
+run_deep_case "{\"TOOL_COMMAND\":\"\",\"TOOL_DRY_RUN\":\"false\",\"TOOL_WS_REMOTE_ADD_URL\":\"http://x\",$DEEP_BASE_POSITIONALS}" tool --url http://x
 
 actual="$(cd "$SUBCOMMANDS_DEEP_DIR" && "$CLI" audit)"
 expected='{"ok":true,"errorCount":0,"warningCount":0,"errors":[],"warnings":[]}'
