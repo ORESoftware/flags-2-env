@@ -173,5 +173,6 @@ module.exports = {
   completionScript,
   generateTypes,
   helpTable,
+  helpTableForArgv,
 };
 module.exports.default = module.exports;
