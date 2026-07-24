@@ -62,6 +62,9 @@ test: borrow-check readme-test parity-test $(PROCESS_SMOKE) $(API_HARDENING)
 codegen-docker-test:
 	./tests/codegen-docker/run.sh
 
+core-docker-test:
+	./tests/core-docker/run.sh
+
 readme-test: ./scripts/test-readme-snippets.mjs
 	./scripts/test-readme-snippets.mjs
 
