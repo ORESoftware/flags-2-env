@@ -478,7 +478,7 @@ run_subcommand_case "{\"GITISH_COMMAND\":\"\",\"GITISH_VERBOSE\":\"false\",$BASE
 # true typos are still collected
 run_subcommand_case "{\"GITISH_COMMAND\":\"\",\"GITISH_VERBOSE\":\"false\",$BASE_POSITIONALS,\"GITISH_UNKNOWN_OPTIONS\":\"[\\\"--wat\\\"]\"}" gitish --wat
 # lenient fallback never applies once a command matched
-run_subcommand_case "{\"GITISH_COMMAND\":\"commit\",\"GITISH_VERBOSE\":\"false\",$BASE_POSITIONALS,\"GITISH_UNKNOWN_OPTIONS\":\"[\\\"--chmod\\\"]\"}" gitish commit --chmod=755
+run_subcommand_case "{\"GITISH_COMMAND\":\"commit\",\"GITISH_VERBOSE\":\"false\",$BASE_POSITIONALS,\"GITISH_UNKNOWN_OPTIONS\":\"[\\\"--chmod=755\\\"]\"}" gitish commit --chmod=755
 # [global.flags.*] is the explicit global namespace and reaches every scope
 run_subcommand_case "{\"GITISH_COMMAND\":\"remote add\",\"GITISH_CMD_REMOTE_ADD\":\"true\",\"GITISH_VERBOSE\":\"false\",\"GITISH_REMOTE_ADD_FETCH\":\"false\",\"GITISH_COLOR\":\"true\",$BASE_POSITIONALS}" gitish remote add --color
 
