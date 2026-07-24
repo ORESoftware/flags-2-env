@@ -411,12 +411,62 @@ static int f2e_scope_parent(const F2EConfig *config, int scope) {
   return config->commands[scope].parent;
 }
 
+/* Searches every scope; sets *ambiguous when distinct flags share the name. */
+static const F2EFlag *f2e_find_flag_any_scope_by_alias(const F2EConfig *config, const char *alias, int *ambiguous) {
+  const F2EFlag *found = NULL;
+  for (size_t i = 0; i < config->flag_count; i++) {
+    const F2EFlag *flag = &config->flags[i];
+    for (size_t j = 0; j < flag->alias_count; j++) {
+      if (!f2e_streq(flag->aliases[j], alias)) {
+        continue;
+      }
+      if (found && found != flag) {
+        if (ambiguous) {
+          *ambiguous = 1;
+        }
+        return NULL;
+      }
+      found = flag;
+    }
+  }
+  return found;
+}
+
+static const F2EFlag *f2e_find_flag_any_scope_by_short(const F2EConfig *config, char short_name, int *ambiguous) {
+  const F2EFlag *found = NULL;
+  for (size_t i = 0; i < config->flag_count; i++) {
+    const F2EFlag *flag = &config->flags[i];
+    if (flag->short_name != short_name) {
+      continue;
+    }
+    if (found && found != flag) {
+      if (ambiguous) {
+        *ambiguous = 1;
+      }
+      return NULL;
+    }
+    found = flag;
+  }
+  return found;
+}
+
 /*
  * Flag lookups resolve against a command scope: the scope's own flags win,
  * then each ancestor up to the global (root) flags. A subcommand can thereby
  * reuse an alias or short flag that means something else elsewhere.
+ *
+ * F2E_SCOPE_LENIENT is used when commands are declared but argv selected
+ * none (a wrapper may have consumed the subcommand): root flags win, and a
+ * name that is unambiguous across all scopes resolves as if it were global.
  */
 static const F2EFlag *f2e_find_flag_by_alias_const(const F2EConfig *config, int scope, const char *alias) {
+  if (scope == F2E_SCOPE_LENIENT) {
+    const F2EFlag *root = f2e_find_flag_by_alias_const(config, F2E_SCOPE_ROOT, alias);
+    if (root) {
+      return root;
+    }
+    return f2e_find_flag_any_scope_by_alias(config, alias, NULL);
+  }
   for (;;) {
     for (size_t i = 0; i < config->flag_count; i++) {
       const F2EFlag *flag = &config->flags[i];
@@ -441,6 +491,13 @@ static F2EFlag *f2e_find_flag_by_alias(F2EConfig *config, int scope, const char 
 }
 
 static F2EFlag *f2e_find_flag_by_short(F2EConfig *config, int scope, char short_name) {
+  if (scope == F2E_SCOPE_LENIENT) {
+    F2EFlag *root = f2e_find_flag_by_short(config, F2E_SCOPE_ROOT, short_name);
+    if (root) {
+      return root;
+    }
+    return (F2EFlag *)f2e_find_flag_any_scope_by_short(config, short_name, NULL);
+  }
   for (;;) {
     for (size_t i = 0; i < config->flag_count; i++) {
       if (config->flags[i].command == scope && config->flags[i].short_name == short_name) {
