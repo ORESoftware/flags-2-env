@@ -5248,6 +5248,7 @@ static void f2e_scan_argv(F2EConfig *config,
       int parsed_allow_unknown = 0;
       if (f2e_token_sets_allow_unknown(token, &parsed_allow_unknown)) {
         allow_unknown = parsed_allow_unknown;
+        allow_unknown_forced = 1;
       } else if (!allow_unknown && unknown_options) {
         f2e_json_list_append(unknown_options, token);
       }
