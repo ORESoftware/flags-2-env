@@ -77,11 +77,25 @@ typedef struct {
   int has_default;
   char default_value[F2E_MAX_VALUE];
   char help[F2E_MAX_VALUE];
+  int command; /* index into F2EConfig.commands; F2E_SCOPE_ROOT for global flags */
 } F2EFlag;
+
+typedef struct {
+  char name[F2E_MAX_NAME];
+  char aliases[F2E_MAX_ALIASES][F2E_MAX_NAME];
+  size_t alias_count;
+  char env[F2E_MAX_ENV];
+  char help[F2E_MAX_VALUE];
+  int parent; /* index into F2EConfig.commands; F2E_SCOPE_ROOT for top-level commands */
+} F2ECommand;
 
 typedef struct {
   F2EFlag flags[F2E_MAX_FLAGS];
   size_t flag_count;
+  F2ECommand commands[F2E_MAX_COMMANDS];
+  size_t command_count;
+  char command_env[F2E_MAX_ENV];
+  int too_many_commands;
   int allow_separated_values;
   int stop_at_first_positional;
   char positionals_env[F2E_MAX_ENV];
