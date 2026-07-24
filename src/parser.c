@@ -4914,7 +4914,10 @@ static char *f2e_help_table_scoped(const F2EConfig *config, const char *command_
 
   for (size_t k = 0; k < scope_flag_count; k++) {
     const F2EFlag *flag = &config->flags[scope_flags[k]];
-    char *names = f2e_help_flag_names(flag);
+    /* hide a short flag that a nearer scope reuses for a different option */
+    int show_short = flag->short_name == '\0' ||
+                     f2e_find_flag_by_short((F2EConfig *)config, scope, flag->short_name) == flag;
+    char *names = f2e_help_flag_names(flag, show_short);
     if (!names) {
       free(table.data);
       return NULL;
