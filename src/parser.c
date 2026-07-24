@@ -4866,7 +4866,7 @@ char *f2e_parse_from_file(const char *config_path, int argc, const char *const a
   if (config->command_count > 0) {
     F2ECommandPath path;
     memset(&path, 0, sizeof(path));
-    f2e_resolve_command_path(config, argc, argv);
+    f2e_resolve_command_path(config, argc, argv, &path);
     char joined[F2E_MAX_VALUE];
     int tail = path.depth > 0 ? path.commands[path.depth - 1] : F2E_SCOPE_ROOT;
     if (f2e_command_path_label(config, tail, joined, sizeof(joined))) {
