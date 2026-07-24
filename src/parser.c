@@ -5422,10 +5422,15 @@ char *f2e_parse_from_file(const char *config_path, int argc, const char *const a
   int allow_unknown_forced = 0;
   int allow_unknown = f2e_resolve_allow_unknown(config, argc, argv, &allow_unknown_forced);
 
+  int lenient = 0;
   if (config->command_count > 0) {
     F2ECommandPath path;
     memset(&path, 0, sizeof(path));
     f2e_resolve_command_path(config, argc, argv, &path);
+    /* a wrapper script may have consumed the subcommand before argv reached
+       this parser; when nothing matched, fall back to lenient global
+       resolution instead of treating scoped flags as unknown */
+    lenient = path.depth == 0;
     char joined[F2E_MAX_VALUE];
     int tail = path.depth > 0 ? path.commands[path.depth - 1] : F2E_SCOPE_ROOT;
     if (f2e_command_path_label(config, tail, joined, sizeof(joined))) {
@@ -5452,6 +5457,7 @@ char *f2e_parse_from_file(const char *config_path, int argc, const char *const a
                 track_errors ? &errors : NULL,
                 allow_unknown,
                 allow_unknown_forced,
+                lenient,
                 NULL);
 
   if (track_positionals && positionals.count > 0) {
