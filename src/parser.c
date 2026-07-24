@@ -4129,6 +4129,45 @@ static char *f2e_generate_types_from_config(const F2EConfig *config, const char 
   return NULL;
 }
 
+static int f2e_codegen_env_is_declared(const F2EConfig *config, const char *env) {
+  for (size_t i = 0; i < config->flag_count; i++) {
+    if (f2e_streq(config->flags[i].env, env)) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+/*
+ * Generated types describe every env key the parser may emit, so command
+ * marker envs and parse.command_env are appended as synthetic optional
+ * fields (bool markers, string command path) before rendering.
+ */
+static void f2e_codegen_append_command_envs(F2EConfig *config) {
+  for (size_t i = 0; i < config->command_count; i++) {
+    const F2ECommand *command = &config->commands[i];
+    if (command->env[0] == '\0' || f2e_codegen_env_is_declared(config, command->env)) {
+      continue;
+    }
+    F2EFlag *flag = f2e_add_flag(config, command->name);
+    if (!flag) {
+      return;
+    }
+    f2e_strlcpy(flag->env, command->env, sizeof(flag->env));
+    flag->type = F2E_TYPE_BOOL;
+    f2e_strlcpy(flag->help, command->help, sizeof(flag->help));
+  }
+  if (config->command_count > 0 && config->command_env[0] != '\0' &&
+      !f2e_codegen_env_is_declared(config, config->command_env)) {
+    F2EFlag *flag = f2e_add_flag(config, "command");
+    if (flag) {
+      f2e_strlcpy(flag->env, config->command_env, sizeof(flag->env));
+      flag->type = F2E_TYPE_STRING;
+      f2e_strlcpy(flag->help, "Space-joined subcommand path selected by argv.", sizeof(flag->help));
+    }
+  }
+}
+
 char *f2e_generate_types_from_file(const char *config_path, const char *language, const char *type_name) {
   F2EConfig *config = (F2EConfig *)malloc(sizeof(F2EConfig));
   if (!config) {
@@ -4138,6 +4177,7 @@ char *f2e_generate_types_from_file(const char *config_path, const char *language
     free(config);
     return NULL;
   }
+  f2e_codegen_append_command_envs(config);
   char *source = f2e_generate_types_from_config(config, language, type_name);
   free(config);
   return source;
