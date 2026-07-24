@@ -190,6 +190,8 @@ function coerce(values = process.env, options = {}) {
 module.exports = {
   parse,
   parseFromArgs,
+  parseStructured,
+  resolveCommands,
   parseProcess,
   apply,
   applyProcess,
