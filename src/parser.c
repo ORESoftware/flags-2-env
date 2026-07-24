@@ -156,6 +156,8 @@ typedef struct {
 
 /* defined alongside the parse loop; used earlier by help rendering */
 static void f2e_resolve_command_path(F2EConfig *config, int argc, const char *const argv[], F2ECommandPath *path_out);
+/* defined alongside help rendering; used earlier by completion generation */
+static size_t f2e_help_collect_scope_flags(const F2EConfig *config, int scope, size_t out[F2E_MAX_FLAGS]);
 
 typedef struct {
   F2EBuffer buffer;
