@@ -1,7 +1,8 @@
 .{
-    .name = "flags2env",
+    .name = .flags2env,
     .version = "0.1.0",
-    .minimum_zig_version = "0.12.0",
+    .fingerprint = 0x8b5e2a91c4d7f312,
+    .minimum_zig_version = "0.14.0",
     .paths = .{
         "build.zig",
         "build.zig.zon",
