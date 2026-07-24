@@ -3235,6 +3235,321 @@ static void f2e_completion_free_words(F2EBuffer *a, F2EBuffer *b, F2EBuffer *c, 
   free(d->data);
 }
 
+static int f2e_completion_scope_key(const F2EConfig *config, int scope, char *out, size_t out_size) {
+  if (scope < 0) {
+    if (out_size == 0) {
+      return 0;
+    }
+    out[0] = '\0';
+    return 1;
+  }
+  return f2e_command_path_label(config, scope, out, out_size);
+}
+
+/* Effective option words for one command scope: own flags plus inherited,
+   unshadowed ancestors, mirroring how the parser resolves them. */
+static int f2e_completion_scope_flag_words(const F2EConfig *config,
+                                           int scope,
+                                           F2EBuffer *all_options,
+                                           F2EBuffer *value_options,
+                                           F2EBuffer *bool_value_options) {
+  size_t indexes[F2E_MAX_FLAGS];
+  size_t count = f2e_help_collect_scope_flags(config, scope, indexes);
+  for (size_t k = 0; k < count; k++) {
+    const F2EFlag *flag = &config->flags[indexes[k]];
+    if (flag->env[0] == '\0') {
+      continue;
+    }
+    for (size_t j = 0; j < flag->alias_count; j++) {
+      if (!f2e_option_name_is_valid(flag->aliases[j])) {
+        return 0;
+      }
+      char option[F2E_MAX_NAME + 4];
+      snprintf(option, sizeof(option), "--%s", flag->aliases[j]);
+      if (!f2e_completion_append_word(all_options, option)) {
+        return 0;
+      }
+      if (flag->type == F2E_TYPE_BOOL) {
+        if (!f2e_completion_append_word(bool_value_options, option) ||
+            !f2e_completion_add_option_word(all_options, "--no-", flag->aliases[j], NULL)) {
+          return 0;
+        }
+      } else {
+        if (!f2e_completion_append_word(value_options, option) ||
+            !f2e_completion_add_option_word(all_options, "--", flag->aliases[j], "=")) {
+          return 0;
+        }
+      }
+    }
+    if (flag->short_name != '\0') {
+      if (!isalnum((unsigned char)flag->short_name)) {
+        return 0;
+      }
+      if (f2e_find_flag_by_short((F2EConfig *)config, scope, flag->short_name) == flag) {
+        char short_option[3] = {'-', flag->short_name, '\0'};
+        if (!f2e_completion_append_word(all_options, short_option)) {
+          return 0;
+        }
+        if (flag->type == F2E_TYPE_BOOL) {
+          if (!f2e_completion_append_word(bool_value_options, short_option)) {
+            return 0;
+          }
+        } else if (!f2e_completion_append_word(value_options, short_option)) {
+          return 0;
+        }
+      }
+    }
+  }
+  return 1;
+}
+
+static int f2e_completion_scope_child_commands(const F2EConfig *config, int scope, F2EBuffer *words) {
+  for (size_t i = 0; i < config->command_count; i++) {
+    const F2ECommand *command = &config->commands[i];
+    if (command->parent != scope) {
+      continue;
+    }
+    if (!f2e_option_name_is_valid(command->name) ||
+        !f2e_completion_append_word(words, command->name)) {
+      return 0;
+    }
+    for (size_t j = 0; j < command->alias_count; j++) {
+      if (!f2e_option_name_is_valid(command->aliases[j]) ||
+          !f2e_completion_append_word(words, command->aliases[j])) {
+        return 0;
+      }
+    }
+  }
+  return 1;
+}
+
+static int f2e_completion_emit_case_entry(F2EBuffer *script, const char *pattern, const char *value) {
+  return f2e_buffer_append(script, "    '") &&
+         f2e_buffer_append(script, pattern) &&
+         f2e_buffer_append(script, "') printf '%s' '") &&
+         f2e_buffer_append(script, value ? value : "") &&
+         f2e_buffer_append(script, "' ;;\n");
+}
+
+/*
+ * Emits the shared scope-lookup helper functions (POSIX case statements, so
+ * they work in both bash 3.2 and zsh):
+ *   <fn>_opts <scope>            effective option words for the scope
+ *   <fn>_value_opts <scope>      options that consume a separate value
+ *   <fn>_bool_value_opts <scope> bool options that may consume a value
+ *   <fn>_cmds <scope>            child command words for the scope
+ *   <fn>_child <scope> <word>    resolved child scope key, or empty
+ */
+static int f2e_completion_emit_scope_helpers(const F2EConfig *config, F2EBuffer *script, const char *function_name) {
+  int scopes[F2E_MAX_COMMANDS + 1];
+  size_t scope_count = 0;
+  scopes[scope_count++] = F2E_SCOPE_ROOT;
+  for (size_t i = 0; i < config->command_count; i++) {
+    scopes[scope_count++] = (int)i;
+  }
+
+  const char *suffixes[] = {"_opts", "_value_opts", "_bool_value_opts"};
+  for (size_t which = 0; which < 3; which++) {
+    if (!f2e_buffer_append(script, function_name) ||
+        !f2e_buffer_append(script, suffixes[which]) ||
+        !f2e_buffer_append(script, "() {\n  case \"$1\" in\n")) {
+      return 0;
+    }
+    for (size_t s = 0; s < scope_count; s++) {
+      char key[F2E_MAX_VALUE];
+      if (!f2e_completion_scope_key(config, scopes[s], key, sizeof(key))) {
+        return 0;
+      }
+      F2EBuffer all_options;
+      F2EBuffer value_options;
+      F2EBuffer bool_value_options;
+      if (!f2e_buffer_init(&all_options) || !f2e_buffer_init(&value_options) || !f2e_buffer_init(&bool_value_options)) {
+        free(all_options.data);
+        free(value_options.data);
+        return 0;
+      }
+      int collected = f2e_completion_scope_flag_words(config, scopes[s], &all_options, &value_options, &bool_value_options);
+      const F2EBuffer *chosen = which == 0 ? &all_options : which == 1 ? &value_options : &bool_value_options;
+      int ok = collected && f2e_completion_emit_case_entry(script, key, chosen->data);
+      free(all_options.data);
+      free(value_options.data);
+      free(bool_value_options.data);
+      if (!ok) {
+        return 0;
+      }
+    }
+    if (!f2e_buffer_append(script, "    *) printf '%s' '' ;;\n  esac\n}\n")) {
+      return 0;
+    }
+  }
+
+  if (!f2e_buffer_append(script, function_name) ||
+      !f2e_buffer_append(script, "_cmds() {\n  case \"$1\" in\n")) {
+    return 0;
+  }
+  for (size_t s = 0; s < scope_count; s++) {
+    char key[F2E_MAX_VALUE];
+    if (!f2e_completion_scope_key(config, scopes[s], key, sizeof(key))) {
+      return 0;
+    }
+    F2EBuffer words;
+    if (!f2e_buffer_init(&words)) {
+      return 0;
+    }
+    int ok = f2e_completion_scope_child_commands(config, scopes[s], &words) &&
+             f2e_completion_emit_case_entry(script, key, words.data);
+    free(words.data);
+    if (!ok) {
+      return 0;
+    }
+  }
+  if (!f2e_buffer_append(script, "    *) printf '%s' '' ;;\n  esac\n}\n")) {
+    return 0;
+  }
+
+  if (!f2e_buffer_append(script, function_name) ||
+      !f2e_buffer_append(script, "_child() {\n  case \"$1|$2\" in\n")) {
+    return 0;
+  }
+  for (size_t i = 0; i < config->command_count; i++) {
+    const F2ECommand *command = &config->commands[i];
+    char parent_key[F2E_MAX_VALUE];
+    char child_key[F2E_MAX_VALUE];
+    if (!f2e_completion_scope_key(config, command->parent, parent_key, sizeof(parent_key)) ||
+        !f2e_completion_scope_key(config, (int)i, child_key, sizeof(child_key))) {
+      return 0;
+    }
+    char pattern[F2E_MAX_VALUE * 2];
+    snprintf(pattern, sizeof(pattern), "%s|%s", parent_key, command->name);
+    if (!f2e_completion_emit_case_entry(script, pattern, child_key)) {
+      return 0;
+    }
+    for (size_t j = 0; j < command->alias_count; j++) {
+      snprintf(pattern, sizeof(pattern), "%s|%s", parent_key, command->aliases[j]);
+      if (!f2e_completion_emit_case_entry(script, pattern, child_key)) {
+        return 0;
+      }
+    }
+  }
+  return f2e_buffer_append(script, "    *) printf '%s' '' ;;\n  esac\n}\n");
+}
+
+/*
+ * Scope-aware bash completion for configs with [commands.*]: the generated
+ * function walks the words typed so far to find the active command scope,
+ * then offers that scope's options and child commands. Still fully static —
+ * neither flags2env nor the TOML file is consulted at completion time.
+ */
+static char *f2e_completion_script_bash_commands(const F2EConfig *config, const char *command_name) {
+  F2EBuffer bool_values;
+  memset(&bool_values, 0, sizeof(bool_values));
+  if (!f2e_buffer_init(&bool_values)) {
+    return NULL;
+  }
+  for (size_t i = 0; i < config->flag_count; i++) {
+    const F2EFlag *flag = &config->flags[i];
+    if (flag->env[0] != '\0' && flag->type == F2E_TYPE_BOOL &&
+        !f2e_completion_add_bool_values(&bool_values, flag)) {
+      free(bool_values.data);
+      return NULL;
+    }
+  }
+
+  char command[F2E_MAX_NAME];
+  if (!f2e_completion_command_name(command_name, command, sizeof(command))) {
+    free(bool_values.data);
+    return NULL;
+  }
+  char function_name[F2E_MAX_NAME * 2];
+  f2e_completion_function_name(command, function_name, sizeof(function_name));
+
+  F2EBuffer script;
+  if (!f2e_buffer_init(&script)) {
+    free(bool_values.data);
+    return NULL;
+  }
+
+  int ok = f2e_buffer_append(&script, "# flags2env bash completion (subcommand-aware)\n") &&
+           f2e_completion_emit_scope_helpers(config, &script, function_name) &&
+           f2e_buffer_append(&script, function_name) &&
+           f2e_buffer_append(&script, "() {\n"
+                                      "  local cur prev opt opts value_opts bool_value_opts bool_values cmds scope child w i matched stopped\n"
+                                      "  COMPREPLY=()\n"
+                                      "  cur=\"${COMP_WORDS[COMP_CWORD]}\"\n"
+                                      "  prev=\"${COMP_WORDS[COMP_CWORD-1]}\"\n"
+                                      "  scope=''\n"
+                                      "  matched=0\n"
+                                      "  stopped=0\n"
+                                      "  for ((i=1; i<COMP_CWORD; i++)); do\n"
+                                      "    w=\"${COMP_WORDS[i]}\"\n"
+                                      "    if [ \"$w\" = \"--\" ]; then\n"
+                                      "      return 0\n"
+                                      "    fi\n"
+                                      "    case \"$w\" in\n"
+                                      "      -*) continue ;;\n"
+                                      "    esac\n"
+                                      "    if [ \"$stopped\" = 1 ]; then\n"
+                                      "      continue\n"
+                                      "    fi\n"
+                                      "    child=\"$(") &&
+           f2e_buffer_append(&script, function_name) &&
+           f2e_buffer_append(&script, "_child \"$scope\" \"$w\")\"\n"
+                                      "    if [ -n \"$child\" ]; then\n"
+                                      "      scope=\"$child\"\n"
+                                      "      matched=1\n"
+                                      "    elif [ \"$matched\" = 1 ]; then\n"
+                                      "      stopped=1\n"
+                                      "    fi\n"
+                                      "  done\n"
+                                      "  opts=\"$(") &&
+           f2e_buffer_append(&script, function_name) &&
+           f2e_buffer_append(&script, "_opts \"$scope\")\"\n  value_opts=\"$(") &&
+           f2e_buffer_append(&script, function_name) &&
+           f2e_buffer_append(&script, "_value_opts \"$scope\")\"\n  bool_value_opts=\"$(") &&
+           f2e_buffer_append(&script, function_name) &&
+           f2e_buffer_append(&script, "_bool_value_opts \"$scope\")\"\n  bool_values=") &&
+           f2e_buffer_append_shell_single_quoted(&script, bool_values.data) &&
+           f2e_buffer_append(&script, "\n  cmds=''\n"
+                                      "  if [ \"$stopped\" = 0 ]; then\n"
+                                      "    cmds=\"$(") &&
+           f2e_buffer_append(&script, function_name) &&
+           f2e_buffer_append(&script, "_cmds \"$scope\")\"\n"
+                                      "  fi\n"
+                                      "  for opt in $bool_value_opts; do\n"
+                                      "    if [ \"$prev\" = \"$opt\" ]; then\n"
+                                      "      COMPREPLY=( $(compgen -W \"$bool_values\" -- \"$cur\") )\n"
+                                      "      return 0\n"
+                                      "    fi\n"
+                                      "  done\n"
+                                      "  for opt in $value_opts; do\n"
+                                      "    if [ \"$prev\" = \"$opt\" ]; then\n"
+                                      "      return 0\n"
+                                      "    fi\n"
+                                      "  done\n"
+                                      "  case \"$cur\" in\n"
+                                      "    -*) COMPREPLY=( $(compgen -W \"$opts\" -- \"$cur\") ) ;;\n"
+                                      "    *)\n"
+                                      "      if [ -n \"$cmds\" ]; then\n"
+                                      "        COMPREPLY=( $(compgen -W \"$cmds\" -- \"$cur\") )\n"
+                                      "      fi\n"
+                                      "      ;;\n"
+                                      "  esac\n"
+                                      "  return 0\n"
+                                      "}\n"
+                                      "complete -o default -F ") &&
+           f2e_buffer_append(&script, function_name) &&
+           f2e_buffer_append(&script, " -- ") &&
+           f2e_buffer_append_shell_single_quoted(&script, command) &&
+           f2e_buffer_append_char(&script, '\n');
+
+  free(bool_values.data);
+  if (!ok) {
+    free(script.data);
+    return NULL;
+  }
+  return script.data;
+}
+
 static char *f2e_completion_script_bash(const F2EConfig *config, const char *command_name) {
   F2EBuffer options;
   F2EBuffer value_options;
