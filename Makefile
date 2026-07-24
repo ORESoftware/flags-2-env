@@ -27,7 +27,7 @@ PROCESS_SMOKE := $(BUILD_DIR)/process-smoke
 API_HARDENING := $(BUILD_DIR)/api-hardening
 PARSER_OBJ := $(BUILD_DIR)/parser.o
 
-.PHONY: all borrow-check clean codegen-docker-test parity-test readme-test test shared static cli FORCE
+.PHONY: all borrow-check clean codegen-docker-test core-docker-test parity-test readme-test test shared static cli FORCE
 
 FORCE:
 
