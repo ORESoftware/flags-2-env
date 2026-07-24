@@ -549,6 +549,60 @@ case "$subcommand_completion_zsh" in
     ;;
 esac
 
+SUBCOMMANDS_DEEP_DIR="$ROOT_DIR/tests/subcommands-deep"
+run_deep_case() {
+  expected="$1"
+  shift
+  actual="$(cd "$SUBCOMMANDS_DEEP_DIR" && "$CLI" "$@")"
+  if [ "$actual" != "$expected" ]; then
+    printf 'Expected deep subcommand parse: %s\nActual:                         %s\n' "$expected" "$actual" >&2
+    exit 1
+  fi
+}
+
+DEEP_BASE_POSITIONALS="\"TOOL_POSITIONALS\":\"[\\\"$CLI\\\",\\\"tool\\\"]\""
+# four-level command path with a flag scoped four levels deep
+run_deep_case "{\"TOOL_COMMAND\":\"ws remote add tag\",\"TOOL_CMD_TAG\":\"true\",\"TOOL_DRY_RUN\":\"false\",\"TOOL_TAG_NAME\":\"v1\",\"TOOL_TAG_DRY_RUN\":\"true\",$DEEP_BASE_POSITIONALS}" tool ws remote add tag --name v1 -n
+# -n resolves to the ws-scoped flag one level down
+run_deep_case "{\"TOOL_COMMAND\":\"ws\",\"TOOL_DRY_RUN\":\"false\",\"TOOL_WS_DRY_RUN\":\"true\",$DEEP_BASE_POSITIONALS}" tool ws -n
+# a separated flag value that looks like a command must not select the command
+run_deep_case "{\"TOOL_COMMAND\":\"\",\"TOOL_DRY_RUN\":\"false\",\"TOOL_LABEL\":\"ws\",\"TOOL_POSITIONALS\":\"[\\\"$CLI\\\",\\\"tool\\\",\\\"remote\\\"]\"}" tool --label ws remote
+# a bool flag does not consume a following command token
+run_deep_case "{\"TOOL_COMMAND\":\"ws\",\"TOOL_DRY_RUN\":\"true\",$DEEP_BASE_POSITIONALS}" tool --dry-run ws
+# after the path locks, the first unmatched positional triggers stop_at_first_positional
+run_deep_case "{\"TOOL_COMMAND\":\"ws\",\"TOOL_DRY_RUN\":\"false\",\"TOOL_POSITIONALS\":\"[\\\"$CLI\\\",\\\"tool\\\",\\\"foo\\\",\\\"remote\\\",\\\"--dry-run\\\"]\"}" tool ws foo remote --dry-run
+# a bare -- always ends command matching
+run_deep_case "{\"TOOL_COMMAND\":\"\",\"TOOL_DRY_RUN\":\"false\",\"TOOL_POSITIONALS\":\"[\\\"$CLI\\\",\\\"tool\\\",\\\"ws\\\"]\"}" tool -- ws
+# unknown options are collected without ending command matching
+run_deep_case "{\"TOOL_COMMAND\":\"ws remote\",\"TOOL_DRY_RUN\":\"false\",$DEEP_BASE_POSITIONALS,\"TOOL_UNKNOWN_OPTIONS\":\"[\\\"--wat\\\"]\"}" tool --wat ws remote
+
+actual="$(cd "$SUBCOMMANDS_DEEP_DIR" && "$CLI" audit)"
+expected='{"ok":true,"errorCount":0,"warningCount":0,"errors":[],"warnings":[]}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected clean deep subcommand audit: %s\nActual:                               %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+
+deep_help="$(cd "$SUBCOMMANDS_DEEP_DIR" && COLUMNS=110 "$CLI" tool --help)"
+case "$deep_help" in
+  *'Command: tool [COMMAND] [OPTIONS]'*'| ws '*'| ws remote '*'| ws remote add '*'| ws remote add tag '*)
+    ;;
+  *)
+    printf 'Deep help should list the full nested command tree:\n%s\n' "$deep_help" >&2
+    exit 1
+    ;;
+esac
+
+deep_scoped_help="$(cd "$SUBCOMMANDS_DEEP_DIR" && COLUMNS=110 "$CLI" tool ws remote add tag --help)"
+case "$deep_scoped_help" in
+  *'Command: tool ws remote add tag [OPTIONS]'*'Tag a newly added workspace remote.'*'--name'*)
+    ;;
+  *)
+    printf 'Deep scoped help should render the four-level command:\n%s\n' "$deep_scoped_help" >&2
+    exit 1
+    ;;
+esac
+
 INVALID_SUBCOMMAND_CONFIG="$ROOT_DIR/tests/audit-invalid-subcommand/.cli-flags.toml"
 set +e
 actual="$("$CLI" audit "$INVALID_SUBCOMMAND_CONFIG")"
