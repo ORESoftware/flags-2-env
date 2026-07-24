@@ -6717,6 +6717,28 @@ char *f2e_parse_json_argv_from_file(const char *config_path, const char *argv_js
   return result;
 }
 
+char *f2e_parse_structured_json_argv_from_file(const char *config_path, const char *argv_json) {
+  char **items = NULL;
+  int count = 0;
+  if (!argv_json || !f2e_parse_json_argv_items(argv_json, &items, &count)) {
+    f2e_free_json_items(items, count);
+    return f2e_parse_structured_from_file(config_path, 0, NULL);
+  }
+  char *result = f2e_parse_structured_from_file(config_path, count, (const char *const *)items);
+  f2e_free_json_items(items, count);
+  return result;
+}
+
+char *f2e_parse_structured_json_argv(const char *argv_json) {
+  char *path = f2e_default_config_path();
+  if (!path) {
+    return NULL;
+  }
+  char *result = f2e_parse_structured_json_argv_from_file(path, argv_json);
+  free(path);
+  return result;
+}
+
 char *f2e_resolve_commands_json_argv_from_file(const char *config_path, const char *argv_json) {
   char **items = NULL;
   int count = 0;
