@@ -4771,28 +4771,29 @@ static char *f2e_help_command_row_name(const F2EConfig *config, int index, int s
   return names.data;
 }
 
-static size_t f2e_help_commands_name_width(const F2EConfig *config, int scope, size_t depth) {
+static size_t f2e_help_commands_name_width(const F2EConfig *config, int help_scope, int parent, size_t depth) {
   size_t width = 0;
   if (depth >= F2E_MAX_COMMAND_DEPTH) {
     return width;
   }
   for (size_t i = 0; i < config->command_count; i++) {
     const F2ECommand *command = &config->commands[i];
-    if (command->parent != scope) {
+    if (command->parent != parent) {
       continue;
     }
-    char *names = f2e_help_command_row_name(config, (int)i, scope);
+    char *names = f2e_help_command_row_name(config, (int)i, help_scope);
     if (names) {
       width = f2e_size_max(width, strlen(names));
       free(names);
     }
-    width = f2e_size_max(width, f2e_help_commands_name_width(config, (int)i, depth + 1));
+    width = f2e_size_max(width, f2e_help_commands_name_width(config, help_scope, (int)i, depth + 1));
   }
   return width;
 }
 
 static int f2e_help_append_command_rows(const F2EConfig *config,
-                                        int scope,
+                                        int help_scope,
+                                        int parent,
                                         size_t depth,
                                         F2EBuffer *table,
                                         const size_t *widths) {
@@ -4801,17 +4802,17 @@ static int f2e_help_append_command_rows(const F2EConfig *config,
   }
   for (size_t i = 0; i < config->command_count; i++) {
     const F2ECommand *command = &config->commands[i];
-    if (command->parent != scope) {
+    if (command->parent != parent) {
       continue;
     }
-    char *names = f2e_help_command_row_name(command, depth);
+    char *names = f2e_help_command_row_name(config, (int)i, help_scope);
     if (!names) {
       return 0;
     }
     const char *row[] = {names, command->help[0] != '\0' ? command->help : "-"};
     int ok = f2e_help_append_row(table, row, widths, 2);
     free(names);
-    if (!ok || !f2e_help_append_command_rows(config, (int)i, depth + 1, table, widths)) {
+    if (!ok || !f2e_help_append_command_rows(config, help_scope, (int)i, depth + 1, table, widths)) {
       return 0;
     }
   }
