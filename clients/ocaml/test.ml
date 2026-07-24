@@ -77,7 +77,24 @@ type = "bool"
       ~command:"gitish"
       [ "gitish" ]
   in
+  let coerced =
+    Flags2env.coerce
+      ~config_path:subcommands_path
+      [ ("FLAGS2ENV_COMMAND", `String "remote add"); ("GITISH_REMOTE_ADD_FETCH", `String "true") ]
+  in
+  let coerce_rejected =
+    match Flags2env.coerce ~config_path:subcommands_path [ ("FLAGS2ENV_COMMAND", `Int 42) ] with
+    | _ -> false
+    | exception Flags2env.Coercion_error _ -> true
+  in
+  let generated =
+    Flags2env.generate_types ~config_path:subcommands_path ~type_name:"GitishConfig" "typescript"
+  in
   Sys.remove subcommands_path;
+  if List.assoc "FLAGS2ENV_COMMAND" coerced <> `String "remote add"
+     || List.assoc "GITISH_REMOTE_ADD_FETCH" coerced <> `Bool true then
+    failwith "unexpected coerced map";
+  if not coerce_rejected then failwith "expected coercion error";
   if not (contains scoped_help "Command: gitish remote add [OPTIONS]" && contains scoped_help "--fetch") then
     failwith "unexpected scoped help table";
   if not (contains top_help "Commands:" && contains top_help "remote add") then
