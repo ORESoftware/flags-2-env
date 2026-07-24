@@ -1985,7 +1985,7 @@ static int f2e_try_set_bool_value(F2EFlag *flag, F2EPair *pairs, size_t pair_cou
   return 1;
 }
 
-static int f2e_token_looks_like_known_option(F2EConfig *config, const char *token) {
+static int f2e_token_looks_like_known_option(F2EConfig *config, int scope, const char *token) {
   if (!token || token[0] != '-' || token[1] == '\0') {
     return 0;
   }
@@ -1997,16 +1997,16 @@ static int f2e_token_looks_like_known_option(F2EConfig *config, const char *toke
     if (eq) {
       *eq = '\0';
     }
-    if (f2e_find_flag_by_alias(config, copy)) {
+    if (f2e_find_flag_by_alias(config, scope, copy)) {
       return 1;
     }
     if (strncmp(copy, "no-", 3) == 0) {
-      F2EFlag *flag = f2e_find_flag_by_alias(config, copy + 3);
+      F2EFlag *flag = f2e_find_flag_by_alias(config, scope, copy + 3);
       return flag && flag->type == F2E_TYPE_BOOL;
     }
     return 0;
   }
-  return f2e_find_flag_by_short(config, token[1]) != NULL;
+  return f2e_find_flag_by_short(config, scope, token[1]) != NULL;
 }
 
 static int f2e_token_looks_like_option(const char *token) {
