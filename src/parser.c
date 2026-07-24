@@ -5502,6 +5502,8 @@ char *f2e_parse_from_file(const char *config_path, int argc, const char *const a
                 track_positionals ? &positionals : NULL,
                 track_unknown_options ? &unknown_options : NULL,
                 track_errors ? &errors : NULL,
+                NULL,
+                0,
                 allow_unknown,
                 allow_unknown_forced,
                 lenient,
