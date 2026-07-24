@@ -1008,13 +1008,15 @@ static int f2e_table_keyword_is_flags(const char *word) {
  * sets *section_out (plus *flag_out or *command_out).
  */
 static int f2e_load_commands_table(F2EConfig *config,
-                                   char *table,
+                                   const char *table,
                                    F2EConfigSection *section_out,
                                    F2EFlag **flag_out,
                                    int *command_out) {
+  char copy[F2E_MAX_LINE];
+  f2e_strlcpy(copy, table, sizeof(copy));
   char *segments[2 * F2E_MAX_COMMAND_DEPTH + 2];
   size_t segment_count = 0;
-  for (char *cursor = table; cursor;) {
+  for (char *cursor = copy; cursor;) {
     if (segment_count >= sizeof(segments) / sizeof(segments[0])) {
       return 0;
     }
