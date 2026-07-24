@@ -4995,17 +4995,7 @@ int f2e_print_table(const char *command_name, int terminal_columns) {
   return ok ? 0 : 1;
 }
 
-/*
- * Walks argv once: matches subcommand tokens, resolves flags in the active
- * command scope, and (when pairs is non-NULL) records the parsed values.
- * A NULL pairs pointer makes this a dry run used to discover the command
- * path before defaults are applied; both passes consume tokens identically.
- *
- * Command matching skips leading positionals (program or wrapper names) until
- * the first token matches a top-level command; after that, each positional
- * must match a subcommand of the current scope or matching stops for good.
- */
-static void f2e_scan_argv(F2EConfig *config,
+static void f2e_scan_argv_moved(F2EConfig *config,
                           F2EPair *pairs,
                           size_t pair_count,
                           int argc,
