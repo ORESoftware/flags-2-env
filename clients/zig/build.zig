@@ -11,26 +11,35 @@ pub fn build(b: *std.Build) void {
     });
     module.addIncludePath(b.path("native"));
 
-    const parser = b.addStaticLibrary(.{
-        .name = "flags2env_parser",
+    const parser_module = b.createModule(.{
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
     });
-    parser.addCSourceFile(.{
+    parser_module.addCSourceFile(.{
         .file = b.path("native/parser.c"),
-        .flags = &.{"-std=c99", "-Wall", "-Wextra"},
+        .flags = &.{ "-std=c99", "-Wall", "-Wextra" },
     });
-    parser.addIncludePath(b.path("native"));
-    parser.linkLibC();
+    parser_module.addIncludePath(b.path("native"));
 
-    const tests = b.addTest(.{
+    const parser = b.addLibrary(.{
+        .name = "flags2env_parser",
+        .linkage = .static,
+        .root_module = parser_module,
+    });
+
+    const tests_module = b.createModule(.{
         .root_source_file = b.path("test.zig"),
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
     });
-    tests.root_module.addImport("flags2env", module);
+    tests_module.addImport("flags2env", module);
+
+    const tests = b.addTest(.{
+        .root_module = tests_module,
+    });
     tests.linkLibrary(parser);
-    tests.linkLibC();
 
     const run_tests = b.addRunArtifact(tests);
     const test_step = b.step("test", "Run Zig smoke tests");
