@@ -468,12 +468,54 @@ run_subcommand_case "{\"GITISH_COMMAND\":\"remote\",\"GITISH_VERBOSE\":\"false\"
 run_subcommand_case "{\"GITISH_COMMAND\":\"add\",\"GITISH_CMD_ADD\":\"true\",\"GITISH_VERBOSE\":\"false\",\"GITISH_POSITIONALS\":\"[\\\"$CLI\\\",\\\"gitish\\\",\\\"foo\\\",\\\"commit\\\"]\"}" gitish add foo commit
 run_subcommand_case "{\"GITISH_COMMAND\":\"remote add\",\"GITISH_CMD_REMOTE_ADD\":\"true\",\"GITISH_VERBOSE\":\"false\",\"GITISH_REMOTE_ADD_FETCH\":\"false\",\"GITISH_POSITIONALS\":\"[\\\"$CLI\\\",\\\"gitish\\\",\\\"-f\\\"]\"}" gitish remote add -- -f
 
+# lenient fallback: a wrapper may strip the subcommand before argv reaches the
+# parser; scoped flags then resolve globally when unambiguous
+run_subcommand_case "{\"GITISH_COMMAND\":\"\",\"GITISH_VERBOSE\":\"false\",\"GITISH_ADD_CHMOD\":\"+x\",$BASE_POSITIONALS}" gitish --chmod +x
+run_subcommand_case "{\"GITISH_COMMAND\":\"\",\"GITISH_VERBOSE\":\"false\",\"GITISH_COMMIT_ALL\":\"true\",$BASE_POSITIONALS}" gitish -a
+# ambiguous names (add --all vs commit --all) are accepted but not applied,
+# and not reported unknown
+run_subcommand_case "{\"GITISH_COMMAND\":\"\",\"GITISH_VERBOSE\":\"false\",$BASE_POSITIONALS}" gitish --all
+# true typos are still collected
+run_subcommand_case "{\"GITISH_COMMAND\":\"\",\"GITISH_VERBOSE\":\"false\",$BASE_POSITIONALS,\"GITISH_UNKNOWN_OPTIONS\":\"[\\\"--wat\\\"]\"}" gitish --wat
+# lenient fallback never applies once a command matched
+run_subcommand_case "{\"GITISH_COMMAND\":\"commit\",\"GITISH_VERBOSE\":\"false\",$BASE_POSITIONALS,\"GITISH_UNKNOWN_OPTIONS\":\"[\\\"--chmod\\\"]\"}" gitish commit --chmod=755
+# [global.flags.*] is the explicit global namespace and reaches every scope
+run_subcommand_case "{\"GITISH_COMMAND\":\"remote add\",\"GITISH_CMD_REMOTE_ADD\":\"true\",\"GITISH_VERBOSE\":\"false\",\"GITISH_REMOTE_ADD_FETCH\":\"false\",\"GITISH_COLOR\":\"true\",$BASE_POSITIONALS}" gitish remote add --color
+
 actual="$(cd "$SUBCOMMANDS_DIR" && "$CLI" audit)"
 expected='{"ok":true,"errorCount":0,"warningCount":0,"errors":[],"warnings":[]}'
 if [ "$actual" != "$expected" ]; then
   printf 'Expected clean subcommand audit: %s\nActual:                          %s\n' "$expected" "$actual" >&2
   exit 1
 fi
+
+generated_subcommands_ts="$("$CLI" generate typescript "$SUBCOMMANDS_DIR/.cli-flags.toml" --name GitishConfig)"
+case "$generated_subcommands_ts" in
+  *'GITISH_COMMAND?: string;'*'GITISH_CMD_ADD?: boolean;'*'GITISH_ADD_ALL?: boolean;'*)
+    ;;
+  *)
+    printf 'Generated TypeScript should include subcommand and command envs:\n%s\n' "$generated_subcommands_ts" >&2
+    exit 1
+    ;;
+esac
+case "$generated_subcommands_ts" in
+  *'GITISH_REMOTE_ADD_FETCH?: boolean;'*)
+    ;;
+  *)
+    printf 'Command-scoped defaults should generate optional fields:\n%s\n' "$generated_subcommands_ts" >&2
+    exit 1
+    ;;
+esac
+
+generated_subcommands_schema="$("$CLI" generate json-schema "$SUBCOMMANDS_DIR/.cli-flags.toml" --name GitishConfig)"
+case "$generated_subcommands_schema" in
+  *'"GITISH_COMMAND"'*'"GITISH_CMD_REMOTE_ADD"'*)
+    ;;
+  *)
+    printf 'Generated JSON Schema should include command envs:\n%s\n' "$generated_subcommands_schema" >&2
+    exit 1
+    ;;
+esac
 
 subcommand_help="$(cd "$SUBCOMMANDS_DIR" && COLUMNS=100 "$CLI" gitish --help)"
 case "$subcommand_help" in
