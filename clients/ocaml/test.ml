@@ -99,4 +99,6 @@ type = "bool"
     failwith "unexpected scoped help table";
   if not (contains top_help "Commands:" && contains top_help "remote add") then
     failwith "unexpected top-level help table";
+  if not (contains generated "FLAGS2ENV_COMMAND?: string;") then
+    failwith "unexpected generated types";
   print_endline "ocaml client tests passed"
