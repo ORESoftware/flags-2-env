@@ -1175,6 +1175,14 @@ static int f2e_load_config(const char *config_path, F2EConfig *config) {
         if (f2e_parse_bare_value(value, parsed, sizeof(parsed))) {
           f2e_strlcpy(config->errors_env, parsed, sizeof(config->errors_env));
         }
+      } else if (f2e_streq(key, "command_env") ||
+                 f2e_streq(key, "commands_env") ||
+                 f2e_streq(key, "subcommand_env") ||
+                 f2e_streq(key, "command_path_env")) {
+        char parsed[F2E_MAX_ENV];
+        if (f2e_parse_bare_value(value, parsed, sizeof(parsed))) {
+          f2e_strlcpy(config->command_env, parsed, sizeof(config->command_env));
+        }
       } else if (f2e_streq(key, "help_url") || f2e_streq(key, "url")) {
         char parsed[F2E_MAX_VALUE];
         if (f2e_parse_bare_value(value, parsed, sizeof(parsed))) {
