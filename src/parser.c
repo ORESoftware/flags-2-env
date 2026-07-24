@@ -5781,7 +5781,7 @@ static char *f2e_coerce_report_from_config(const F2EConfig *config, const char *
     return f2e_coerce_error_report("values must be a JSON object");
   }
 
-  F2ECoerceValue *values = (F2ECoerceValue *)calloc(config->flag_count, sizeof(F2ECoerceValue));
+  F2ECoerceValue *values = (F2ECoerceValue *)calloc(f2e_coerce_slot_count(config), sizeof(F2ECoerceValue));
   if (!values) {
     return NULL;
   }
