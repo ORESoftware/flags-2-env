@@ -92,6 +92,13 @@ class Flags2Env {
     return Flags2Env._(DynamicLibrary.open(libraryPath ?? _defaultLibraryPath()));
   }
 
+  /// Binds against an already-loaded library, e.g.
+  /// `Flags2Env.fromLibrary(DynamicLibrary.process())` when the native core
+  /// is statically linked into the host binary (Flutter on iOS).
+  factory Flags2Env.fromLibrary(DynamicLibrary library) {
+    return Flags2Env._(library);
+  }
+
   Map<String, String> parse(List<String> argv, {String? configPath}) {
     final encodedArgv = jsonEncode(argv.map((value) => value.toString()).toList()).toNativeUtf8();
     final Pointer<Utf8> result;
