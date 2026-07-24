@@ -988,6 +988,87 @@ static int f2e_json_value_is_valid(const char *value) {
   return *cursor == '\0';
 }
 
+static int f2e_table_keyword_is_commands(const char *word) {
+  return f2e_streq(word, "commands") || f2e_streq(word, "command") ||
+         f2e_streq(word, "subcommands") || f2e_streq(word, "subcommand");
+}
+
+static int f2e_table_keyword_is_flags(const char *word) {
+  return f2e_streq(word, "flags") || f2e_streq(word, "flag");
+}
+
+/*
+ * Parses a [commands.*] table header such as:
+ *   [commands.add]
+ *   [commands.add.flags.all]
+ *   [commands.remote.commands.add.flags.fetch]
+ * Nesting is arbitrary: each `commands.<name>` segment descends one level and
+ * an optional trailing `flags.<name>` declares a flag scoped to that command.
+ * Returns 0 when the table is not commands-shaped; otherwise returns 1 and
+ * sets *section_out (plus *flag_out or *command_out).
+ */
+static int f2e_load_commands_table(F2EConfig *config,
+                                   char *table,
+                                   F2EConfigSection *section_out,
+                                   F2EFlag **flag_out,
+                                   int *command_out) {
+  char *segments[2 * F2E_MAX_COMMAND_DEPTH + 2];
+  size_t segment_count = 0;
+  for (char *cursor = table; cursor;) {
+    if (segment_count >= sizeof(segments) / sizeof(segments[0])) {
+      return 0;
+    }
+    char *dot = strchr(cursor, '.');
+    if (dot) {
+      *dot = '\0';
+    }
+    segments[segment_count++] = f2e_trim(cursor);
+    cursor = dot ? dot + 1 : NULL;
+  }
+
+  if (segment_count < 2 || !f2e_table_keyword_is_commands(segments[0])) {
+    return 0;
+  }
+
+  *section_out = F2E_SECTION_NONE;
+  *flag_out = NULL;
+  *command_out = F2E_SCOPE_ROOT;
+
+  int scope = F2E_SCOPE_ROOT;
+  size_t index = 0;
+  while (index < segment_count) {
+    if (f2e_table_keyword_is_commands(segments[index])) {
+      if (index + 1 >= segment_count || segments[index + 1][0] == '\0') {
+        return 1;
+      }
+      int next = f2e_find_or_add_command(config, scope, segments[index + 1]);
+      if (next < 0) {
+        return 1;
+      }
+      scope = next;
+      index += 2;
+      continue;
+    }
+    if (f2e_table_keyword_is_flags(segments[index])) {
+      if (index + 2 != segment_count || segments[index + 1][0] == '\0') {
+        return 1;
+      }
+      F2EFlag *flag = f2e_add_flag(config, segments[index + 1]);
+      if (flag) {
+        flag->command = scope;
+        *flag_out = flag;
+        *section_out = F2E_SECTION_FLAG;
+      }
+      return 1;
+    }
+    return 1;
+  }
+
+  *command_out = scope;
+  *section_out = F2E_SECTION_COMMAND;
+  return 1;
+}
+
 static int f2e_load_config(const char *config_path, F2EConfig *config) {
   memset(config, 0, sizeof(*config));
   config->allow_separated_values = 1;
