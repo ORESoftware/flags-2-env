@@ -2105,6 +2105,34 @@ static void f2e_apply_defaults(F2EConfig *config, F2EPair *pairs, size_t pair_co
   }
 }
 
+static int f2e_command_path_contains(const F2ECommandPath *path, int index) {
+  if (!path) {
+    return 0;
+  }
+  for (size_t i = 0; i < path->depth; i++) {
+    if (path->commands[i] == index) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+/* Defaults only apply for global flags and flags scoped to an active command. */
+static void f2e_apply_defaults_for_path(F2EConfig *config, F2EPair *pairs, size_t pair_count, const F2ECommandPath *path) {
+  for (size_t i = 0; i < config->flag_count; i++) {
+    F2EFlag *flag = &config->flags[i];
+    if (flag->command != F2E_SCOPE_ROOT && !f2e_command_path_contains(path, flag->command)) {
+      continue;
+    }
+    if (flag->env[0] != '\0' && flag->has_default) {
+      char normalized[F2E_MAX_VALUE];
+      if (f2e_normalize_flag_value(flag, flag->default_value, normalized, sizeof(normalized))) {
+        f2e_set_pair(pairs, pair_count, flag->env, normalized);
+      }
+    }
+  }
+}
+
 static int f2e_can_bundle_bool_shorts(F2EConfig *config, int scope, const char *shorts) {
   if (!shorts || shorts[0] == '\0') {
     return 0;
