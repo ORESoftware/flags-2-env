@@ -3267,7 +3267,7 @@ static char *f2e_completion_script_zsh(const F2EConfig *config, const char *comm
 
   for (size_t i = 0; i < config->flag_count; i++) {
     const F2EFlag *flag = &config->flags[i];
-    if (flag->env[0] == '\0') {
+    if (flag->env[0] == '\0' || flag->command != F2E_SCOPE_ROOT) {
       continue;
     }
     for (size_t j = 0; j < flag->alias_count; j++) {
@@ -3299,6 +3299,28 @@ static char *f2e_completion_script_zsh(const F2EConfig *config, const char *comm
         free(script.data);
         return NULL;
       }
+    }
+  }
+
+  if (f2e_command_has_children(config, F2E_SCOPE_ROOT)) {
+    F2EBuffer command_words;
+    if (!f2e_buffer_init(&command_words) ||
+        !f2e_completion_collect_commands(config, &command_words)) {
+      free(command_words.data);
+      free(script.data);
+      return NULL;
+    }
+    F2EBuffer spec;
+    int ok = f2e_buffer_init(&spec) &&
+             f2e_buffer_append(&spec, "1:command:(") &&
+             f2e_buffer_append(&spec, command_words.data) &&
+             f2e_buffer_append_char(&spec, ')') &&
+             f2e_completion_zsh_append_spec(&script, &spec);
+    free(spec.data);
+    free(command_words.data);
+    if (!ok) {
+      free(script.data);
+      return NULL;
     }
   }
 
