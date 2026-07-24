@@ -439,6 +439,10 @@ static napi_value f2e_node_init(napi_env env, napi_value exports) {
   napi_value help_table;
   napi_create_function(env, "helpTable", NAPI_AUTO_LENGTH, f2e_node_help_table, NULL, &help_table);
   napi_set_named_property(env, exports, "helpTable", help_table);
+
+  napi_value help_table_for_argv;
+  napi_create_function(env, "helpTableForArgv", NAPI_AUTO_LENGTH, f2e_node_help_table_for_argv, NULL, &help_table_for_argv);
+  napi_set_named_property(env, exports, "helpTableForArgv", help_table_for_argv);
   return exports;
 }
 
