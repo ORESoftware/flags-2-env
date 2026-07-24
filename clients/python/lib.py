@@ -27,6 +27,17 @@ def _load_library(library_path: str | None = None) -> ctypes.CDLL:
     lib.f2e_parse_process.restype = ctypes.c_void_p
     lib.f2e_parse_process_from_file.argtypes = [ctypes.c_char_p]
     lib.f2e_parse_process_from_file.restype = ctypes.c_void_p
+    lib.f2e_is_help_requested_json_argv.argtypes = [ctypes.c_char_p]
+    lib.f2e_is_help_requested_json_argv.restype = ctypes.c_int
+    lib.f2e_help_table_for_json_argv.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int]
+    lib.f2e_help_table_for_json_argv.restype = ctypes.c_void_p
+    lib.f2e_help_table_for_json_argv_from_file.argtypes = [
+        ctypes.c_char_p,
+        ctypes.c_char_p,
+        ctypes.c_char_p,
+        ctypes.c_int,
+    ]
+    lib.f2e_help_table_for_json_argv_from_file.restype = ctypes.c_void_p
     lib.f2e_free.argtypes = [ctypes.c_void_p]
     lib.f2e_free.restype = None
     return lib
