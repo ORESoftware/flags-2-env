@@ -4392,13 +4392,13 @@ static int f2e_help_append_row(F2EBuffer *buffer, const char *const *cells, cons
   return ok;
 }
 
-static char *f2e_help_flag_names(const F2EFlag *flag) {
+static char *f2e_help_flag_names(const F2EFlag *flag, int show_short) {
   F2EBuffer names;
   if (!f2e_buffer_init(&names)) {
     return NULL;
   }
 
-  if (flag->short_name != '\0') {
+  if (flag->short_name != '\0' && show_short) {
     char short_name[3] = {'-', flag->short_name, '\0'};
     if (!f2e_buffer_append(&names, short_name)) {
       free(names.data);
