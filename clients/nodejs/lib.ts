@@ -295,6 +295,8 @@ export function coerce<T extends object = Record<string, unknown>>(
 export default {
   parse,
   parseFromArgs,
+  parseStructured,
+  resolveCommands,
   parseProcess,
   apply,
   applyProcess,

@@ -9,6 +9,50 @@ type ParseProcessFn = unsafe extern "C" fn(*const c_char) -> *mut c_char;
 type ParseProcessDefaultFn = unsafe extern "C" fn() -> *mut c_char;
 type FreeFn = unsafe extern "C" fn(*mut c_char);
 
+/// Structured parse result: each channel is returned separately instead of
+/// packed into env keys, so nothing can be shadowed by real environment
+/// variables. `flags` is the same map `parse` returns.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct StructuredParse {
+    pub flags: HashMap<String, String>,
+    pub command: String,
+    pub subcommands: Vec<String>,
+    pub extras: Vec<String>,
+    pub unknown_options: Vec<String>,
+    pub errors: Vec<String>,
+}
+
+/// The `[commands.*]` path selected by argv, independent of the env map.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ResolvedCommands {
+    pub path: Vec<String>,
+    pub label: String,
+}
+
+fn json_string_vec(value: Option<&serde_json::Value>) -> Vec<String> {
+    value
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn json_string_map(value: Option<&serde_json::Value>) -> HashMap<String, String> {
+    value
+        .and_then(|value| value.as_object())
+        .map(|object| {
+            object
+                .iter()
+                .filter_map(|(key, item)| item.as_str().map(|text| (key.clone(), text.to_string())))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 pub struct Flags2Env {
     library: Library,
 }
