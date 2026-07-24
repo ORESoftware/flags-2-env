@@ -5492,7 +5492,7 @@ static int f2e_parse_coerce_input(const F2EConfig *config,
     if (!f2e_parse_json_string_token(&cursor, key, sizeof(key))) {
       return 0;
     }
-    size_t index = f2e_find_flag_index_by_env(config, key);
+    size_t index = f2e_coerce_slot_for_key(config, key);
     int is_parse_errors = config->errors_env[0] != '\0' && f2e_streq(config->errors_env, key);
     f2e_json_skip_ws(&cursor);
     if (*cursor != ':') {
