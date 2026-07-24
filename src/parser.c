@@ -1064,6 +1064,13 @@ static int f2e_table_keyword_is_flags(const char *word) {
   return f2e_streq(word, "flags") || f2e_streq(word, "flag");
 }
 
+static void f2e_record_invalid_command_table(F2EConfig *config, const char *table) {
+  if (!config->has_invalid_command_table) {
+    config->has_invalid_command_table = 1;
+    f2e_strlcpy(config->invalid_command_table, table, sizeof(config->invalid_command_table));
+  }
+}
+
 /*
  * Parses a [commands.*] table header such as:
  *   [commands.add]
@@ -1071,6 +1078,8 @@ static int f2e_table_keyword_is_flags(const char *word) {
  *   [commands.remote.commands.add.flags.fetch]
  * Nesting is arbitrary: each `commands.<name>` segment descends one level and
  * an optional trailing `flags.<name>` declares a flag scoped to that command.
+ * Keyword and name positions strictly alternate, so command names can even be
+ * the literal words "commands" or "flags" without ambiguity.
  * Returns 0 when the table is not commands-shaped; otherwise returns 1 and
  * sets *section_out (plus *flag_out or *command_out).
  */
