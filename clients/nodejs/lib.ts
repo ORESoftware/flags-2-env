@@ -64,6 +64,7 @@ type NativeModule = {
   coerceJson(valuesJson: string, configPath?: string): string;
   isHelpJson(argvJson: string): boolean;
   helpTable(command?: string, terminalColumns?: number, configPath?: string): string;
+  helpTableForArgv?(command: string, argvJson: string, terminalColumns?: number, configPath?: string): string;
 };
 
 const require = createRequire(import.meta.url);
