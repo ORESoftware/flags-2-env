@@ -27,6 +27,16 @@ let parse_process_native =
 let parse_process_from_file_native =
   foreign ~from:lib "f2e_parse_process_from_file" (string @-> returning (ptr char))
 
+let is_help_requested_json_argv_native =
+  foreign ~from:lib "f2e_is_help_requested_json_argv" (string @-> returning int)
+
+let help_table_for_json_argv_native =
+  foreign ~from:lib "f2e_help_table_for_json_argv" (string @-> string @-> int @-> returning (ptr char))
+
+let help_table_for_json_argv_from_file_native =
+  foreign ~from:lib "f2e_help_table_for_json_argv_from_file"
+    (string @-> string @-> string @-> int @-> returning (ptr char))
+
 let free_native =
   foreign ~from:lib "f2e_free" (ptr char @-> returning void)
 
