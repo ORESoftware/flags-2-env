@@ -1253,6 +1253,27 @@ static int f2e_load_config(const char *config_path, F2EConfig *config) {
       continue;
     }
 
+    if (section == F2E_SECTION_COMMAND) {
+      if (current_command < 0 || (size_t)current_command >= config->command_count) {
+        continue;
+      }
+      F2ECommand *command = &config->commands[current_command];
+      if (f2e_streq(key, "help") || f2e_streq(key, "description") || f2e_streq(key, "summary")) {
+        char parsed[F2E_MAX_VALUE];
+        if (f2e_parse_bare_value(value, parsed, sizeof(parsed))) {
+          f2e_strlcpy(command->help, parsed, sizeof(command->help));
+        }
+      } else if (f2e_streq(key, "aliases")) {
+        f2e_parse_alias_list(command->aliases, &command->alias_count, value);
+      } else if (f2e_streq(key, "env")) {
+        char parsed[F2E_MAX_ENV];
+        if (f2e_parse_bare_value(value, parsed, sizeof(parsed))) {
+          f2e_strlcpy(command->env, parsed, sizeof(command->env));
+        }
+      }
+      continue;
+    }
+
     if (section != F2E_SECTION_FLAG || !current) {
       continue;
     }
