@@ -65,6 +65,25 @@ type NativeModule = {
   isHelpJson(argvJson: string): boolean;
   helpTable(command?: string, terminalColumns?: number, configPath?: string): string;
   helpTableForArgv?(command: string, argvJson: string, terminalColumns?: number, configPath?: string): string;
+  parseStructuredJson?(argvJson: string, configPath?: string): string;
+  resolveCommandsJson?(argvJson: string, configPath?: string): string;
+};
+
+export type StructuredParseResult = {
+  flags: EnvMap;
+  command: string;
+  subcommands: string[];
+  extras: string[];
+  unknownOptions: string[];
+  errors: string[];
+} & {
+  readonly isHelpMenu: boolean;
+  printTable(target?: TableWriter): string;
+};
+
+export type ResolvedCommands = {
+  path: string[];
+  label: string;
 };
 
 const require = createRequire(import.meta.url);
