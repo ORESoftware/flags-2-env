@@ -2105,12 +2105,12 @@ static void f2e_apply_defaults(F2EConfig *config, F2EPair *pairs, size_t pair_co
   }
 }
 
-static int f2e_can_bundle_bool_shorts(F2EConfig *config, const char *shorts) {
+static int f2e_can_bundle_bool_shorts(F2EConfig *config, int scope, const char *shorts) {
   if (!shorts || shorts[0] == '\0') {
     return 0;
   }
   for (const char *cursor = shorts; *cursor; cursor++) {
-    F2EFlag *flag = f2e_find_flag_by_short(config, *cursor);
+    F2EFlag *flag = f2e_find_flag_by_short(config, scope, *cursor);
     if (!flag || flag->env[0] == '\0' || flag->type != F2E_TYPE_BOOL) {
       return 0;
     }
@@ -2118,16 +2118,16 @@ static int f2e_can_bundle_bool_shorts(F2EConfig *config, const char *shorts) {
   return 1;
 }
 
-static void f2e_apply_bool_short_bundle(F2EConfig *config, F2EPair *pairs, size_t pair_count, const char *shorts) {
+static void f2e_apply_bool_short_bundle(F2EConfig *config, int scope, F2EPair *pairs, size_t pair_count, const char *shorts) {
   for (const char *cursor = shorts; *cursor; cursor++) {
-    F2EFlag *flag = f2e_find_flag_by_short(config, *cursor);
+    F2EFlag *flag = f2e_find_flag_by_short(config, scope, *cursor);
     if (flag && flag->env[0] != '\0' && flag->type == F2E_TYPE_BOOL) {
       f2e_set_pair(pairs, pair_count, flag->env, "true");
     }
   }
 }
 
-static void f2e_apply_long_arg(F2EConfig *config, F2EPair *pairs, size_t pair_count, const char *token, int *index, int argc, const char *const argv[], F2EJsonList *errors) {
+static void f2e_apply_long_arg(F2EConfig *config, int scope, F2EPair *pairs, size_t pair_count, const char *token, int *index, int argc, const char *const argv[], F2EJsonList *errors) {
   char name[F2E_MAX_NAME];
   char inline_value[F2E_MAX_VALUE];
   int has_inline_value = 0;
