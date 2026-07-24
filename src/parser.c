@@ -2347,11 +2347,95 @@ static void f2e_audit_bool_value_aliases(const F2EFlag *flag, F2EAudit *audit) {
   }
 }
 
+static void f2e_audit_command_semantics(const F2EConfig *config, F2EAudit *audit) {
+  if (config->too_many_commands) {
+    f2e_audit_add(audit, 1, "too many [commands.*] tables declared (max %d)", F2E_MAX_COMMANDS);
+  }
+  if (config->command_count > 0) {
+    if (config->command_env[0] == '\0' || !f2e_env_name_is_valid(config->command_env)) {
+      f2e_audit_add(audit, 1, "parse.command_env \"%s\" is not a valid env var name", config->command_env);
+    }
+  } else if (config->command_env[0] != '\0') {
+    f2e_audit_add(audit, 0, "parse.command_env is set but no [commands.*] tables are declared");
+  }
+
+  for (size_t i = 0; i < config->command_count; i++) {
+    const F2ECommand *command = &config->commands[i];
+    char label[F2E_MAX_VALUE];
+    if (!f2e_command_path_label(config, (int)i, label, sizeof(label))) {
+      f2e_strlcpy(label, command->name, sizeof(label));
+    }
+    if (!f2e_option_name_is_valid(command->name)) {
+      f2e_audit_add(audit, 1, "commands.%s has an unsafe command name", label);
+    }
+    if (f2e_command_depth(config, (int)i) > F2E_MAX_COMMAND_DEPTH) {
+      f2e_audit_add(audit, 1, "commands.%s is nested deeper than %d levels", label, F2E_MAX_COMMAND_DEPTH);
+    }
+    if (command->env[0] != '\0' && !f2e_env_name_is_valid(command->env)) {
+      f2e_audit_add(audit, 1, "commands.%s env \"%s\" is not a valid env var name", label, command->env);
+    }
+    for (size_t j = 0; j < command->alias_count; j++) {
+      const char *alias = command->aliases[j];
+      if (alias[0] == '\0' || alias[0] == '-' || !f2e_option_name_is_valid(alias)) {
+        f2e_audit_add(audit, 1, "commands.%s alias \"%s\" contains unsafe characters", label, alias);
+      }
+    }
+    if (command->env[0] != '\0') {
+      for (size_t j = 0; j < config->flag_count; j++) {
+        if (f2e_streq(config->flags[j].env, command->env)) {
+          f2e_audit_add(audit, 1, "commands.%s env \"%s\" collides with flags.%s env",
+                        label,
+                        command->env,
+                        f2e_audit_flag_name(&config->flags[j]));
+        }
+      }
+      if (config->command_env[0] != '\0' && f2e_streq(command->env, config->command_env)) {
+        f2e_audit_add(audit, 1, "commands.%s env \"%s\" collides with parse.command_env", label, command->env);
+      }
+    }
+    for (size_t j = i + 1; j < config->command_count; j++) {
+      const F2ECommand *sibling = &config->commands[j];
+      if (sibling->parent != command->parent) {
+        continue;
+      }
+      int clash = f2e_streq(command->name, sibling->name);
+      for (size_t a = 0; !clash && a < command->alias_count; a++) {
+        clash = f2e_streq(command->aliases[a], sibling->name);
+        for (size_t b = 0; !clash && b < sibling->alias_count; b++) {
+          clash = f2e_streq(command->aliases[a], sibling->aliases[b]);
+        }
+      }
+      for (size_t b = 0; !clash && b < sibling->alias_count; b++) {
+        clash = f2e_streq(command->name, sibling->aliases[b]);
+      }
+      if (clash) {
+        char sibling_label[F2E_MAX_VALUE];
+        if (!f2e_command_path_label(config, (int)j, sibling_label, sizeof(sibling_label))) {
+          f2e_strlcpy(sibling_label, sibling->name, sizeof(sibling_label));
+        }
+        f2e_audit_add(audit, 1, "commands.%s and commands.%s share a name or alias", label, sibling_label);
+      }
+    }
+  }
+
+  if (config->command_env[0] != '\0' && config->command_count > 0) {
+    for (size_t i = 0; i < config->flag_count; i++) {
+      if (f2e_streq(config->flags[i].env, config->command_env)) {
+        f2e_audit_add(audit, 1, "parse.command_env collides with flags.%s env \"%s\"",
+                      f2e_audit_flag_name(&config->flags[i]),
+                      config->command_env);
+      }
+    }
+  }
+}
+
 static void f2e_audit_config_semantics(const F2EConfig *config, F2EAudit *audit) {
-  if (config->flag_count == 0) {
-    f2e_audit_add(audit, 1, "no [flags.*] tables declared");
+  if (config->flag_count == 0 && config->command_count == 0) {
+    f2e_audit_add(audit, 1, "no [flags.*] or [commands.*] tables declared");
     return;
   }
+
+  f2e_audit_command_semantics(config, audit);
 
   for (size_t i = 0; i < config->flag_count; i++) {
     const F2EFlag *flag = &config->flags[i];
