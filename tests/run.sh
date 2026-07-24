@@ -491,7 +491,7 @@ fi
 
 generated_subcommands_ts="$("$CLI" generate typescript "$SUBCOMMANDS_DIR/.cli-flags.toml" --name GitishConfig)"
 case "$generated_subcommands_ts" in
-  *'GITISH_COMMAND?: string;'*'GITISH_CMD_ADD?: boolean;'*'GITISH_ADD_ALL?: boolean;'*)
+  *'GITISH_ADD_ALL?: boolean;'*'GITISH_CMD_ADD?: boolean;'*'GITISH_COMMAND?: string;'*)
     ;;
   *)
     printf 'Generated TypeScript should include subcommand and command envs:\n%s\n' "$generated_subcommands_ts" >&2
