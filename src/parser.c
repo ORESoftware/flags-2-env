@@ -87,6 +87,8 @@ typedef struct {
   char env[F2E_MAX_ENV];
   char help[F2E_MAX_VALUE];
   int parent; /* index into F2EConfig.commands; F2E_SCOPE_ROOT for top-level commands */
+  int allow_unknown;
+  int allow_unknown_set; /* command overrides [parse] allow_unknown for its scope */
 } F2ECommand;
 
 typedef struct {
