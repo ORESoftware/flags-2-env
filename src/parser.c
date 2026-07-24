@@ -2544,7 +2544,7 @@ static void f2e_audit_config_semantics(const F2EConfig *config, F2EAudit *audit)
       for (size_t alias_index = 0; alias_index < left->alias_count; alias_index++) {
         char negated_alias[F2E_MAX_NAME + 3];
         snprintf(negated_alias, sizeof(negated_alias), "no-%s", left->aliases[alias_index]);
-        const F2EFlag *clash = f2e_find_flag_by_alias_const(config, negated_alias);
+        const F2EFlag *clash = f2e_find_flag_by_alias_const(config, left->command, negated_alias);
         if (clash) {
           f2e_audit_add(audit, 1, "alias \"%s\" clashes with negated bool flag flags.%s",
                         negated_alias,
@@ -2555,6 +2555,11 @@ static void f2e_audit_config_semantics(const F2EConfig *config, F2EAudit *audit)
 
     for (size_t j = i + 1; j < config->flag_count; j++) {
       const F2EFlag *right = &config->flags[j];
+      /* the same alias, short flag, or env may be reused by a different
+         command scope; duplicates are only errors within one scope */
+      if (left->command != right->command) {
+        continue;
+      }
       if (left->env[0] != '\0' && right->env[0] != '\0' && f2e_streq(left->env, right->env)) {
         f2e_audit_add(audit, 1, "flags.%s and flags.%s both map to env \"%s\"",
                       f2e_audit_flag_name(left),
