@@ -33,6 +33,9 @@ help = "Dry-run scoped to ws."
 
 [commands.ws.commands.remote]
 help = "Manage workspace remotes."
+# unknown options are tolerated inside `ws remote` (and its subcommands), but
+# nowhere else
+allow_unknown = true
 
 [commands.ws.commands.remote.commands.add]
 help = "Add a workspace remote."
