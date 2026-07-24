@@ -126,6 +126,8 @@ Commands that declare `env` also get that key set to `"true"` when they are on t
 
 `--help` is subcommand-aware: the top-level menu renders a bordered `Commands:` table (nested commands shown as their full path, e.g. `remote add`) beneath the global options, and `mycli remote add --help` renders that command's description, its own flags, and the inherited global flags with shadowed short flags hidden. Generated shell completions offer top-level command names alongside global options, and `flags2env audit` validates command tables: duplicate aliases or shorts are only errors within one scope, sibling commands must not share names or aliases, and command envs must not collide with flag envs.
 
+Native callers can render the scoped help directly with `f2e_help_table_for_argv[_from_file]` / `f2e_print_table_for_argv[_from_file]`, or `f2e_help_table_for_json_argv[_from_file]` from FFI clients. The Node.js client exposes this as `helpTableForArgv(command, argv, opts)`, and its `parse(...).printTable()` automatically renders the help table for the subcommand selected by the parsed argv.
+
 For CLIs with subcommands that you do not want to model as `[commands.*]` tables, add a `[parse]` table to make parsing stricter or to surface ignored tokens:
 
 ```toml
