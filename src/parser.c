@@ -2769,6 +2769,16 @@ static int f2e_config_ignores_env_key(const F2EConfig *config, const char *key) 
       return 1;
     }
   }
+  /* command markers are derived at parse time, so .env files may set or omit
+     them freely without tripping the audit */
+  if (config->command_count > 0 && config->command_env[0] != '\0' && f2e_streq(config->command_env, key)) {
+    return 1;
+  }
+  for (size_t i = 0; i < config->command_count; i++) {
+    if (config->commands[i].env[0] != '\0' && f2e_streq(config->commands[i].env, key)) {
+      return 1;
+    }
+  }
   return 0;
 }
 
