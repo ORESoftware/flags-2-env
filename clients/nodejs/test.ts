@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { chdir } from "node:process";
 
-import { apply, auditConfig, auditConfigStatus, auditEnv, auditEnvStatus, coerce, CoercionError, completionScript, generateTypes, helpTable, helpTableForArgv, parse, parseFromArgs } from "./lib.ts";
+import { apply, auditConfig, auditConfigStatus, auditEnv, auditEnvStatus, coerce, CoercionError, completionScript, generateTypes, helpTable, helpTableForArgv, parse, parseStructured, resolveCommands, parseFromArgs } from "./lib.ts";
 
 chdir("../../tests/fixtures/nested/deeper");
 
@@ -95,6 +95,26 @@ assert.match(topTable, /remote add/);
 const scopedParse = parse(["gitish", "add", "-A"], { configPath: subcommandsConfig });
 assert.equal(scopedParse.GITISH_COMMAND, "add");
 assert.equal(scopedParse.GITISH_ADD_ALL, "true");
+
+const structured = parseStructured(["gitish", "remote", "add", "-f", "abc", "efg"], { configPath: subcommandsConfig });
+assert.equal(structured.command, "remote add");
+assert.deepEqual(structured.subcommands, ["remote", "add"]);
+assert.deepEqual(structured.extras, ["abc", "efg"]);
+assert.equal(structured.flags.GITISH_REMOTE_ADD_FETCH, "true");
+assert.deepEqual(structured.unknownOptions, []);
+assert.deepEqual(structured.errors, []);
+assert.equal(structured.isHelpMenu, false);
+
+const structuredDashed = parseStructured(["gitish", "remote", "add", "--", "xyz", "-q"], { configPath: subcommandsConfig });
+assert.deepEqual(structuredDashed.extras, ["xyz", "-q"]);
+
+const structuredTypo = parseStructured(["gitish", "commit", "--wat"], { configPath: subcommandsConfig });
+assert.deepEqual(structuredTypo.unknownOptions, ["--wat"]);
+
+const resolved = resolveCommands(["gitish", "remote", "add", "-f"], { configPath: subcommandsConfig });
+assert.deepEqual(resolved, { path: ["remote", "add"], label: "remote add" });
+const resolvedNone = resolveCommands(["gitish", "--verbose"], { configPath: subcommandsConfig });
+assert.deepEqual(resolvedNone, { path: [], label: "" });
 
 const bashCompletion = completionScript("bash", "mycli", { configPath: "../../.cli-flags.toml" });
 assert.match(bashCompletion, /_flags2env_complete_mycli/);

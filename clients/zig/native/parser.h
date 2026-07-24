@@ -73,6 +73,34 @@ int f2e_is_help_requested(int argc, const char *const argv[]) F2E_WARN_UNUSED_RE
 int f2e_is_help_requested_json_argv(const char *argv_json) F2E_WARN_UNUSED_RESULT;
 
 /*
+ * Structured parse: every channel is returned separately instead of packed
+ * into env keys, so nothing can be shadowed by real environment variables:
+ *   {"flags":{...},"command":"remote add","subcommands":["remote","add"],
+ *    "extras":["abc"],"unknownOptions":[],"errors":[]}
+ * "flags" is the same env map f2e_parse returns. "extras" holds operand
+ * tokens: positionals after the last matched command (including tokens after
+ * a bare --); with no command matched, every positional except argv[0].
+ * "unknownOptions" and "errors" are collected regardless of the [parse]
+ * *_env settings. Returns a heap-allocated string; call f2e_free().
+ */
+char *f2e_parse_structured(int argc, const char *const argv[]) F2E_OWNED_RESULT;
+char *f2e_parse_structured_from_file(const char *config_path, int argc, const char *const argv[]) F2E_OWNED_RESULT;
+char *f2e_parse_structured_json_argv(const char *argv_json) F2E_OWNED_RESULT;
+char *f2e_parse_structured_json_argv_from_file(const char *config_path, const char *argv_json) F2E_OWNED_RESULT;
+
+/*
+ * Resolves the [commands.*] path selected by argv and returns it as its own
+ * JSON report, independent of the parsed env map (whose keys can be shadowed
+ * by real environment variables): {"path":["remote","add"],"label":"remote add"}.
+ * An empty path means argv selected no command or the config declares none.
+ * Returns a heap-allocated string; call f2e_free().
+ */
+char *f2e_resolve_commands(int argc, const char *const argv[]) F2E_OWNED_RESULT;
+char *f2e_resolve_commands_from_file(const char *config_path, int argc, const char *const argv[]) F2E_OWNED_RESULT;
+char *f2e_resolve_commands_json_argv(const char *argv_json) F2E_OWNED_RESULT;
+char *f2e_resolve_commands_json_argv_from_file(const char *config_path, const char *argv_json) F2E_OWNED_RESULT;
+
+/*
  * Generates and prints a terminal-width-aware help table from .cli-flags.toml.
  * Pass terminal_columns <= 0 to auto-detect from $COLUMNS or the active
  * terminal. The returned table is heap-allocated; call f2e_free().
