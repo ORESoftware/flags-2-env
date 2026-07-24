@@ -108,5 +108,44 @@ let help_table ?config_path ?(terminal_columns = 0) ~command argv =
     free_native result;
     value
 
+exception Coercion_error of string list
+
+(* Coerces declared env keys (including subcommand flag envs, command marker
+   envs, and the command path env) to their declared types. *)
+let coerce ?config_path values =
+  let payload = `Assoc values |> Yojson.Safe.to_string in
+  let result =
+    match config_path with
+    | Some path -> coerce_json_from_file_native path payload
+    | None -> coerce_json_native payload
+  in
+  if Ctypes.is_null result then raise (Coercion_error [ "coercion failed" ]);
+  let raw = string_of_owned result in
+  let report = Yojson.Safe.from_string raw in
+  let ok =
+    match Yojson.Safe.Util.member "ok" report with
+    | `Bool value -> value
+    | _ -> false
+  in
+  if not ok then begin
+    let errors =
+      Yojson.Safe.Util.member "errors" report
+      |> Yojson.Safe.Util.to_list
+      |> List.map Yojson.Safe.Util.to_string
+    in
+    raise (Coercion_error errors)
+  end;
+  Yojson.Safe.Util.member "value" report |> Yojson.Safe.Util.to_assoc
+
+(* Generates importable types; subcommand flag envs and command envs are
+   included as optional fields. Returns "" when generation fails. *)
+let generate_types ?config_path ?type_name language =
+  let result =
+    match config_path with
+    | Some path -> generate_types_from_file_native path language type_name
+    | None -> generate_types_native language type_name
+  in
+  if Ctypes.is_null result then "" else string_of_owned result
+
 let apply env argv =
   List.fold_left (fun acc pair -> pair :: List.remove_assoc (fst pair) acc) env (parse argv)
