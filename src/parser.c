@@ -1080,6 +1080,7 @@ static int f2e_load_config(const char *config_path, F2EConfig *config) {
   }
 
   F2EFlag *current = NULL;
+  int current_command = F2E_SCOPE_ROOT;
   F2EConfigSection section = F2E_SECTION_NONE;
   char line[F2E_MAX_LINE];
   while (fgets(line, sizeof(line), file)) {
@@ -1097,11 +1098,14 @@ static int f2e_load_config(const char *config_path, F2EConfig *config) {
       }
       *end = '\0';
       char *table = f2e_trim(trimmed + 1);
+      current_command = F2E_SCOPE_ROOT;
       const char prefix[] = "flags.";
       if (strncmp(table, prefix, sizeof(prefix) - 1) == 0) {
         char *name = f2e_trim(table + sizeof(prefix) - 1);
         current = f2e_add_flag(config, name);
         section = F2E_SECTION_FLAG;
+      } else if (f2e_load_commands_table(config, table, &section, &current, &current_command)) {
+        /* section, current, and current_command are set by the helper */
       } else if (f2e_streq(table, "parse") || f2e_streq(table, "parser")) {
         current = NULL;
         section = F2E_SECTION_PARSE;
