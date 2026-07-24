@@ -790,7 +790,7 @@ int main(int argc, const char *const argv[]) {
 
   if (f2e_is_help_requested(argc, argv)) {
     const char *command = f2e_cli_help_command_name(argc, argv);
-    if (f2e_print_table(command, 0) != 0) {
+    if (f2e_print_table_for_argv(command, argc, argv, 0) != 0) {
       f2e_cli_stderr_locked("flags2env: could not generate help menu\n");
       return 1;
     }
