@@ -5339,6 +5339,8 @@ static void f2e_scan_argv(F2EConfig *config,
                           F2EJsonList *positionals,
                           F2EJsonList *unknown_options,
                           F2EJsonList *errors,
+                          F2EJsonList *extras,
+                          int extras_after_match,
                           int allow_unknown,
                           int allow_unknown_forced,
                           int lenient,
@@ -5370,9 +5372,21 @@ static void f2e_scan_argv(F2EConfig *config,
           if (positionals) {
             f2e_json_list_append(positionals, token);
           }
+          if (extras && !extras_after_match && i > 0) {
+            f2e_json_list_append(extras, token);
+          }
           continue;
         }
         matching = 0;
+      }
+      if (extras && (extras_after_match ? matched_any : i > 0)) {
+        if (config->stop_at_first_positional) {
+          for (int j = i; j < argc; j++) {
+            f2e_json_list_append(extras, argv[j]);
+          }
+        } else {
+          f2e_json_list_append(extras, token);
+        }
       }
       if (positionals) {
         if (config->stop_at_first_positional) {
@@ -5388,6 +5402,11 @@ static void f2e_scan_argv(F2EConfig *config,
       continue;
     }
     if (strcmp(token, "--") == 0) {
+      if (extras && (extras_after_match ? matched_any : 1)) {
+        for (int j = i + 1; j < argc; j++) {
+          f2e_json_list_append(extras, argv[j]);
+        }
+      }
       if (positionals) {
         for (int j = i + 1; j < argc; j++) {
           f2e_json_list_append(positionals, argv[j]);
