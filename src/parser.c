@@ -5429,6 +5429,31 @@ static size_t f2e_find_flag_index_by_env(const F2EConfig *config, const char *en
   return SIZE_MAX;
 }
 
+/*
+ * Coercion slots: [0, flag_count) are flags, [flag_count, flag_count +
+ * command_count) are per-command marker envs, and the final slot is
+ * parse.command_env.
+ */
+static size_t f2e_coerce_slot_count(const F2EConfig *config) {
+  return config->flag_count + config->command_count + 1;
+}
+
+static size_t f2e_coerce_slot_for_key(const F2EConfig *config, const char *key) {
+  size_t index = f2e_find_flag_index_by_env(config, key);
+  if (index != SIZE_MAX) {
+    return index;
+  }
+  for (size_t i = 0; i < config->command_count; i++) {
+    if (config->commands[i].env[0] != '\0' && f2e_streq(config->commands[i].env, key)) {
+      return config->flag_count + i;
+    }
+  }
+  if (config->command_count > 0 && config->command_env[0] != '\0' && f2e_streq(config->command_env, key)) {
+    return config->flag_count + config->command_count;
+  }
+  return SIZE_MAX;
+}
+
 static int f2e_copy_json_span(char *out, size_t out_size, const char *start, const char *end) {
   if (!out || out_size == 0 || !start || !end || end < start) {
     return 0;
