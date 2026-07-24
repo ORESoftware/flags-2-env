@@ -39,6 +39,9 @@
 #define F2E_MAX_COMMANDS 96
 #define F2E_MAX_COMMAND_DEPTH 16
 #define F2E_SCOPE_ROOT (-1)
+/* lenient scope: no subcommand was matched (e.g. a wrapper script stripped
+   it), so scoped flags resolve globally when the name is unambiguous */
+#define F2E_SCOPE_LENIENT (-2)
 #define F2E_MAX_PAIRS (F2E_MAX_FLAGS + F2E_MAX_META_PAIRS + F2E_MAX_COMMANDS)
 #define F2E_MAX_ENV_FILE_KEYS 512
 #define F2E_DEFAULT_COMMAND_ENV "FLAGS2ENV_COMMAND"
