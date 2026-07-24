@@ -5379,12 +5379,14 @@ static void f2e_scan_argv(F2EConfig *config,
         }
         matching = 0;
       }
-      if (extras && (extras_after_match ? matched_any : i > 0)) {
+      if (extras) {
         if (config->stop_at_first_positional) {
           for (int j = i; j < argc; j++) {
-            f2e_json_list_append(extras, argv[j]);
+            if (extras_after_match ? matched_any : j > 0) {
+              f2e_json_list_append(extras, argv[j]);
+            }
           }
-        } else {
+        } else if (extras_after_match ? matched_any : i > 0) {
           f2e_json_list_append(extras, token);
         }
       }
