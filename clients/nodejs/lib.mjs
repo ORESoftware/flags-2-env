@@ -92,6 +92,35 @@ export function parseFromArgs(argv = process.argv, options = {}) {
   return parse(argv, options);
 }
 
+/**
+ * Structured parse: {flags, command, subcommands, extras, unknownOptions,
+ * errors} as separate channels (dashdash-style), so nothing is packed into —
+ * or shadowed by — env keys. `flags` is the same map parse() returns.
+ */
+export function parseStructured(argv = process.argv, options = {}) {
+  if (!Array.isArray(argv)) {
+    throw new TypeError("argv must be an array of strings");
+  }
+  const argvItems = argv.map(String);
+  const argvJson = JSON.stringify(argvItems);
+  const raw = options.configPath
+    ? native().parseStructuredJson(argvJson, options.configPath)
+    : native().parseStructuredJson(argvJson);
+  return withHelpMetadata(JSON.parse(raw), argvItems, argvJson, options);
+}
+
+/** Resolves just the [commands.*] path for argv: {path: string[], label}. */
+export function resolveCommands(argv = process.argv, options = {}) {
+  if (!Array.isArray(argv)) {
+    throw new TypeError("argv must be an array of strings");
+  }
+  const argvJson = JSON.stringify(argv.map(String));
+  const raw = options.configPath
+    ? native().resolveCommandsJson(argvJson, options.configPath)
+    : native().resolveCommandsJson(argvJson);
+  return JSON.parse(raw);
+}
+
 export function parseProcess(options = {}) {
   const argvItems = process.argv.map(String);
   const argvJson = JSON.stringify(argvItems);
