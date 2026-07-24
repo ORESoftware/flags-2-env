@@ -4738,21 +4738,30 @@ static size_t f2e_help_collect_scope_flags(const F2EConfig *config, int scope, s
   return count;
 }
 
-static char *f2e_help_command_row_name(const F2ECommand *command, size_t depth) {
+/*
+ * Renders a command's name cell relative to the help scope, so nested
+ * commands read as their invocation path (e.g. "remote add"), with any
+ * aliases appended ("commit, ci").
+ */
+static char *f2e_help_command_row_name(const F2EConfig *config, int index, int scope) {
   F2EBuffer names;
   if (!f2e_buffer_init(&names)) {
     return NULL;
   }
-  for (size_t i = 0; i < depth * 2; i++) {
-    if (!f2e_buffer_append_char(&names, ' ')) {
+  int chain[F2E_MAX_COMMAND_DEPTH];
+  size_t depth = 0;
+  for (int cursor = index; cursor >= 0 && cursor != scope && depth < F2E_MAX_COMMAND_DEPTH;
+       cursor = config->commands[cursor].parent) {
+    chain[depth++] = cursor;
+  }
+  for (size_t i = depth; i > 0; i--) {
+    if ((i < depth && !f2e_buffer_append_char(&names, ' ')) ||
+        !f2e_buffer_append(&names, config->commands[chain[i - 1]].name)) {
       free(names.data);
       return NULL;
     }
   }
-  if (!f2e_buffer_append(&names, command->name)) {
-    free(names.data);
-    return NULL;
-  }
+  const F2ECommand *command = &config->commands[index];
   for (size_t i = 0; i < command->alias_count; i++) {
     if (!f2e_buffer_append(&names, ", ") || !f2e_buffer_append(&names, command->aliases[i])) {
       free(names.data);
@@ -4772,11 +4781,11 @@ static size_t f2e_help_commands_name_width(const F2EConfig *config, int scope, s
     if (command->parent != scope) {
       continue;
     }
-    size_t row = depth * 2 + strlen(command->name);
-    for (size_t j = 0; j < command->alias_count; j++) {
-      row += 2 + strlen(command->aliases[j]);
+    char *names = f2e_help_command_row_name(config, (int)i, scope);
+    if (names) {
+      width = f2e_size_max(width, strlen(names));
+      free(names);
     }
-    width = f2e_size_max(width, row);
     width = f2e_size_max(width, f2e_help_commands_name_width(config, (int)i, depth + 1));
   }
   return width;
