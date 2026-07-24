@@ -22,3 +22,26 @@ combined = sdk.apply({"PORT": "env", "KEEP": "1"}, ["app", "--port", "8181"])
 assert combined["PORT"] == "8181", combined
 assert combined["KEEP"] == "1", combined
 assert combined["COLOR"] == "true", combined
+
+subcommands_config = "../../../subcommands/.cli-flags.toml"
+scoped = sdk.parse(["gitish", "add", "-A"], subcommands_config)
+assert scoped["GITISH_COMMAND"] == "add", scoped
+assert scoped["GITISH_ADD_ALL"] == "true", scoped
+
+assert sdk.is_help_requested(["gitish", "add", "--help"]) is True
+assert sdk.is_help_requested(["gitish", "add"]) is False
+
+scoped_help = sdk.help_table(
+    "gitish",
+    ["gitish", "remote", "add", "--help"],
+    subcommands_config,
+    terminal_columns=100,
+)
+assert "Command: gitish remote add [OPTIONS]" in scoped_help, scoped_help
+assert "--fetch" in scoped_help, scoped_help
+
+top_help = sdk.help_table("gitish", ["gitish"], subcommands_config, terminal_columns=100)
+assert "Commands:" in top_help, top_help
+assert "remote add" in top_help, top_help
+
+print("python client tests passed")

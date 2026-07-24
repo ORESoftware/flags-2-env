@@ -20,6 +20,9 @@ module Flags2Env
     extern "char* f2e_parse_json_argv_from_file(char*, char*)"
     extern "char* f2e_parse_process()"
     extern "char* f2e_parse_process_from_file(char*)"
+    extern "int f2e_is_help_requested_json_argv(char*)"
+    extern "char* f2e_help_table_for_json_argv(char*, char*, int)"
+    extern "char* f2e_help_table_for_json_argv_from_file(char*, char*, char*, int)"
     extern "void f2e_free(char*)"
   end
 
