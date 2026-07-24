@@ -84,3 +84,11 @@ aliases = ["track"]
 short = "t"
 type = "string"
 help = "Branch to track."
+
+# [global.flags.*] is an explicit spelling of the global namespace; it is
+# identical to [flags.*] and applies inside every subcommand.
+[global.flags.color]
+env = "GITISH_COLOR"
+aliases = ["color"]
+type = "bool"
+help = "Colorize output."
