@@ -1108,6 +1108,7 @@ static int f2e_load_commands_table(F2EConfig *config,
   while (index < segment_count) {
     if (f2e_table_keyword_is_commands(segments[index])) {
       if (index + 1 >= segment_count || segments[index + 1][0] == '\0') {
+        f2e_record_invalid_command_table(config, table);
         return 1;
       }
       int next = f2e_find_or_add_command(config, scope, segments[index + 1]);
@@ -1120,6 +1121,7 @@ static int f2e_load_commands_table(F2EConfig *config,
     }
     if (f2e_table_keyword_is_flags(segments[index])) {
       if (index + 2 != segment_count || segments[index + 1][0] == '\0') {
+        f2e_record_invalid_command_table(config, table);
         return 1;
       }
       F2EFlag *flag = f2e_add_flag(config, segments[index + 1]);
@@ -1130,6 +1132,11 @@ static int f2e_load_commands_table(F2EConfig *config,
       }
       return 1;
     }
+    /* a bare segment where a keyword belongs — usually a shorthand like
+       [commands.publish.init.flags.x]; nesting must spell out the keyword
+       ([commands.publish.commands.init.flags.x]) so command names can never
+       clash with the "commands"/"flags" keywords */
+    f2e_record_invalid_command_table(config, table);
     return 1;
   }
 
