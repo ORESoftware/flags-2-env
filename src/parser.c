@@ -1424,7 +1424,7 @@ static F2EPair *f2e_find_pair(F2EPair *pairs, size_t pair_count, const char *key
 }
 
 static void f2e_set_pair(F2EPair *pairs, size_t pair_count, const char *key, const char *value) {
-  if (!key || key[0] == '\0') {
+  if (!pairs || !key || key[0] == '\0') {
     return;
   }
   F2EPair *pair = f2e_find_pair(pairs, pair_count, key);
