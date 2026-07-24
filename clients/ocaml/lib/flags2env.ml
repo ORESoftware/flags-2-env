@@ -73,5 +73,28 @@ let parse_process ?config_path () =
   in
   result |> string_of_owned |> map_of_json
 
+let argv_to_json argv =
+  `List (List.map (fun value -> `String value) argv) |> Yojson.Safe.to_string
+
+let is_help_requested argv =
+  is_help_requested_json_argv_native (argv_to_json argv) <> 0
+
+(* Renders the help table for the [commands.*] path selected by argv; with no
+   matching command this renders the top-level menu including the Commands
+   section when subcommands are declared. Returns "" when no config exists. *)
+let help_table ?config_path ?(terminal_columns = 0) ~command argv =
+  let argv_json = argv_to_json argv in
+  let result =
+    match config_path with
+    | Some path -> help_table_for_json_argv_from_file_native path command argv_json terminal_columns
+    | None -> help_table_for_json_argv_native command argv_json terminal_columns
+  in
+  if Ctypes.is_null result then ""
+  else
+    let len = Unsigned.Size_t.to_int (strlen result) in
+    let value = Ctypes.string_from_ptr result ~length:len in
+    free_native result;
+    value
+
 let apply env argv =
   List.fold_left (fun acc pair -> pair :: List.remove_assoc (fst pair) acc) env (parse argv)
