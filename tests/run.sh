@@ -655,6 +655,41 @@ case "$deep_scoped_help" in
     ;;
 esac
 
+# commands literally named "commands" and "flags" never clash with the table
+# keywords because keyword and name positions strictly alternate
+SUBCOMMANDS_NAMES_DIR="$ROOT_DIR/tests/subcommands-names"
+actual="$(cd "$SUBCOMMANDS_NAMES_DIR" && "$CLI" tool commands --long)"
+expected='{"NAMES_COMMAND":"commands","NAMES_COMMANDS_LONG":"true"}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected command named "commands" parse: %s\nActual:                                  %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+actual="$(cd "$SUBCOMMANDS_NAMES_DIR" && "$CLI" tool flags dump --path deep)"
+expected='{"NAMES_COMMAND":"flags dump","NAMES_FLAGS_DUMP_PATH":"deep"}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected command named "flags" parse: %s\nActual:                               %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+actual="$(cd "$SUBCOMMANDS_NAMES_DIR" && "$CLI" audit)"
+expected='{"ok":true,"errorCount":0,"warningCount":0,"errors":[],"warnings":[]}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected clean keyword-named-command audit: %s\nActual:                                     %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+
+# shorthand nesting without the commands keyword is an audit error, not a
+# silent no-op
+INVALID_NESTING_CONFIG="$ROOT_DIR/tests/audit-invalid-subcommand-nesting/.cli-flags.toml"
+set +e
+actual="$("$CLI" audit "$INVALID_NESTING_CONFIG")"
+status=$?
+set -e
+expected='{"ok":false,"errorCount":1,"warningCount":0,"errors":["[commands.publish.init.flags.access] is not a valid commands table; nest subcommands with an explicit keyword, e.g. [commands.<name>.commands.<name>.flags.<flag>]"],"warnings":[]}'
+if [ "$status" -eq 0 ] || [ "$actual" != "$expected" ]; then
+  printf 'Expected shorthand-nesting audit failure:\n%s\nActual status: %s\nActual: %s\n' "$expected" "$status" "$actual" >&2
+  exit 1
+fi
+
 INVALID_SUBCOMMAND_CONFIG="$ROOT_DIR/tests/audit-invalid-subcommand/.cli-flags.toml"
 set +e
 actual="$("$CLI" audit "$INVALID_SUBCOMMAND_CONFIG")"
