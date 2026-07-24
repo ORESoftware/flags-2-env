@@ -4178,6 +4178,13 @@ char *f2e_generate_types_from_file(const char *config_path, const char *language
     return NULL;
   }
   f2e_codegen_append_command_envs(config);
+  for (size_t i = 0; i < config->flag_count; i++) {
+    /* a command-scoped default is only emitted when its command runs, so the
+       generated field must be optional */
+    if (config->flags[i].command != F2E_SCOPE_ROOT) {
+      config->flags[i].has_default = 0;
+    }
+  }
   char *source = f2e_generate_types_from_config(config, language, type_name);
   free(config);
   return source;
