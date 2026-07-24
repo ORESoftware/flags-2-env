@@ -2081,13 +2081,30 @@ static int f2e_token_looks_like_known_option(F2EConfig *config, int scope, const
     if (f2e_find_flag_by_alias(config, scope, copy)) {
       return 1;
     }
+    if (scope == F2E_SCOPE_LENIENT) {
+      /* an ambiguous name is still a declared option; it is accepted but not
+         applied, rather than reported as unknown */
+      int ambiguous = 0;
+      f2e_find_flag_any_scope_by_alias(config, copy, &ambiguous);
+      if (ambiguous) {
+        return 1;
+      }
+    }
     if (strncmp(copy, "no-", 3) == 0) {
       F2EFlag *flag = f2e_find_flag_by_alias(config, scope, copy + 3);
       return flag && flag->type == F2E_TYPE_BOOL;
     }
     return 0;
   }
-  return f2e_find_flag_by_short(config, scope, token[1]) != NULL;
+  if (f2e_find_flag_by_short(config, scope, token[1])) {
+    return 1;
+  }
+  if (scope == F2E_SCOPE_LENIENT) {
+    int ambiguous = 0;
+    f2e_find_flag_any_scope_by_short(config, token[1], &ambiguous);
+    return ambiguous;
+  }
+  return 0;
 }
 
 static int f2e_token_looks_like_option(const char *token) {
