@@ -1,0 +1,65 @@
+# Four levels of nesting plus stop_at_first_positional and unknown-option
+# tracking, to exercise command matching against the stricter parse modes.
+[parse]
+command_env = "TOOL_COMMAND"
+positionals_env = "TOOL_POSITIONALS"
+unknown_options_env = "TOOL_UNKNOWN_OPTIONS"
+stop_at_first_positional = true
+
+[flags.label]
+env = "TOOL_LABEL"
+aliases = ["label"]
+short = "l"
+type = "string"
+help = "A top-level string flag whose value may look like a command."
+
+[flags.dry_run]
+env = "TOOL_DRY_RUN"
+aliases = ["dry-run"]
+short = "n"
+type = "bool"
+default = "false"
+help = "Top-level dry-run."
+
+[commands.ws]
+help = "Workspace operations."
+
+[commands.ws.flags.dry_run]
+env = "TOOL_WS_DRY_RUN"
+aliases = ["dry-run"]
+short = "n"
+type = "bool"
+help = "Dry-run scoped to ws."
+
+[commands.ws.commands.remote]
+help = "Manage workspace remotes."
+# unknown options are tolerated inside `ws remote` (and its subcommands), but
+# nowhere else
+allow_unknown = true
+
+[commands.ws.commands.remote.commands.add]
+help = "Add a workspace remote."
+
+[commands.ws.commands.remote.commands.add.flags.url]
+env = "TOOL_WS_REMOTE_ADD_URL"
+aliases = ["url"]
+short = "u"
+type = "string"
+help = "Remote URL."
+
+[commands.ws.commands.remote.commands.add.commands.tag]
+help = "Tag a newly added workspace remote."
+env = "TOOL_CMD_TAG"
+
+[commands.ws.commands.remote.commands.add.commands.tag.flags.dry_run]
+env = "TOOL_TAG_DRY_RUN"
+aliases = ["dry-run"]
+short = "n"
+type = "bool"
+help = "Dry-run scoped four levels deep."
+
+[commands.ws.commands.remote.commands.add.commands.tag.flags.name]
+env = "TOOL_TAG_NAME"
+aliases = ["name"]
+type = "string"
+help = "Tag name."

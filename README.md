@@ -68,7 +68,75 @@ type = "integer"
 help = "Retry count."
 ```
 
-For CLIs with subcommands, add a `[parse]` table to make parsing stricter or to surface ignored tokens:
+## Subcommands
+
+CLIs like `git commit -am ...` or `docker run ...` scope their flags to a command: `-A` can mean one thing for `git add -A` and something else entirely for `git log -A`. Declare commands with `[commands.<name>]` tables, and scope flags to a command with `[commands.<name>.flags.<flag>]`. Nest arbitrarily deep (`gh auth login`-style) by chaining `commands` segments:
+
+```toml
+[commands.add]
+help = "Add file contents to the index."
+env = "GIT_CMD_ADD"            # optional: set to "true" when this command runs
+
+[commands.add.flags.all]
+env = "GIT_ADD_ALL"
+aliases = ["all"]
+short = "A"
+type = "bool"
+help = "Stage all tracked and untracked files."
+
+[commands.commit]
+help = "Record changes to the repository."
+aliases = ["ci"]               # optional command aliases
+
+[commands.commit.flags.message]
+env = "GIT_COMMIT_MESSAGE"
+aliases = ["message"]
+short = "m"
+type = "string"
+
+# second-level subcommand: `git remote add ...`
+[commands.remote.commands.add]
+help = "Add a remote."
+
+[commands.remote.commands.add.flags.fetch]
+env = "GIT_REMOTE_ADD_FETCH"
+aliases = ["fetch"]
+short = "f"
+type = "bool"
+```
+
+`command`, `subcommands`, and `subcommand` are accepted spellings of the `commands` keyword, and `[commands.<name>]` property lines support `help`/`description`, `aliases`, and `env`.
+
+Parsing walks argv left to right. Leading positionals that match no top-level command (the program name, a wrapper token) are skipped; the first positional that matches a command selects it, and each following positional may select a nested subcommand. The first positional that matches no subcommand of the current scope ends command matching — so in `docker run ubuntu ls -la`, `run` is the command and `ubuntu`/`ls` stay positionals. Matched command tokens are not recorded as positionals.
+
+Flags resolve against the active command scope first, then its ancestors, then the global `[flags.*]` set — a subcommand may reuse a short flag or alias that means something else elsewhere, and unshadowed global flags keep working after the subcommand. Command-scoped flags are only valid inside their command: `mycli init --pack` reports `--pack` as an unknown option when `pack` is declared under `[commands.run]`. Flag defaults only apply to global flags and flags of the commands actually selected.
+
+`[global.flags.<name>]` is an explicit spelling of the global namespace — identical to `[flags.<name>]` — for configs that want to state loudly that a flag applies inside every subcommand.
+
+`allow_unknown` may also be set per command: `[commands.run] allow_unknown = true` tolerates unrecognized options once `run` (or one of its subcommands, which inherit the setting) is active, while the rest of the CLI stays strict. A runtime `--allow-unknown`/`--no-allow-unknown` token or `FLAGS2ENV_ALLOW_UNKNOWN` env var still overrides every scope.
+
+Some CLIs front the real binary with a wrapper script that consumes the subcommand token before argv reaches flags2env (discouraged, but common). When commands are declared and argv selects none, parsing falls back to lenient global resolution: root flags behave normally, a command-scoped flag whose name is unambiguous across all scopes is applied as if it were global, and a name declared in several scopes is accepted but not applied (never reported unknown). Genuinely undeclared options are still collected. Scoped defaults stay off in this mode because the intended command is unknown.
+
+The resolved command path is returned as a space-joined string under `FLAGS2ENV_COMMAND` (rename it with `[parse] command_env = "MY_CMD"`), which makes dispatch a plain switch:
+
+```sh
+eval "$(flags2env export -- "$0" "$@")"
+case "$FLAGS2ENV_COMMAND" in
+  "add")        do_add ;;
+  "remote add") do_remote_add ;;
+  "")           usage ;;
+esac
+```
+
+Commands that declare `env` also get that key set to `"true"` when they are on the selected path (`GIT_CMD_ADD=true` above), which is convenient in languages where string switches are awkward.
+
+`--help` is subcommand-aware: the top-level menu renders a bordered `Commands:` table (nested commands shown as their full path, e.g. `remote add`) beneath the global options, and `mycli remote add --help` renders that command's description, its own flags, and the inherited global flags with shadowed short flags hidden. Generated shell completions offer top-level command names alongside global options, and `flags2env audit` validates command tables: duplicate aliases or shorts are only errors within one scope, sibling commands must not share names or aliases, and command envs must not collide with flag envs.
+
+Native callers can render the scoped help directly with `f2e_help_table_for_argv[_from_file]` / `f2e_print_table_for_argv[_from_file]`, or `f2e_help_table_for_json_argv[_from_file]` from FFI clients. The Node.js client exposes this as `helpTableForArgv(command, argv, opts)`, and its `parse(...).printTable()` automatically renders the help table for the subcommand selected by the parsed argv.
+
+Generated types (`flags2env generate <language>`) describe every env key the parser may emit: command-scoped flag envs are included as optional fields (their defaults only apply when their command runs), each command's marker `env` becomes an optional boolean, and `parse.command_env` becomes an optional string. `flags2env coerce`-style APIs (`f2e_coerce_json`) accept the marker envs as booleans and the command path env as a string.
+
+For CLIs with subcommands that you do not want to model as `[commands.*]` tables, add a `[parse]` table to make parsing stricter or to surface ignored tokens:
 
 ```toml
 [parse]
@@ -1178,3 +1246,5 @@ let appEnv = try loadAppEnv()
 The C parser owns config discovery. By default, it walks upward from the current working directory to find the nearest `.cli-flags.toml`, but refuses to use `$HOME/.cli-flags.toml` because that is likely accidental. Runtime clients should not reimplement this lookup; they should pass an explicit `configPath` only when the user asks for one.
 
 Unknown flags and positional tokens are ignored unless `[parse]` declares `unknown_options_env` or `positionals_env`; `allow_unknown` suppresses unknown-option collection when downstream flags are expected. Defaults from `.cli-flags.toml` are included in the parsed map, so they also override environment values when merged.
+
+When `[commands.*]` tables are declared, the parser resolves the subcommand path in a dry-run pass before applying defaults, so defaults are only emitted for global flags and the selected commands, and flag lookups always prefer the innermost command scope. The resolved path is reported under `parse.command_env` (default `FLAGS2ENV_COMMAND`, emitted as an empty string when no command is selected), and matched command tokens are consumed rather than recorded as positionals. While no command has matched yet, leading positionals such as the program name are skipped and do not trigger `stop_at_first_positional`.

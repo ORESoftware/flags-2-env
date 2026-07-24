@@ -14,6 +14,7 @@
 #define TYPED_CONFIG "tests/typed/.cli-flags.toml"
 #define NATIVE_SCALARS_CONFIG "tests/native-scalars/.cli-flags.toml"
 #define CODEGEN_CONFIG "tests/codegen/.cli-flags.toml"
+#define SUBCOMMANDS_CONFIG "tests/subcommands/.cli-flags.toml"
 #define INVALID_CODEGEN_CONFIG "tests/audit-invalid-codegen/.cli-flags.toml"
 #define INVALID_TYPED_CONFIG "tests/audit-invalid-typed/.cli-flags.toml"
 #define INVALID_TYPE_CONFIG "tests/audit-invalid-type/.cli-flags.toml"
@@ -372,6 +373,50 @@ int main(void) {
     exit(1);
   }
   expect_status("missing print table config returns failure", f2e_print_table_from_file(NULL, "app", 80), 1);
+
+  const char *scoped_help_argv[] = {"gitish", "remote", "add", "--help"};
+  char *scoped_help = f2e_help_table_for_argv_from_file(SUBCOMMANDS_CONFIG, "gitish", 4, scoped_help_argv, 100);
+  expect_contains("scoped help renders command path", scoped_help, "Command: gitish remote add [OPTIONS]");
+  expect_contains("scoped help renders command description", scoped_help, "Add a remote.");
+  expect_contains("scoped help renders scoped flag", scoped_help, "--fetch");
+  expect_contains("scoped help renders inherited global flag", scoped_help, "--author");
+  if (strstr(scoped_help, "--chmod")) {
+    fprintf(stderr, "scoped help should not render sibling command flags:\n%s\n", scoped_help);
+    f2e_free(scoped_help);
+    exit(1);
+  }
+  f2e_free(scoped_help);
+
+  const char *top_help_argv[] = {"gitish", "--help"};
+  char *top_help = f2e_help_table_for_argv_from_file(SUBCOMMANDS_CONFIG, "gitish", 2, top_help_argv, 100);
+  expect_contains("top help lists commands section", top_help, "Commands:");
+  expect_contains("top help lists nested command path", top_help, "remote add");
+  f2e_free(top_help);
+
+  char *null_argv_help = f2e_help_table_for_argv_from_file(SUBCOMMANDS_CONFIG, "gitish", -1, NULL, 100);
+  expect_contains("null argv help falls back to top-level table", null_argv_help, "Commands:");
+  f2e_free(null_argv_help);
+
+  char *json_argv_help = f2e_help_table_for_json_argv_from_file(SUBCOMMANDS_CONFIG,
+                                                                "gitish",
+                                                                "[\"gitish\",\"remote\",\"add\",\"--help\"]",
+                                                                100);
+  expect_contains("json argv help renders command path", json_argv_help, "Command: gitish remote add [OPTIONS]");
+  f2e_free(json_argv_help);
+
+  char *bad_json_argv_help = f2e_help_table_for_json_argv_from_file(SUBCOMMANDS_CONFIG, "gitish", "[not-json", 100);
+  expect_contains("invalid json argv falls back to top-level help", bad_json_argv_help, "Commands:");
+  f2e_free(bad_json_argv_help);
+
+  char *missing_argv_help = f2e_help_table_for_argv_from_file(NULL, "gitish", 2, top_help_argv, 100);
+  if (missing_argv_help) {
+    fprintf(stderr, "missing argv-help config should return NULL\n");
+    f2e_free(missing_argv_help);
+    exit(1);
+  }
+  expect_status("missing print argv table config returns failure",
+                f2e_print_table_for_argv_from_file(NULL, "gitish", 2, top_help_argv, 100),
+                1);
 
   char *sanitized_help = f2e_help_table_from_file(HELP_HARDENING_CONFIG, "app", 80);
   expect_contains("sanitized help preserves visible text", sanitized_help, "Alpha beta");

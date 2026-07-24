@@ -64,6 +64,7 @@ type NativeModule = {
   coerceJson(valuesJson: string, configPath?: string): string;
   isHelpJson(argvJson: string): boolean;
   helpTable(command?: string, terminalColumns?: number, configPath?: string): string;
+  helpTableForArgv?(command: string, argvJson: string, terminalColumns?: number, configPath?: string): string;
 };
 
 const require = createRequire(import.meta.url);
@@ -100,6 +101,24 @@ export function helpTable(command = "flags2env", options: HelpTableOptions = {})
     : native().helpTable(String(command), options.terminalColumns || 0);
 }
 
+export function helpTableForArgv(
+  command = "flags2env",
+  argv: readonly unknown[] = process.argv,
+  options: HelpTableOptions = {},
+): string {
+  if (!Array.isArray(argv)) {
+    throw new TypeError("argv must be an array of strings");
+  }
+  const argvJson = JSON.stringify(argv.map(String));
+  const nativeHelpTableForArgv = native().helpTableForArgv;
+  if (typeof nativeHelpTableForArgv !== "function") {
+    return helpTable(command, options);
+  }
+  return options.configPath
+    ? nativeHelpTableForArgv.call(native(), String(command), argvJson, options.terminalColumns || 0, options.configPath)
+    : nativeHelpTableForArgv.call(native(), String(command), argvJson, options.terminalColumns || 0);
+}
+
 function withHelpMetadata(result: EnvMap, argvItems: string[], argvJson: string, options: Flags2EnvOptions): ParseResult {
   const command = argvItems[0] || "flags2env";
   const isHelpMenu = native().isHelpJson(argvJson);
@@ -114,7 +133,7 @@ function withHelpMetadata(result: EnvMap, argvItems: string[], argvJson: string,
         if (!target || typeof target.write !== "function") {
           throw new TypeError("printTable target must expose write(chunk)");
         }
-        const table = helpTable(command, {
+        const table = helpTableForArgv(command, argvItems, {
           configPath: options.configPath,
           terminalColumns: resolveTerminalColumns(target),
         });
@@ -226,4 +245,5 @@ export default {
   completionScript,
   generateTypes,
   helpTable,
+  helpTableForArgv,
 };

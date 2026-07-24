@@ -1,3 +1,3 @@
-from lib import Flags2Env
+from lib import CoercionError, Flags2Env
 
-__all__ = ["Flags2Env"]
+__all__ = ["CoercionError", "Flags2Env"]

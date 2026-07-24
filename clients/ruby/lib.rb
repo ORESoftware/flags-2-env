@@ -20,7 +20,23 @@ module Flags2Env
     extern "char* f2e_parse_json_argv_from_file(char*, char*)"
     extern "char* f2e_parse_process()"
     extern "char* f2e_parse_process_from_file(char*)"
+    extern "int f2e_is_help_requested_json_argv(char*)"
+    extern "char* f2e_help_table_for_json_argv(char*, char*, int)"
+    extern "char* f2e_help_table_for_json_argv_from_file(char*, char*, char*, int)"
+    extern "char* f2e_coerce_json(char*)"
+    extern "char* f2e_coerce_json_from_file(char*, char*)"
+    extern "char* f2e_generate_types(char*, char*)"
+    extern "char* f2e_generate_types_from_file(char*, char*, char*)"
     extern "void f2e_free(char*)"
+  end
+
+  class CoercionError < TypeError
+    attr_reader :errors
+
+    def initialize(errors)
+      @errors = errors
+      super("flags2env could not coerce config: #{errors.join('; ')}")
+    end
   end
 
   module_function
@@ -40,6 +56,58 @@ module Flags2Env
     return {} if result.null?
 
     JSON.parse(result.to_s).transform_values(&:to_s)
+  ensure
+    Native.f2e_free(result) if result && !result.null?
+  end
+
+  def help_requested?(argv = ARGV)
+    argv_json = JSON.generate(argv.map(&:to_s))
+    Native.f2e_is_help_requested_json_argv(argv_json) != 0
+  end
+
+  # Renders the help table for the [commands.*] path selected by argv; with no
+  # matching command this renders the top-level menu including the Commands
+  # section when subcommands are declared.
+  def help_table(command, argv = ARGV, config_path: nil, terminal_columns: 0)
+    argv_json = JSON.generate(argv.map(&:to_s))
+    result = if config_path
+               Native.f2e_help_table_for_json_argv_from_file(config_path, command.to_s, argv_json, terminal_columns)
+             else
+               Native.f2e_help_table_for_json_argv(command.to_s, argv_json, terminal_columns)
+             end
+    return "" if result.null?
+
+    result.to_s
+  ensure
+    Native.f2e_free(result) if result && !result.null?
+  end
+
+  # Coerces declared env keys (including subcommand flag envs, command marker
+  # envs, and the command path env) to their declared types.
+  def coerce(values = ENV.to_h, config_path: nil)
+    payload = JSON.generate(values)
+    result = config_path ? Native.f2e_coerce_json_from_file(config_path, payload) : Native.f2e_coerce_json(payload)
+    raise CoercionError, ["coercion failed"] if result.null?
+
+    report = JSON.parse(result.to_s)
+    raise CoercionError, report.fetch("errors", []) unless report["ok"]
+
+    report.fetch("value", {})
+  ensure
+    Native.f2e_free(result) if result && !result.null?
+  end
+
+  # Generates importable types; subcommand flag envs and command envs are
+  # included as optional fields.
+  def generate_types(language, type_name: nil, config_path: nil)
+    result = if config_path
+               Native.f2e_generate_types_from_file(config_path, language.to_s, type_name)
+             else
+               Native.f2e_generate_types(language.to_s, type_name)
+             end
+    raise ArgumentError, "could not generate #{language} types; check the language, type name, and config audit" if result.null?
+
+    result.to_s
   ensure
     Native.f2e_free(result) if result && !result.null?
   end

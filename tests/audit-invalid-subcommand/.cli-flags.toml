@@ -1,0 +1,25 @@
+# Invalid on purpose: duplicate short flags inside one command scope, a
+# command alias clashing with a sibling command, and a command env colliding
+# with a flag env. Reusing "-A" across different scopes stays legal.
+[flags.marker]
+env = "GIT_CMD_ADD"
+aliases = ["marker"]
+type = "string"
+
+[commands.add]
+env = "GIT_CMD_ADD"
+
+[commands.add.flags.all]
+env = "GIT_ADD_ALL"
+aliases = ["all"]
+short = "A"
+type = "bool"
+
+[commands.add.flags.everything]
+env = "GIT_ADD_EVERYTHING"
+aliases = ["everything"]
+short = "A"
+type = "bool"
+
+[commands.stage]
+aliases = ["add"]

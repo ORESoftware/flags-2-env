@@ -13,3 +13,45 @@ raise "unexpected explicit config map: #{explicit.inspect}" unless explicit["DEB
 
 combined = Flags2Env.apply({ "PORT" => "env", "KEEP" => "1" }, ["app", "--port", "8181"])
 raise "unexpected combined map: #{combined.inspect}" unless combined["PORT"] == "8181" && combined["KEEP"] == "1" && combined["COLOR"] == "true"
+
+subcommands_config = "../../../subcommands/.cli-flags.toml"
+scoped = Flags2Env.parse(["gitish", "add", "-A"], config_path: subcommands_config)
+raise "unexpected scoped map: #{scoped.inspect}" unless scoped["GITISH_COMMAND"] == "add" && scoped["GITISH_ADD_ALL"] == "true"
+
+raise "help detection failed" unless Flags2Env.help_requested?(["gitish", "add", "--help"])
+raise "help false positive" if Flags2Env.help_requested?(["gitish", "add"])
+
+scoped_help = Flags2Env.help_table("gitish", ["gitish", "remote", "add", "--help"],
+                                   config_path: subcommands_config, terminal_columns: 100)
+unless scoped_help.include?("Command: gitish remote add [OPTIONS]") && scoped_help.include?("--fetch")
+  raise "unexpected scoped help:\n#{scoped_help}"
+end
+
+top_help = Flags2Env.help_table("gitish", ["gitish"], config_path: subcommands_config, terminal_columns: 100)
+unless top_help.include?("Commands:") && top_help.include?("remote add")
+  raise "unexpected top-level help:\n#{top_help}"
+end
+
+puts "ruby client tests passed"
+
+coerced = Flags2Env.coerce(
+  { "GITISH_COMMAND" => "remote add", "GITISH_CMD_ADD" => "true", "GITISH_REMOTE_ADD_FETCH" => "true" },
+  config_path: subcommands_config
+)
+unless coerced["GITISH_COMMAND"] == "remote add" && coerced["GITISH_CMD_ADD"] == true && coerced["GITISH_REMOTE_ADD_FETCH"] == true
+  raise "unexpected coerced map: #{coerced.inspect}"
+end
+
+begin
+  Flags2Env.coerce({ "GITISH_COMMAND" => 42 }, config_path: subcommands_config)
+  raise "expected CoercionError"
+rescue Flags2Env::CoercionError => e
+  raise "unexpected coercion error: #{e.message}" unless e.message.include?("command_env")
+end
+
+generated = Flags2Env.generate_types("typescript", type_name: "GitishConfig", config_path: subcommands_config)
+unless generated.include?("GITISH_COMMAND?: string;") && generated.include?("GITISH_CMD_ADD?: boolean;")
+  raise "unexpected generated types:\n#{generated}"
+end
+
+puts "ruby client extended tests passed"

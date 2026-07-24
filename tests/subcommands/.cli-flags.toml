@@ -1,0 +1,94 @@
+[help]
+url = "https://example.com/gitish/help"
+
+[parse]
+command_env = "GITISH_COMMAND"
+positionals_env = "GITISH_POSITIONALS"
+unknown_options_env = "GITISH_UNKNOWN_OPTIONS"
+
+[flags.verbose]
+env = "GITISH_VERBOSE"
+aliases = ["verbose"]
+short = "v"
+type = "bool"
+default = "false"
+help = "Enable verbose output."
+
+[flags.author]
+env = "GITISH_AUTHOR"
+aliases = ["author"]
+short = "A"
+type = "string"
+help = "Author filter at the top level."
+
+[commands.add]
+help = "Add file contents to the index."
+env = "GITISH_CMD_ADD"
+
+[commands.add.flags.all]
+env = "GITISH_ADD_ALL"
+aliases = ["all"]
+short = "A"
+type = "bool"
+help = "Stage all tracked and untracked files."
+
+[commands.add.flags.chmod]
+env = "GITISH_ADD_CHMOD"
+aliases = ["chmod"]
+type = "string"
+help = "Override the executable bit."
+
+[commands.commit]
+help = "Record changes to the repository."
+aliases = ["ci"]
+
+[commands.commit.flags.all]
+env = "GITISH_COMMIT_ALL"
+aliases = ["all"]
+short = "a"
+type = "bool"
+help = "Commit all changed files."
+
+[commands.commit.flags.message]
+env = "GITISH_COMMIT_MESSAGE"
+aliases = ["message"]
+short = "m"
+type = "string"
+help = "Commit message."
+
+[commands.remote]
+help = "Manage the set of tracked repositories."
+
+[commands.remote.flags.verbose]
+env = "GITISH_REMOTE_VERBOSE"
+aliases = ["verbose"]
+short = "v"
+type = "bool"
+help = "Shadowed verbose that only applies to remote."
+
+[commands.remote.commands.add]
+help = "Add a remote."
+env = "GITISH_CMD_REMOTE_ADD"
+
+[commands.remote.commands.add.flags.fetch]
+env = "GITISH_REMOTE_ADD_FETCH"
+aliases = ["fetch"]
+short = "f"
+type = "bool"
+default = "false"
+help = "Fetch the remote after adding it."
+
+[commands.remote.commands.add.flags.track]
+env = "GITISH_REMOTE_ADD_TRACK"
+aliases = ["track"]
+short = "t"
+type = "string"
+help = "Branch to track."
+
+# [global.flags.*] is an explicit spelling of the global namespace; it is
+# identical to [flags.*] and applies inside every subcommand.
+[global.flags.color]
+env = "GITISH_COLOR"
+aliases = ["color"]
+type = "bool"
+help = "Colorize output."

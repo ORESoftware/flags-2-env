@@ -327,6 +327,46 @@ static napi_value f2e_node_help_table(napi_env env, napi_callback_info info) {
   return f2e_node_string_result(env, result, "failed to generate help table");
 }
 
+static napi_value f2e_node_help_table_for_argv(napi_env env, napi_callback_info info) {
+  size_t argc = 4;
+  napi_value args[4];
+  napi_get_cb_info(env, info, &argc, args, NULL, NULL);
+
+  if (argc < 2) {
+    return f2e_node_throw(env, "helpTableForArgv(command, argvJson, terminalColumns?, configPath?) requires command and argvJson");
+  }
+
+  char *command = NULL;
+  char *argv_json = NULL;
+  char *config_path = NULL;
+  int terminal_columns = 0;
+  if (!f2e_node_read_optional_string(env, args[0], &command)) {
+    return f2e_node_throw(env, "command must be a string");
+  }
+  if (!f2e_node_read_string(env, args[1], &argv_json)) {
+    free(command);
+    return f2e_node_throw(env, "argvJson must be a string");
+  }
+  if (argc >= 3 && !f2e_node_read_optional_int(env, args[2], &terminal_columns)) {
+    free(command);
+    free(argv_json);
+    return f2e_node_throw(env, "terminalColumns must be a number");
+  }
+  if (argc >= 4 && !f2e_node_read_optional_string(env, args[3], &config_path)) {
+    free(command);
+    free(argv_json);
+    return f2e_node_throw(env, "configPath must be a string");
+  }
+
+  char *result = config_path
+                     ? f2e_help_table_for_json_argv_from_file(config_path, command, argv_json, terminal_columns)
+                     : f2e_help_table_for_json_argv(command, argv_json, terminal_columns);
+  free(command);
+  free(argv_json);
+  free(config_path);
+  return f2e_node_string_result(env, result, "failed to generate help table");
+}
+
 static napi_value f2e_node_parse_process_json(napi_env env, napi_callback_info info) {
   size_t argc = 1;
   napi_value args[1];
@@ -399,6 +439,10 @@ static napi_value f2e_node_init(napi_env env, napi_value exports) {
   napi_value help_table;
   napi_create_function(env, "helpTable", NAPI_AUTO_LENGTH, f2e_node_help_table, NULL, &help_table);
   napi_set_named_property(env, exports, "helpTable", help_table);
+
+  napi_value help_table_for_argv;
+  napi_create_function(env, "helpTableForArgv", NAPI_AUTO_LENGTH, f2e_node_help_table_for_argv, NULL, &help_table_for_argv);
+  napi_set_named_property(env, exports, "helpTableForArgv", help_table_for_argv);
   return exports;
 }
 
