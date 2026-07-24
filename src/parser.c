@@ -4769,9 +4769,20 @@ static char *f2e_help_table_scoped(const F2EConfig *config, const char *command_
     return NULL;
   }
 
+  char path_label[F2E_MAX_VALUE];
+  path_label[0] = '\0';
+  if (scope >= 0 && !f2e_command_path_label(config, scope, path_label, sizeof(path_label))) {
+    path_label[0] = '\0';
+  }
+  int has_children = f2e_command_has_children(config, scope);
+
   size_t table_width = f2e_help_table_width(widths, column_count);
   char title[F2E_MAX_VALUE];
-  snprintf(title, sizeof(title), "Command: %s [OPTIONS]", command);
+  snprintf(title, sizeof(title), "Command: %s%s%s%s [OPTIONS]",
+           command,
+           path_label[0] != '\0' ? " " : "",
+           path_label,
+           has_children ? " [COMMAND]" : "");
   if (!f2e_help_append_border(&table, widths, column_count) ||
       !f2e_help_append_spanning_row(&table, title, table_width) ||
       !f2e_help_append_border(&table, widths, column_count)) {
@@ -4779,7 +4790,20 @@ static char *f2e_help_table_scoped(const F2EConfig *config, const char *command_
     return NULL;
   }
 
-  if (wide) {
+  if (scope >= 0 && (size_t)scope < config->command_count && config->commands[scope].help[0] != '\0') {
+    if (!f2e_help_append_spanning_row(&table, config->commands[scope].help, table_width) ||
+        !f2e_help_append_border(&table, widths, column_count)) {
+      free(table.data);
+      return NULL;
+    }
+  }
+
+  size_t scope_flags[F2E_MAX_FLAGS];
+  size_t scope_flag_count = f2e_help_collect_scope_flags(config, scope, scope_flags);
+
+  if (scope_flag_count == 0) {
+    /* no reachable flags at this scope; skip the options table entirely */
+  } else if (wide) {
     const char *header[5] = {0};
     for (size_t i = 0; i < column_count; i++) {
       header[i] = f2e_help_column_header(wide_columns[i]);
