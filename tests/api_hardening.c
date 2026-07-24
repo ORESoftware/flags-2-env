@@ -14,6 +14,7 @@
 #define TYPED_CONFIG "tests/typed/.cli-flags.toml"
 #define NATIVE_SCALARS_CONFIG "tests/native-scalars/.cli-flags.toml"
 #define CODEGEN_CONFIG "tests/codegen/.cli-flags.toml"
+#define SUBCOMMANDS_CONFIG "tests/subcommands/.cli-flags.toml"
 #define INVALID_CODEGEN_CONFIG "tests/audit-invalid-codegen/.cli-flags.toml"
 #define INVALID_TYPED_CONFIG "tests/audit-invalid-typed/.cli-flags.toml"
 #define INVALID_TYPE_CONFIG "tests/audit-invalid-type/.cli-flags.toml"
