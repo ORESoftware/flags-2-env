@@ -4874,6 +4874,34 @@ static char *f2e_help_table_scoped(const F2EConfig *config, const char *command_
     }
   }
 
+  if (has_children) {
+    size_t name_width = f2e_help_commands_name_width(config, scope, 0);
+    name_width = f2e_size_max(name_width, strlen("Command"));
+    size_t max_name_width = table_width > 7 + 18 ? table_width - 7 - 18 : name_width;
+    name_width = f2e_size_min(name_width, f2e_size_min(max_name_width, 40));
+    size_t command_widths[2] = {name_width, table_width - name_width - 7};
+    const char *command_header[] = {"Command", "Description"};
+    if (!f2e_help_append_spanning_row(&table, "Commands:", table_width) ||
+        !f2e_help_append_border(&table, command_widths, 2) ||
+        !f2e_help_append_row(&table, command_header, command_widths, 2) ||
+        !f2e_help_append_border(&table, command_widths, 2) ||
+        !f2e_help_append_command_rows(config, scope, 0, &table, command_widths) ||
+        !f2e_help_append_border(&table, command_widths, 2)) {
+      free(table.data);
+      return NULL;
+    }
+    char hint[F2E_MAX_VALUE];
+    snprintf(hint, sizeof(hint), "Run '%s%s%s <command> --help' for command-specific options.",
+             command,
+             path_label[0] != '\0' ? " " : "",
+             path_label);
+    if (!f2e_help_append_spanning_row(&table, hint, table_width) ||
+        !f2e_help_append_border(&table, widths, column_count)) {
+      free(table.data);
+      return NULL;
+    }
+  }
+
   if (config->help_url[0] != '\0') {
     char help_url[F2E_MAX_VALUE + 16];
     snprintf(help_url, sizeof(help_url), "More help: %s", config->help_url);
@@ -4885,6 +4913,10 @@ static char *f2e_help_table_scoped(const F2EConfig *config, const char *command_
   }
 
   return table.data;
+}
+
+static char *f2e_help_table_from_config(const F2EConfig *config, const char *command_name, int terminal_columns) {
+  return f2e_help_table_scoped(config, command_name, terminal_columns, F2E_SCOPE_ROOT);
 }
 
 static int f2e_print_stream_locked(FILE *stream, const char *value) {
