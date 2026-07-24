@@ -2228,8 +2228,8 @@ static void f2e_apply_short_arg(F2EConfig *config, int scope, F2EPair *pairs, si
     return;
   }
 
-  if (f2e_can_bundle_bool_shorts(config, token + 1)) {
-    f2e_apply_bool_short_bundle(config, pairs, pair_count, token + 1);
+  if (f2e_can_bundle_bool_shorts(config, scope, token + 1)) {
+    f2e_apply_bool_short_bundle(config, scope, pairs, pair_count, token + 1);
     return;
   }
 
