@@ -90,6 +90,41 @@ class Flags2Env:
         finally:
             self._lib.f2e_free(result)
 
+    def coerce(self, values: Mapping[str, object] | None = None, config_path: str | None = None) -> dict[str, object]:
+        """Coerces declared env keys (including subcommand flag envs, command
+        marker envs, and the command path env) to their declared types."""
+        payload = json.dumps(dict(os.environ if values is None else values)).encode()
+        result = (
+            self._lib.f2e_coerce_json_from_file(config_path.encode(), payload)
+            if config_path
+            else self._lib.f2e_coerce_json(payload)
+        )
+        if not result:
+            raise CoercionError(["coercion failed"])
+        try:
+            report = json.loads(ctypes.string_at(result).decode())
+        finally:
+            self._lib.f2e_free(result)
+        if not report.get("ok"):
+            raise CoercionError([str(error) for error in report.get("errors", [])])
+        return dict(report.get("value", {}))
+
+    def generate_types(self, language: str, type_name: str | None = None, config_path: str | None = None) -> str:
+        """Generates importable types; subcommand flag envs and command envs
+        are included as optional fields."""
+        encoded_name = (type_name or "").encode() or None
+        result = (
+            self._lib.f2e_generate_types_from_file(config_path.encode(), language.encode(), encoded_name)
+            if config_path
+            else self._lib.f2e_generate_types(language.encode(), encoded_name)
+        )
+        if not result:
+            raise ValueError(f"could not generate {language} types; check the language, type name, and config audit")
+        try:
+            return ctypes.string_at(result).decode()
+        finally:
+            self._lib.f2e_free(result)
+
     def is_help_requested(self, argv: Sequence[str] | None = None) -> bool:
         encoded_argv = json.dumps([str(value) for value in (sys.argv if argv is None else argv)]).encode()
         return bool(self._lib.f2e_is_help_requested_json_argv(encoded_argv))
