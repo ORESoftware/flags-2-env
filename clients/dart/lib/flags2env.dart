@@ -53,6 +53,23 @@ class Flags2Env {
         _parseProcess = library.lookupFunction<_ParseProcessDefaultNative, _ParseProcessDefaultDart>(
           'f2e_parse_process',
         ),
+        _isHelpJsonArgv = library.lookupFunction<_IsHelpNative, _IsHelpDart>(
+          'f2e_is_help_requested_json_argv',
+        ),
+        _helpTableForJsonArgv = library.lookupFunction<_HelpForArgvNative, _HelpForArgvDart>(
+          'f2e_help_table_for_json_argv',
+        ),
+        _helpTableForJsonArgvFromFile = library.lookupFunction<_HelpForArgvFromFileNative, _HelpForArgvFromFileDart>(
+          'f2e_help_table_for_json_argv_from_file',
+        ),
+        _coerceJson = library.lookupFunction<_CoerceNative, _CoerceDart>('f2e_coerce_json'),
+        _coerceJsonFromFile = library.lookupFunction<_CoerceFromFileNative, _CoerceFromFileDart>(
+          'f2e_coerce_json_from_file',
+        ),
+        _generateTypes = library.lookupFunction<_GenerateNative, _GenerateDart>('f2e_generate_types'),
+        _generateTypesFromFile = library.lookupFunction<_GenerateFromFileNative, _GenerateFromFileDart>(
+          'f2e_generate_types_from_file',
+        ),
         _free = library.lookupFunction<_FreeNative, _FreeDart>('f2e_free');
 
   final DynamicLibrary _library;
@@ -60,6 +77,13 @@ class Flags2Env {
   final _ParseDefaultDart _parseJsonArgv;
   final _ParseProcessDart _parseProcessFromFile;
   final _ParseProcessDefaultDart _parseProcess;
+  final _IsHelpDart _isHelpJsonArgv;
+  final _HelpForArgvDart _helpTableForJsonArgv;
+  final _HelpForArgvFromFileDart _helpTableForJsonArgvFromFile;
+  final _CoerceDart _coerceJson;
+  final _CoerceFromFileDart _coerceJsonFromFile;
+  final _GenerateDart _generateTypes;
+  final _GenerateFromFileDart _generateTypesFromFile;
   final _FreeDart _free;
 
   DynamicLibrary get nativeLibrary => _library;
