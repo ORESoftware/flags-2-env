@@ -148,7 +148,7 @@ typedef struct {
 } F2ECommandPath;
 
 /* defined alongside the parse loop; used earlier by help rendering */
-static void f2e_resolve_command_path(struct F2EConfigStruct *config, int argc, const char *const argv[], F2ECommandPath *path_out);
+static void f2e_resolve_command_path(F2EConfig *config, int argc, const char *const argv[], F2ECommandPath *path_out);
 
 typedef struct {
   F2EBuffer buffer;
