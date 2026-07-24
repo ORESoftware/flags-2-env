@@ -179,6 +179,49 @@ export function parseFromArgs(argv: readonly unknown[] = process.argv, options: 
   return parse(argv, options);
 }
 
+/**
+ * Structured parse: {flags, command, subcommands, extras, unknownOptions,
+ * errors} as separate channels (dashdash-style), so nothing is packed into —
+ * or shadowed by — env keys. `flags` is the same map parse() returns.
+ */
+export function parseStructured(
+  argv: readonly unknown[] = process.argv,
+  options: Flags2EnvOptions = {},
+): StructuredParseResult {
+  if (!Array.isArray(argv)) {
+    throw new TypeError("argv must be an array of strings");
+  }
+  const parseStructuredJson = native().parseStructuredJson;
+  if (typeof parseStructuredJson !== "function") {
+    throw new TypeError("the loaded flags2env addon does not support parseStructuredJson");
+  }
+  const argvItems = argv.map(String);
+  const argvJson = JSON.stringify(argvItems);
+  const raw = options.configPath
+    ? parseStructuredJson.call(native(), argvJson, options.configPath)
+    : parseStructuredJson.call(native(), argvJson);
+  return withHelpMetadata(JSON.parse(raw), argvItems, argvJson, options) as unknown as StructuredParseResult;
+}
+
+/** Resolves just the [commands.*] path for argv: {path: string[], label}. */
+export function resolveCommands(
+  argv: readonly unknown[] = process.argv,
+  options: Flags2EnvOptions = {},
+): ResolvedCommands {
+  if (!Array.isArray(argv)) {
+    throw new TypeError("argv must be an array of strings");
+  }
+  const resolveCommandsJson = native().resolveCommandsJson;
+  if (typeof resolveCommandsJson !== "function") {
+    throw new TypeError("the loaded flags2env addon does not support resolveCommandsJson");
+  }
+  const argvJson = JSON.stringify(argv.map(String));
+  const raw = options.configPath
+    ? resolveCommandsJson.call(native(), argvJson, options.configPath)
+    : resolveCommandsJson.call(native(), argvJson);
+  return JSON.parse(raw) as ResolvedCommands;
+}
+
 export function parseProcess(options: Flags2EnvOptions = {}): ParseResult {
   const argvItems = process.argv.map(String);
   const argvJson = JSON.stringify(argvItems);
