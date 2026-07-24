@@ -76,6 +76,37 @@ class Flags2Env:
         finally:
             self._lib.f2e_free(result)
 
+    def is_help_requested(self, argv: Sequence[str] | None = None) -> bool:
+        encoded_argv = json.dumps([str(value) for value in (sys.argv if argv is None else argv)]).encode()
+        return bool(self._lib.f2e_is_help_requested_json_argv(encoded_argv))
+
+    def help_table(
+        self,
+        command: str,
+        argv: Sequence[str] | None = None,
+        config_path: str | None = None,
+        terminal_columns: int = 0,
+    ) -> str:
+        """Renders the help table for the [commands.*] path selected by argv.
+
+        With no argv (or no matching command) this renders the top-level menu,
+        including the Commands section when subcommands are declared.
+        """
+        encoded_argv = json.dumps([str(value) for value in (sys.argv if argv is None else argv)]).encode()
+        result = (
+            self._lib.f2e_help_table_for_json_argv_from_file(
+                config_path.encode(), command.encode(), encoded_argv, terminal_columns
+            )
+            if config_path
+            else self._lib.f2e_help_table_for_json_argv(command.encode(), encoded_argv, terminal_columns)
+        )
+        if not result:
+            return ""
+        try:
+            return ctypes.string_at(result).decode()
+        finally:
+            self._lib.f2e_free(result)
+
     def apply(
         self,
         env: Mapping[str, str] | None = None,
