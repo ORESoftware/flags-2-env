@@ -567,29 +567,33 @@ esac
 
 subcommand_completion_bash="$("$CLI" completion bash gitish "$SUBCOMMANDS_DIR/.cli-flags.toml")"
 case "$subcommand_completion_bash" in
-  *'--verbose'*"cmds='add commit ci remote'"*)
+  *"'') printf '%s' 'add commit ci remote' ;;"*"'remote') printf '%s' 'add' ;;"*'complete -o default -F _flags2env_complete_gitish'*)
     ;;
   *)
-    printf 'Bash completion should offer top-level commands:\n%s\n' "$subcommand_completion_bash" >&2
+    printf 'Bash completion should be scope-aware:\n%s\n' "$subcommand_completion_bash" >&2
     exit 1
     ;;
 esac
 case "$subcommand_completion_bash" in
-  *'--fetch'*|*'--chmod'*)
-    printf 'Bash completion should not offer subcommand-scoped flags:\n%s\n' "$subcommand_completion_bash" >&2
+  *"'remote add') printf '%s' '--fetch"*)
+    ;;
+  *)
+    printf 'Bash completion should carry nested scope options:\n%s\n' "$subcommand_completion_bash" >&2
     exit 1
     ;;
 esac
 
 subcommand_completion_zsh="$("$CLI" completion zsh gitish "$SUBCOMMANDS_DIR/.cli-flags.toml")"
 case "$subcommand_completion_zsh" in
-  *'1:command:(add commit ci remote)'*)
+  *'#compdef gitish'*"'') printf '%s' 'add commit ci remote' ;;"*'compadd -- ${=cmds}'*)
     ;;
   *)
-    printf 'Zsh completion should offer top-level commands:\n%s\n' "$subcommand_completion_zsh" >&2
+    printf 'Zsh completion should be scope-aware:\n%s\n' "$subcommand_completion_zsh" >&2
     exit 1
     ;;
 esac
+
+bash "$ROOT_DIR/tests/completion/run.bash"
 
 SUBCOMMANDS_DEEP_DIR="$ROOT_DIR/tests/subcommands-deep"
 run_deep_case() {
