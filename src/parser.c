@@ -1318,6 +1318,9 @@ static int f2e_load_config(const char *config_path, F2EConfig *config) {
   }
 
   fclose(file);
+  if (config->command_count > 0 && config->command_env[0] == '\0') {
+    f2e_strlcpy(config->command_env, F2E_DEFAULT_COMMAND_ENV, sizeof(config->command_env));
+  }
   return 1;
 }
 
