@@ -134,6 +134,8 @@ Commands that declare `env` also get that key set to `"true"` when they are on t
 
 Native callers can render the scoped help directly with `f2e_help_table_for_argv[_from_file]` / `f2e_print_table_for_argv[_from_file]`, or `f2e_help_table_for_json_argv[_from_file]` from FFI clients. The Node.js client exposes this as `helpTableForArgv(command, argv, opts)`, and its `parse(...).printTable()` automatically renders the help table for the subcommand selected by the parsed argv.
 
+Generated types (`flags2env generate <language>`) describe every env key the parser may emit: command-scoped flag envs are included as optional fields (their defaults only apply when their command runs), each command's marker `env` becomes an optional boolean, and `parse.command_env` becomes an optional string. `flags2env coerce`-style APIs (`f2e_coerce_json`) accept the marker envs as booleans and the command path env as a string.
+
 For CLIs with subcommands that you do not want to model as `[commands.*]` tables, add a `[parse]` table to make parsing stricter or to surface ignored tokens:
 
 ```toml
