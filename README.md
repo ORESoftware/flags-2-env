@@ -109,7 +109,13 @@ type = "bool"
 
 Parsing walks argv left to right. Leading positionals that match no top-level command (the program name, a wrapper token) are skipped; the first positional that matches a command selects it, and each following positional may select a nested subcommand. The first positional that matches no subcommand of the current scope ends command matching — so in `docker run ubuntu ls -la`, `run` is the command and `ubuntu`/`ls` stay positionals. Matched command tokens are not recorded as positionals.
 
-Flags resolve against the active command scope first, then its ancestors, then the global `[flags.*]` set — a subcommand may reuse a short flag or alias that means something else elsewhere, and unshadowed global flags keep working after the subcommand. Flag defaults only apply to global flags and flags of the commands actually selected.
+Flags resolve against the active command scope first, then its ancestors, then the global `[flags.*]` set — a subcommand may reuse a short flag or alias that means something else elsewhere, and unshadowed global flags keep working after the subcommand. Command-scoped flags are only valid inside their command: `mycli init --pack` reports `--pack` as an unknown option when `pack` is declared under `[commands.run]`. Flag defaults only apply to global flags and flags of the commands actually selected.
+
+`[global.flags.<name>]` is an explicit spelling of the global namespace — identical to `[flags.<name>]` — for configs that want to state loudly that a flag applies inside every subcommand.
+
+`allow_unknown` may also be set per command: `[commands.run] allow_unknown = true` tolerates unrecognized options once `run` (or one of its subcommands, which inherit the setting) is active, while the rest of the CLI stays strict. A runtime `--allow-unknown`/`--no-allow-unknown` token or `FLAGS2ENV_ALLOW_UNKNOWN` env var still overrides every scope.
+
+Some CLIs front the real binary with a wrapper script that consumes the subcommand token before argv reaches flags2env (discouraged, but common). When commands are declared and argv selects none, parsing falls back to lenient global resolution: root flags behave normally, a command-scoped flag whose name is unambiguous across all scopes is applied as if it were global, and a name declared in several scopes is accepted but not applied (never reported unknown). Genuinely undeclared options are still collected. Scoped defaults stay off in this mode because the intended command is unknown.
 
 The resolved command path is returned as a space-joined string under `FLAGS2ENV_COMMAND` (rename it with `[parse] command_env = "MY_CMD"`), which makes dispatch a plain switch:
 
