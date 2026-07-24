@@ -2089,14 +2089,22 @@ static int f2e_token_sets_allow_unknown(const char *token, int *out) {
   return 0;
 }
 
-static int f2e_resolve_allow_unknown(const F2EConfig *config, int argc, const char *const argv[]) {
+/*
+ * Resolves the starting allow-unknown state. forced_out reports whether a
+ * runtime source (env var or --allow-unknown token) chose the value; a forced
+ * value applies everywhere, while a config-derived value can still be
+ * overridden per command scope by [commands.*] allow_unknown.
+ */
+static int f2e_resolve_allow_unknown(const F2EConfig *config, int argc, const char *const argv[], int *forced_out) {
   int allow_unknown = config ? config->allow_unknown : 0;
+  int forced = 0;
   int parsed = 0;
   if (f2e_runtime_bool_from_env("FLAGS2ENV_ALLOW_UNKNOWN", &parsed) ||
       f2e_runtime_bool_from_env("F2E_ALLOW_UNKNOWN", &parsed) ||
       f2e_runtime_bool_from_env("FLAGS2ENV_ALLOW_HIDDEN", &parsed) ||
       f2e_runtime_bool_from_env("F2E_ALLOW_HIDDEN", &parsed)) {
     allow_unknown = parsed;
+    forced = 1;
   }
 
   for (int i = 0; i < argc; i++) {
@@ -2109,7 +2117,11 @@ static int f2e_resolve_allow_unknown(const F2EConfig *config, int argc, const ch
     }
     if (f2e_token_sets_allow_unknown(token, &parsed)) {
       allow_unknown = parsed;
+      forced = 1;
     }
+  }
+  if (forced_out) {
+    *forced_out = forced;
   }
   return allow_unknown;
 }
