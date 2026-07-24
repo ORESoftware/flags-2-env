@@ -5193,6 +5193,7 @@ static void f2e_scan_argv(F2EConfig *config,
                           F2EJsonList *unknown_options,
                           F2EJsonList *errors,
                           int allow_unknown,
+                          int allow_unknown_forced,
                           F2ECommandPath *path_out) {
   int scope = F2E_SCOPE_ROOT;
   int matching = config->command_count > 0;
@@ -5206,6 +5207,9 @@ static void f2e_scan_argv(F2EConfig *config,
         if (next >= 0) {
           scope = next;
           matched_any = 1;
+          if (!allow_unknown_forced && config->commands[next].allow_unknown_set) {
+            allow_unknown = config->commands[next].allow_unknown;
+          }
           if (path_out && path_out->depth < F2E_MAX_COMMAND_DEPTH) {
             path_out->commands[path_out->depth++] = next;
           }
