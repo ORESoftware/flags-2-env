@@ -101,6 +101,8 @@ typedef struct {
   size_t command_count;
   char command_env[F2E_MAX_ENV];
   int too_many_commands;
+  char invalid_command_table[F2E_MAX_VALUE];
+  int has_invalid_command_table;
   int allow_separated_values;
   int stop_at_first_positional;
   char positionals_env[F2E_MAX_ENV];
@@ -1062,6 +1064,13 @@ static int f2e_table_keyword_is_flags(const char *word) {
   return f2e_streq(word, "flags") || f2e_streq(word, "flag");
 }
 
+static void f2e_record_invalid_command_table(F2EConfig *config, const char *table) {
+  if (!config->has_invalid_command_table) {
+    config->has_invalid_command_table = 1;
+    f2e_strlcpy(config->invalid_command_table, table, sizeof(config->invalid_command_table));
+  }
+}
+
 /*
  * Parses a [commands.*] table header such as:
  *   [commands.add]
@@ -1069,6 +1078,8 @@ static int f2e_table_keyword_is_flags(const char *word) {
  *   [commands.remote.commands.add.flags.fetch]
  * Nesting is arbitrary: each `commands.<name>` segment descends one level and
  * an optional trailing `flags.<name>` declares a flag scoped to that command.
+ * Keyword and name positions strictly alternate, so command names can even be
+ * the literal words "commands" or "flags" without ambiguity.
  * Returns 0 when the table is not commands-shaped; otherwise returns 1 and
  * sets *section_out (plus *flag_out or *command_out).
  */
@@ -1106,6 +1117,7 @@ static int f2e_load_commands_table(F2EConfig *config,
   while (index < segment_count) {
     if (f2e_table_keyword_is_commands(segments[index])) {
       if (index + 1 >= segment_count || segments[index + 1][0] == '\0') {
+        f2e_record_invalid_command_table(config, table);
         return 1;
       }
       int next = f2e_find_or_add_command(config, scope, segments[index + 1]);
@@ -1118,6 +1130,7 @@ static int f2e_load_commands_table(F2EConfig *config,
     }
     if (f2e_table_keyword_is_flags(segments[index])) {
       if (index + 2 != segment_count || segments[index + 1][0] == '\0') {
+        f2e_record_invalid_command_table(config, table);
         return 1;
       }
       F2EFlag *flag = f2e_add_flag(config, segments[index + 1]);
@@ -1128,6 +1141,11 @@ static int f2e_load_commands_table(F2EConfig *config,
       }
       return 1;
     }
+    /* a bare segment where a keyword belongs — usually a shorthand like
+       [commands.publish.init.flags.x]; nesting must spell out the keyword
+       ([commands.publish.commands.init.flags.x]) so command names can never
+       clash with the "commands"/"flags" keywords */
+    f2e_record_invalid_command_table(config, table);
     return 1;
   }
 
@@ -2460,6 +2478,11 @@ static void f2e_audit_bool_value_aliases(const F2EFlag *flag, F2EAudit *audit) {
 static void f2e_audit_command_semantics(const F2EConfig *config, F2EAudit *audit) {
   if (config->too_many_commands) {
     f2e_audit_add(audit, 1, "too many [commands.*] tables declared (max %d)", F2E_MAX_COMMANDS);
+  }
+  if (config->has_invalid_command_table) {
+    f2e_audit_add(audit, 1,
+                  "[%s] is not a valid commands table; nest subcommands with an explicit keyword, e.g. [commands.<name>.commands.<name>.flags.<flag>]",
+                  config->invalid_command_table);
   }
   if (config->command_count > 0) {
     if (config->command_env[0] == '\0' || !f2e_env_name_is_valid(config->command_env)) {

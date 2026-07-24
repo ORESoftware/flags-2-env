@@ -1,0 +1,15 @@
+# Invalid on purpose: sub-subcommands must spell out the `commands` keyword
+# ([commands.publish.commands.init.flags.access]); the shorthand below would
+# make command names ambiguous with the "commands"/"flags" keywords.
+[flags.verbose]
+env = "R2G_VERBOSE"
+aliases = ["verbose"]
+type = "bool"
+
+[commands.publish]
+help = "Publish the package."
+
+[commands.publish.init.flags.access]
+env = "R2G_PUBLISH_INIT_ACCESS"
+aliases = ["access"]
+type = "string"

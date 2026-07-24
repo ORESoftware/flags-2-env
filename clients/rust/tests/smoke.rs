@@ -43,6 +43,61 @@ fn parse_finds_parent_config() {
     assert_eq!(combined.get("COLOR"), Some(&"true".to_string()));
 }
 
+#[test]
+fn parse_structured_returns_separate_channels() {
+    let library = compile_test_library();
+    let config_root = create_subcommand_config();
+    let config_path = config_root.join(".cli-flags.toml");
+    let config = config_path.to_str().unwrap();
+
+    let sdk = unsafe { Flags2Env::load(Some(library.to_str().unwrap())).unwrap() };
+
+    let argv: Vec<String> = ["gitish", "remote", "add", "-f", "abc", "efg"]
+        .iter()
+        .map(|value| value.to_string())
+        .collect();
+    let structured = sdk.parse_structured(&argv, Some(config)).unwrap();
+    assert_eq!(structured.command, "remote add");
+    assert_eq!(structured.subcommands, vec!["remote".to_string(), "add".to_string()]);
+    assert_eq!(structured.extras, vec!["abc".to_string(), "efg".to_string()]);
+    assert_eq!(structured.flags.get("GITISH_REMOTE_ADD_FETCH"), Some(&"true".to_string()));
+    assert!(structured.unknown_options.is_empty());
+    assert!(structured.errors.is_empty());
+
+    let dashed: Vec<String> = ["gitish", "remote", "add", "--", "xyz", "-q"]
+        .iter()
+        .map(|value| value.to_string())
+        .collect();
+    let dashed_result = sdk.parse_structured(&dashed, Some(config)).unwrap();
+    assert_eq!(dashed_result.extras, vec!["xyz".to_string(), "-q".to_string()]);
+
+    let resolved = sdk.resolve_commands(&argv, Some(config)).unwrap();
+    assert_eq!(resolved.path, vec!["remote".to_string(), "add".to_string()]);
+    assert_eq!(resolved.label, "remote add");
+}
+
+fn create_subcommand_config() -> PathBuf {
+    let root = temp_dir("subcommands");
+    fs::write(root.join(".cli-flags.toml"), r#"[flags.verbose]
+env = "GITISH_VERBOSE"
+aliases = ["verbose"]
+type = "bool"
+
+[commands.remote]
+help = "Manage remotes."
+
+[commands.remote.commands.add]
+help = "Add a remote."
+
+[commands.remote.commands.add.flags.fetch]
+env = "GITISH_REMOTE_ADD_FETCH"
+aliases = ["fetch"]
+short = "f"
+type = "bool"
+"#).unwrap();
+    root
+}
+
 fn compile_test_library() -> PathBuf {
     let out_dir = temp_dir("native");
     let output = out_dir.join(default_library_name());

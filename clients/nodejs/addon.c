@@ -278,6 +278,58 @@ static napi_value f2e_node_coerce_json(napi_env env, napi_callback_info info) {
   return f2e_node_string_result(env, result, "failed to coerce values");
 }
 
+static napi_value f2e_node_parse_structured_json(napi_env env, napi_callback_info info) {
+  size_t argc = 2;
+  napi_value args[2];
+  napi_get_cb_info(env, info, &argc, args, NULL, NULL);
+
+  if (argc < 1) {
+    return f2e_node_throw(env, "parseStructuredJson(argvJson, configPath?) requires argvJson");
+  }
+
+  char *argv_json = NULL;
+  char *config_path = NULL;
+  if (!f2e_node_read_string(env, args[0], &argv_json)) {
+    return f2e_node_throw(env, "argvJson must be a string");
+  }
+  if (argc >= 2 && !f2e_node_read_optional_string(env, args[1], &config_path)) {
+    free(argv_json);
+    return f2e_node_throw(env, "configPath must be a string");
+  }
+
+  char *result = config_path ? f2e_parse_structured_json_argv_from_file(config_path, argv_json)
+                             : f2e_parse_structured_json_argv(argv_json);
+  free(argv_json);
+  free(config_path);
+  return f2e_node_string_result(env, result, "failed to parse argv");
+}
+
+static napi_value f2e_node_resolve_commands_json(napi_env env, napi_callback_info info) {
+  size_t argc = 2;
+  napi_value args[2];
+  napi_get_cb_info(env, info, &argc, args, NULL, NULL);
+
+  if (argc < 1) {
+    return f2e_node_throw(env, "resolveCommandsJson(argvJson, configPath?) requires argvJson");
+  }
+
+  char *argv_json = NULL;
+  char *config_path = NULL;
+  if (!f2e_node_read_string(env, args[0], &argv_json)) {
+    return f2e_node_throw(env, "argvJson must be a string");
+  }
+  if (argc >= 2 && !f2e_node_read_optional_string(env, args[1], &config_path)) {
+    free(argv_json);
+    return f2e_node_throw(env, "configPath must be a string");
+  }
+
+  char *result = config_path ? f2e_resolve_commands_json_argv_from_file(config_path, argv_json)
+                             : f2e_resolve_commands_json_argv(argv_json);
+  free(argv_json);
+  free(config_path);
+  return f2e_node_string_result(env, result, "failed to resolve commands");
+}
+
 static napi_value f2e_node_is_help_json(napi_env env, napi_callback_info info) {
   size_t argc = 1;
   napi_value args[1];
@@ -435,6 +487,14 @@ static napi_value f2e_node_init(napi_env env, napi_value exports) {
   napi_value is_help_json;
   napi_create_function(env, "isHelpJson", NAPI_AUTO_LENGTH, f2e_node_is_help_json, NULL, &is_help_json);
   napi_set_named_property(env, exports, "isHelpJson", is_help_json);
+
+  napi_value resolve_commands_json;
+  napi_create_function(env, "resolveCommandsJson", NAPI_AUTO_LENGTH, f2e_node_resolve_commands_json, NULL, &resolve_commands_json);
+  napi_set_named_property(env, exports, "resolveCommandsJson", resolve_commands_json);
+
+  napi_value parse_structured_json;
+  napi_create_function(env, "parseStructuredJson", NAPI_AUTO_LENGTH, f2e_node_parse_structured_json, NULL, &parse_structured_json);
+  napi_set_named_property(env, exports, "parseStructuredJson", parse_structured_json);
 
   napi_value help_table;
   napi_create_function(env, "helpTable", NAPI_AUTO_LENGTH, f2e_node_help_table, NULL, &help_table);
