@@ -5321,14 +5321,17 @@ static void f2e_scan_argv(F2EConfig *config,
                           int lenient,
                           F2ECommandPath *path_out) {
   int scope = lenient ? F2E_SCOPE_LENIENT : F2E_SCOPE_ROOT;
-  int matching = !lenient && config->command_count > 0;
+  /* lenient mode keeps the command-mode positional handling (leading tokens
+     are skipped, never triggering stop_at_first_positional) but resolves no
+     commands, mirroring the dry-run pass that found none */
+  int matching = config->command_count > 0;
   int matched_any = 0;
 
   for (int i = 0; i < argc; i++) {
     const char *token = argv[i];
     if (!token || token[0] != '-' || token[1] == '\0') {
       if (matching && token && token[0] != '\0') {
-        int next = f2e_find_command_by_token(config, scope, token);
+        int next = lenient ? -1 : f2e_find_command_by_token(config, scope, token);
         if (next >= 0) {
           scope = next;
           matched_any = 1;
