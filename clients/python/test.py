@@ -45,3 +45,23 @@ assert "Commands:" in top_help, top_help
 assert "remote add" in top_help, top_help
 
 print("python client tests passed")
+
+coerced = sdk.coerce(
+    {"GITISH_COMMAND": "remote add", "GITISH_CMD_ADD": "true", "GITISH_REMOTE_ADD_FETCH": "true"},
+    subcommands_config,
+)
+assert coerced["GITISH_COMMAND"] == "remote add", coerced
+assert coerced["GITISH_CMD_ADD"] is True, coerced
+assert coerced["GITISH_REMOTE_ADD_FETCH"] is True, coerced
+
+try:
+    sdk.coerce({"GITISH_COMMAND": 42}, subcommands_config)
+    raise AssertionError("expected CoercionError")
+except Exception as error:
+    assert "command_env" in str(error), error
+
+generated = sdk.generate_types("typescript", "GitishConfig", subcommands_config)
+assert "GITISH_COMMAND?: string;" in generated, generated
+assert "GITISH_CMD_ADD?: boolean;" in generated, generated
+
+print("python client extended tests passed")

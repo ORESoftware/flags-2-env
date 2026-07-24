@@ -23,7 +23,20 @@ module Flags2Env
     extern "int f2e_is_help_requested_json_argv(char*)"
     extern "char* f2e_help_table_for_json_argv(char*, char*, int)"
     extern "char* f2e_help_table_for_json_argv_from_file(char*, char*, char*, int)"
+    extern "char* f2e_coerce_json(char*)"
+    extern "char* f2e_coerce_json_from_file(char*, char*)"
+    extern "char* f2e_generate_types(char*, char*)"
+    extern "char* f2e_generate_types_from_file(char*, char*, char*)"
     extern "void f2e_free(char*)"
+  end
+
+  class CoercionError < TypeError
+    attr_reader :errors
+
+    def initialize(errors)
+      @errors = errors
+      super("flags2env could not coerce config: #{errors.join('; ')}")
+    end
   end
 
   module_function
