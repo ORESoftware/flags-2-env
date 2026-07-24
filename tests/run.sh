@@ -509,7 +509,7 @@ esac
 
 generated_subcommands_schema="$("$CLI" generate json-schema "$SUBCOMMANDS_DIR/.cli-flags.toml" --name GitishConfig)"
 case "$generated_subcommands_schema" in
-  *'"GITISH_COMMAND"'*'"GITISH_CMD_REMOTE_ADD"'*)
+  *'"GITISH_CMD_REMOTE_ADD"'*'"GITISH_COMMAND"'*)
     ;;
   *)
     printf 'Generated JSON Schema should include command envs:\n%s\n' "$generated_subcommands_schema" >&2
