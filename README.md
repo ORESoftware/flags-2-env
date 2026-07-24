@@ -68,7 +68,65 @@ type = "integer"
 help = "Retry count."
 ```
 
-For CLIs with subcommands, add a `[parse]` table to make parsing stricter or to surface ignored tokens:
+## Subcommands
+
+CLIs like `git commit -am ...` or `docker run ...` scope their flags to a command: `-A` can mean one thing for `git add -A` and something else entirely for `git log -A`. Declare commands with `[commands.<name>]` tables, and scope flags to a command with `[commands.<name>.flags.<flag>]`. Nest arbitrarily deep (`gh auth login`-style) by chaining `commands` segments:
+
+```toml
+[commands.add]
+help = "Add file contents to the index."
+env = "GIT_CMD_ADD"            # optional: set to "true" when this command runs
+
+[commands.add.flags.all]
+env = "GIT_ADD_ALL"
+aliases = ["all"]
+short = "A"
+type = "bool"
+help = "Stage all tracked and untracked files."
+
+[commands.commit]
+help = "Record changes to the repository."
+aliases = ["ci"]               # optional command aliases
+
+[commands.commit.flags.message]
+env = "GIT_COMMIT_MESSAGE"
+aliases = ["message"]
+short = "m"
+type = "string"
+
+# second-level subcommand: `git remote add ...`
+[commands.remote.commands.add]
+help = "Add a remote."
+
+[commands.remote.commands.add.flags.fetch]
+env = "GIT_REMOTE_ADD_FETCH"
+aliases = ["fetch"]
+short = "f"
+type = "bool"
+```
+
+`command`, `subcommands`, and `subcommand` are accepted spellings of the `commands` keyword, and `[commands.<name>]` property lines support `help`/`description`, `aliases`, and `env`.
+
+Parsing walks argv left to right. Leading positionals that match no top-level command (the program name, a wrapper token) are skipped; the first positional that matches a command selects it, and each following positional may select a nested subcommand. The first positional that matches no subcommand of the current scope ends command matching — so in `docker run ubuntu ls -la`, `run` is the command and `ubuntu`/`ls` stay positionals. Matched command tokens are not recorded as positionals.
+
+Flags resolve against the active command scope first, then its ancestors, then the global `[flags.*]` set — a subcommand may reuse a short flag or alias that means something else elsewhere, and unshadowed global flags keep working after the subcommand. Flag defaults only apply to global flags and flags of the commands actually selected.
+
+The resolved command path is returned as a space-joined string under `FLAGS2ENV_COMMAND` (rename it with `[parse] command_env = "MY_CMD"`), which makes dispatch a plain switch:
+
+```sh
+eval "$(flags2env export -- "$0" "$@")"
+case "$FLAGS2ENV_COMMAND" in
+  "add")        do_add ;;
+  "remote add") do_remote_add ;;
+  "")           usage ;;
+esac
+```
+
+Commands that declare `env` also get that key set to `"true"` when they are on the selected path (`GIT_CMD_ADD=true` above), which is convenient in languages where string switches are awkward.
+
+`--help` is subcommand-aware: the top-level menu renders a bordered `Commands:` table (nested commands shown as their full path, e.g. `remote add`) beneath the global options, and `mycli remote add --help` renders that command's description, its own flags, and the inherited global flags with shadowed short flags hidden. Generated shell completions offer top-level command names alongside global options, and `flags2env audit` validates command tables: duplicate aliases or shorts are only errors within one scope, sibling commands must not share names or aliases, and command envs must not collide with flag envs.
+
+For CLIs with subcommands that you do not want to model as `[commands.*]` tables, add a `[parse]` table to make parsing stricter or to surface ignored tokens:
 
 ```toml
 [parse]
