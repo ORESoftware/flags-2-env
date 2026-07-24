@@ -38,9 +38,23 @@ def _load_library(library_path: str | None = None) -> ctypes.CDLL:
         ctypes.c_int,
     ]
     lib.f2e_help_table_for_json_argv_from_file.restype = ctypes.c_void_p
+    lib.f2e_coerce_json.argtypes = [ctypes.c_char_p]
+    lib.f2e_coerce_json.restype = ctypes.c_void_p
+    lib.f2e_coerce_json_from_file.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+    lib.f2e_coerce_json_from_file.restype = ctypes.c_void_p
+    lib.f2e_generate_types.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+    lib.f2e_generate_types.restype = ctypes.c_void_p
+    lib.f2e_generate_types_from_file.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p]
+    lib.f2e_generate_types_from_file.restype = ctypes.c_void_p
     lib.f2e_free.argtypes = [ctypes.c_void_p]
     lib.f2e_free.restype = None
     return lib
+
+
+class CoercionError(TypeError):
+    def __init__(self, errors: list[str]) -> None:
+        super().__init__(f"flags2env could not coerce config: {'; '.join(errors)}")
+        self.errors = list(errors)
 
 
 class Flags2Env:
