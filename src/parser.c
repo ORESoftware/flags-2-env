@@ -4958,7 +4958,7 @@ static char *f2e_help_table_scoped(const F2EConfig *config, const char *command_
   }
 
   if (has_children) {
-    size_t name_width = f2e_help_commands_name_width(config, scope, 0);
+    size_t name_width = f2e_help_commands_name_width(config, scope, scope, 0);
     name_width = f2e_size_max(name_width, strlen("Command"));
     size_t max_name_width = table_width > 7 + 18 ? table_width - 7 - 18 : name_width;
     name_width = f2e_size_min(name_width, f2e_size_min(max_name_width, 40));
@@ -4968,7 +4968,7 @@ static char *f2e_help_table_scoped(const F2EConfig *config, const char *command_
         !f2e_help_append_border(&table, command_widths, 2) ||
         !f2e_help_append_row(&table, command_header, command_widths, 2) ||
         !f2e_help_append_border(&table, command_widths, 2) ||
-        !f2e_help_append_command_rows(config, scope, 0, &table, command_widths) ||
+        !f2e_help_append_command_rows(config, scope, scope, 0, &table, command_widths) ||
         !f2e_help_append_border(&table, command_widths, 2)) {
       free(table.data);
       return NULL;
