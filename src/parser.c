@@ -2479,6 +2479,11 @@ static void f2e_audit_command_semantics(const F2EConfig *config, F2EAudit *audit
   if (config->too_many_commands) {
     f2e_audit_add(audit, 1, "too many [commands.*] tables declared (max %d)", F2E_MAX_COMMANDS);
   }
+  if (config->has_invalid_command_table) {
+    f2e_audit_add(audit, 1,
+                  "[%s] is not a valid commands table; nest subcommands with an explicit keyword, e.g. [commands.<name>.commands.<name>.flags.<flag>]",
+                  config->invalid_command_table);
+  }
   if (config->command_count > 0) {
     if (config->command_env[0] == '\0' || !f2e_env_name_is_valid(config->command_env)) {
       f2e_audit_add(audit, 1, "parse.command_env \"%s\" is not a valid env var name", config->command_env);
