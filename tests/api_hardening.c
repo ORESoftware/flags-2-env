@@ -397,6 +397,29 @@ int main(void) {
   expect_contains("null argv help falls back to top-level table", null_argv_help, "Commands:");
   f2e_free(null_argv_help);
 
+  char *structured = f2e_parse_structured_json_argv_from_file(SUBCOMMANDS_CONFIG,
+                                                              "[\"gitish\",\"remote\",\"add\",\"-f\",\"abc\"]");
+  expect_contains("structured parse has command channel", structured, "\"command\":\"remote add\"");
+  expect_contains("structured parse has subcommands channel", structured, "\"subcommands\":[\"remote\",\"add\"]");
+  expect_contains("structured parse has extras channel", structured, "\"extras\":[\"abc\"]");
+  expect_contains("structured parse keeps flags map", structured, "\"GITISH_REMOTE_ADD_FETCH\":\"true\"");
+  f2e_free(structured);
+
+  char *structured_missing = f2e_parse_structured_from_file(NULL, 0, NULL);
+  if (structured_missing) {
+    fprintf(stderr, "structured parse with missing config should return NULL\n");
+    f2e_free(structured_missing);
+    exit(1);
+  }
+
+  char *resolved = f2e_resolve_commands_json_argv_from_file(SUBCOMMANDS_CONFIG, "[\"gitish\",\"remote\",\"add\"]");
+  expect_contains("resolve commands returns path", resolved, "{\"path\":[\"remote\",\"add\"],\"label\":\"remote add\"}");
+  f2e_free(resolved);
+
+  char *resolved_none = f2e_resolve_commands_json_argv_from_file(SUBCOMMANDS_CONFIG, "[\"gitish\",\"--verbose\"]");
+  expect_contains("resolve commands empty path", resolved_none, "{\"path\":[],\"label\":\"\"}");
+  f2e_free(resolved_none);
+
   char *json_argv_help = f2e_help_table_for_json_argv_from_file(SUBCOMMANDS_CONFIG,
                                                                 "gitish",
                                                                 "[\"gitish\",\"remote\",\"add\",\"--help\"]",
