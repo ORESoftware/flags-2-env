@@ -3692,7 +3692,126 @@ static int f2e_completion_zsh_option_spec(F2EBuffer *script, const char *option,
   return ok;
 }
 
+/*
+ * Scope-aware zsh completion for configs with [commands.*]: shares the same
+ * generated scope-lookup helpers as the bash script (plain POSIX case
+ * statements) and offers scope options, child commands, and bool values.
+ */
+static char *f2e_completion_script_zsh_commands(const F2EConfig *config, const char *command_name) {
+  F2EBuffer bool_values;
+  memset(&bool_values, 0, sizeof(bool_values));
+  if (!f2e_buffer_init(&bool_values)) {
+    return NULL;
+  }
+  for (size_t i = 0; i < config->flag_count; i++) {
+    const F2EFlag *flag = &config->flags[i];
+    if (flag->env[0] != '\0' && flag->type == F2E_TYPE_BOOL &&
+        !f2e_completion_add_bool_values(&bool_values, flag)) {
+      free(bool_values.data);
+      return NULL;
+    }
+  }
+
+  char command[F2E_MAX_NAME];
+  if (!f2e_completion_command_name(command_name, command, sizeof(command))) {
+    free(bool_values.data);
+    return NULL;
+  }
+  char function_name[F2E_MAX_NAME * 2];
+  f2e_completion_function_name(command, function_name, sizeof(function_name));
+
+  F2EBuffer script;
+  if (!f2e_buffer_init(&script)) {
+    free(bool_values.data);
+    return NULL;
+  }
+
+  int ok = f2e_buffer_append(&script, "#compdef ") &&
+           f2e_buffer_append(&script, command) &&
+           f2e_buffer_append(&script, "\n# flags2env zsh completion (subcommand-aware)\n") &&
+           f2e_completion_emit_scope_helpers(config, &script, function_name) &&
+           f2e_buffer_append(&script, function_name) &&
+           f2e_buffer_append(&script, "() {\n"
+                                      "  local cur prev opt opts value_opts bool_value_opts bool_values cmds scope child w i matched stopped\n"
+                                      "  cur=\"${words[CURRENT]}\"\n"
+                                      "  prev=\"${words[CURRENT-1]}\"\n"
+                                      "  scope=''\n"
+                                      "  matched=0\n"
+                                      "  stopped=0\n"
+                                      "  for ((i=2; i<CURRENT; i++)); do\n"
+                                      "    w=\"${words[i]}\"\n"
+                                      "    if [ \"$w\" = \"--\" ]; then\n"
+                                      "      _files\n"
+                                      "      return\n"
+                                      "    fi\n"
+                                      "    case \"$w\" in\n"
+                                      "      -*) continue ;;\n"
+                                      "    esac\n"
+                                      "    if [ \"$stopped\" = 1 ]; then\n"
+                                      "      continue\n"
+                                      "    fi\n"
+                                      "    child=\"$(") &&
+           f2e_buffer_append(&script, function_name) &&
+           f2e_buffer_append(&script, "_child \"$scope\" \"$w\")\"\n"
+                                      "    if [ -n \"$child\" ]; then\n"
+                                      "      scope=\"$child\"\n"
+                                      "      matched=1\n"
+                                      "    elif [ \"$matched\" = 1 ]; then\n"
+                                      "      stopped=1\n"
+                                      "    fi\n"
+                                      "  done\n"
+                                      "  opts=\"$(") &&
+           f2e_buffer_append(&script, function_name) &&
+           f2e_buffer_append(&script, "_opts \"$scope\")\"\n  value_opts=\"$(") &&
+           f2e_buffer_append(&script, function_name) &&
+           f2e_buffer_append(&script, "_value_opts \"$scope\")\"\n  bool_value_opts=\"$(") &&
+           f2e_buffer_append(&script, function_name) &&
+           f2e_buffer_append(&script, "_bool_value_opts \"$scope\")\"\n  bool_values=") &&
+           f2e_buffer_append_shell_single_quoted(&script, bool_values.data) &&
+           f2e_buffer_append(&script, "\n  cmds=''\n"
+                                      "  if [ \"$stopped\" = 0 ]; then\n"
+                                      "    cmds=\"$(") &&
+           f2e_buffer_append(&script, function_name) &&
+           f2e_buffer_append(&script, "_cmds \"$scope\")\"\n"
+                                      "  fi\n"
+                                      "  for opt in ${=bool_value_opts}; do\n"
+                                      "    if [ \"$prev\" = \"$opt\" ]; then\n"
+                                      "      compadd -- ${=bool_values}\n"
+                                      "      return\n"
+                                      "    fi\n"
+                                      "  done\n"
+                                      "  for opt in ${=value_opts}; do\n"
+                                      "    if [ \"$prev\" = \"$opt\" ]; then\n"
+                                      "      _files\n"
+                                      "      return\n"
+                                      "    fi\n"
+                                      "  done\n"
+                                      "  case \"$cur\" in\n"
+                                      "    -*) compadd -- ${=opts} ;;\n"
+                                      "    *)\n"
+                                      "      if [ -n \"$cmds\" ]; then\n"
+                                      "        compadd -- ${=cmds}\n"
+                                      "      else\n"
+                                      "        _files\n"
+                                      "      fi\n"
+                                      "      ;;\n"
+                                      "  esac\n"
+                                      "}\n") &&
+           f2e_buffer_append(&script, function_name) &&
+           f2e_buffer_append(&script, " \"$@\"\n");
+
+  free(bool_values.data);
+  if (!ok) {
+    free(script.data);
+    return NULL;
+  }
+  return script.data;
+}
+
 static char *f2e_completion_script_zsh(const F2EConfig *config, const char *command_name) {
+  if (config->command_count > 0) {
+    return f2e_completion_script_zsh_commands(config, command_name);
+  }
   F2EBuffer script;
   if (!f2e_buffer_init(&script)) {
     return NULL;
