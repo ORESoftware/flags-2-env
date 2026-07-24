@@ -4829,8 +4829,8 @@ static char *f2e_help_table_scoped(const F2EConfig *config, const char *command_
     }
   }
 
-  for (size_t i = 0; i < config->flag_count; i++) {
-    const F2EFlag *flag = &config->flags[i];
+  for (size_t k = 0; k < scope_flag_count; k++) {
+    const F2EFlag *flag = &config->flags[scope_flags[k]];
     char *names = f2e_help_flag_names(flag);
     if (!names) {
       free(table.data);
