@@ -3108,24 +3108,31 @@ static char *f2e_completion_script_bash(const F2EConfig *config, const char *com
   F2EBuffer value_options;
   F2EBuffer bool_value_options;
   F2EBuffer bool_values;
+  F2EBuffer command_words;
   memset(&options, 0, sizeof(options));
   memset(&value_options, 0, sizeof(value_options));
   memset(&bool_value_options, 0, sizeof(bool_value_options));
   memset(&bool_values, 0, sizeof(bool_values));
-  if (!f2e_completion_collect_bash_words(config, &options, &value_options, &bool_value_options, &bool_values)) {
+  memset(&command_words, 0, sizeof(command_words));
+  if (!f2e_completion_collect_bash_words(config, &options, &value_options, &bool_value_options, &bool_values) ||
+      !f2e_buffer_init(&command_words) ||
+      !f2e_completion_collect_commands(config, &command_words)) {
     f2e_completion_free_words(&options, &value_options, &bool_value_options, &bool_values);
+    free(command_words.data);
     return NULL;
   }
 
   F2EBuffer script;
   if (!f2e_buffer_init(&script)) {
     f2e_completion_free_words(&options, &value_options, &bool_value_options, &bool_values);
+    free(command_words.data);
     return NULL;
   }
 
   char command[F2E_MAX_NAME];
   if (!f2e_completion_command_name(command_name, command, sizeof(command))) {
     f2e_completion_free_words(&options, &value_options, &bool_value_options, &bool_values);
+    free(command_words.data);
     free(script.data);
     return NULL;
   }
@@ -3135,7 +3142,7 @@ static char *f2e_completion_script_bash(const F2EConfig *config, const char *com
   if (!f2e_buffer_append(&script, "# flags2env bash completion\n") ||
       !f2e_buffer_append(&script, function_name) ||
       !f2e_buffer_append(&script, "() {\n"
-                                  "  local cur prev opt opts value_opts bool_value_opts bool_values\n"
+                                  "  local cur prev opt opts value_opts bool_value_opts bool_values cmds\n"
                                   "  COMPREPLY=()\n"
                                   "  cur=\"${COMP_WORDS[COMP_CWORD]}\"\n"
                                   "  prev=\"${COMP_WORDS[COMP_CWORD-1]}\"\n"
@@ -3147,6 +3154,8 @@ static char *f2e_completion_script_bash(const F2EConfig *config, const char *com
       !f2e_buffer_append_shell_single_quoted(&script, bool_value_options.data) ||
       !f2e_buffer_append(&script, "\n  bool_values=") ||
       !f2e_buffer_append_shell_single_quoted(&script, bool_values.data) ||
+      !f2e_buffer_append(&script, "\n  cmds=") ||
+      !f2e_buffer_append_shell_single_quoted(&script, command_words.data) ||
       !f2e_buffer_append(&script, "\n"
                                   "  for opt in $bool_value_opts; do\n"
                                   "    if [ \"$prev\" = \"$opt\" ]; then\n"
@@ -3161,6 +3170,11 @@ static char *f2e_completion_script_bash(const F2EConfig *config, const char *com
                                   "  done\n"
                                   "  case \"$cur\" in\n"
                                   "    -*) COMPREPLY=( $(compgen -W \"$opts\" -- \"$cur\") ) ;;\n"
+                                  "    *)\n"
+                                  "      if [ -n \"$cmds\" ]; then\n"
+                                  "        COMPREPLY=( $(compgen -W \"$cmds\" -- \"$cur\") )\n"
+                                  "      fi\n"
+                                  "      ;;\n"
                                   "  esac\n"
                                   "  return 0\n"
                                   "}\n"
@@ -3171,10 +3185,12 @@ static char *f2e_completion_script_bash(const F2EConfig *config, const char *com
       !f2e_buffer_append_char(&script, '\n')) {
     free(script.data);
     f2e_completion_free_words(&options, &value_options, &bool_value_options, &bool_values);
+    free(command_words.data);
     return NULL;
   }
 
   f2e_completion_free_words(&options, &value_options, &bool_value_options, &bool_values);
+  free(command_words.data);
   return script.data;
 }
 
