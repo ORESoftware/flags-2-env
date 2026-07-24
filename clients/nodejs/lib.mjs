@@ -191,6 +191,8 @@ export function coerce(values = process.env, options = {}) {
 export default {
   parse,
   parseFromArgs,
+  parseStructured,
+  resolveCommands,
   parseProcess,
   apply,
   applyProcess,
