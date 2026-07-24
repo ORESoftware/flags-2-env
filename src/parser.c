@@ -2142,9 +2142,9 @@ static void f2e_apply_long_arg(F2EConfig *config, int scope, F2EPair *pairs, siz
     has_inline_value = 1;
   }
 
-  F2EFlag *flag = f2e_find_flag_by_alias(config, name);
+  F2EFlag *flag = f2e_find_flag_by_alias(config, scope, name);
   if (!flag && strncmp(name, "no-", 3) == 0) {
-    flag = f2e_find_flag_by_alias(config, name + 3);
+    flag = f2e_find_flag_by_alias(config, scope, name + 3);
     if (flag && flag->type == F2E_TYPE_BOOL) {
       negated = 1;
     } else {
