@@ -5318,9 +5318,10 @@ static void f2e_scan_argv(F2EConfig *config,
                           F2EJsonList *errors,
                           int allow_unknown,
                           int allow_unknown_forced,
+                          int lenient,
                           F2ECommandPath *path_out) {
-  int scope = F2E_SCOPE_ROOT;
-  int matching = config->command_count > 0;
+  int scope = lenient ? F2E_SCOPE_LENIENT : F2E_SCOPE_ROOT;
+  int matching = !lenient && config->command_count > 0;
   int matched_any = 0;
 
   for (int i = 0; i < argc; i++) {
