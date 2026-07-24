@@ -1275,6 +1275,15 @@ static int f2e_load_config(const char *config_path, F2EConfig *config) {
         if (f2e_parse_bare_value(value, parsed, sizeof(parsed))) {
           f2e_strlcpy(command->env, parsed, sizeof(command->env));
         }
+      } else if (f2e_streq(key, "allow_unknown") ||
+                 f2e_streq(key, "allow_hidden") ||
+                 f2e_streq(key, "allow_unrecognized") ||
+                 f2e_streq(key, "allow_unknown_options")) {
+        int parsed = 0;
+        if (f2e_parse_config_bool(value, &parsed)) {
+          command->allow_unknown = parsed;
+          command->allow_unknown_set = 1;
+        }
       }
       continue;
     }
