@@ -2181,13 +2181,13 @@ static void f2e_apply_long_arg(F2EConfig *config, int scope, F2EPair *pairs, siz
   }
 }
 
-static void f2e_apply_short_arg(F2EConfig *config, F2EPair *pairs, size_t pair_count, const char *token, int *index, int argc, const char *const argv[], F2EJsonList *errors) {
+static void f2e_apply_short_arg(F2EConfig *config, int scope, F2EPair *pairs, size_t pair_count, const char *token, int *index, int argc, const char *const argv[], F2EJsonList *errors) {
   if (token[1] == '\0') {
     return;
   }
 
   char short_name = token[1];
-  F2EFlag *first = f2e_find_flag_by_short(config, short_name);
+  F2EFlag *first = f2e_find_flag_by_short(config, scope, short_name);
   if (!first || first->env[0] == '\0') {
     return;
   }
