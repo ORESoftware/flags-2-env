@@ -47,6 +47,28 @@ module Flags2Env
     Native.f2e_free(result) if result && !result.null?
   end
 
+  def help_requested?(argv = ARGV)
+    argv_json = JSON.generate(argv.map(&:to_s))
+    Native.f2e_is_help_requested_json_argv(argv_json) != 0
+  end
+
+  # Renders the help table for the [commands.*] path selected by argv; with no
+  # matching command this renders the top-level menu including the Commands
+  # section when subcommands are declared.
+  def help_table(command, argv = ARGV, config_path: nil, terminal_columns: 0)
+    argv_json = JSON.generate(argv.map(&:to_s))
+    result = if config_path
+               Native.f2e_help_table_for_json_argv_from_file(config_path, command.to_s, argv_json, terminal_columns)
+             else
+               Native.f2e_help_table_for_json_argv(command.to_s, argv_json, terminal_columns)
+             end
+    return "" if result.null?
+
+    result.to_s
+  ensure
+    Native.f2e_free(result) if result && !result.null?
+  end
+
   def apply(env = ENV.to_h, argv = ARGV, config_path: nil)
     env.merge(parse(argv, config_path: config_path))
   end
