@@ -1,0 +1,30 @@
+# Commands literally named "commands" and "flags": the table grammar strictly
+# alternates keyword and name positions, so these names never clash with the
+# keywords themselves.
+[parse]
+command_env = "NAMES_COMMAND"
+
+[flags.verbose]
+env = "NAMES_VERBOSE"
+aliases = ["verbose"]
+short = "v"
+type = "bool"
+
+[commands.commands]
+help = "A command literally named commands."
+
+[commands.commands.flags.long]
+env = "NAMES_COMMANDS_LONG"
+aliases = ["long"]
+type = "bool"
+
+[commands.flags]
+help = "A command literally named flags."
+
+[commands.flags.commands.dump]
+help = "A subcommand of the command named flags."
+
+[commands.flags.commands.dump.flags.path]
+env = "NAMES_FLAGS_DUMP_PATH"
+aliases = ["path"]
+type = "string"
