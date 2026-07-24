@@ -4978,6 +4978,69 @@ char *f2e_help_table(const char *command_name, int terminal_columns) {
   return table;
 }
 
+static int f2e_help_scope_from_argv(F2EConfig *config, int argc, const char *const argv[]) {
+  if (argc < 0 || !argv || config->command_count == 0) {
+    return F2E_SCOPE_ROOT;
+  }
+  F2ECommandPath path;
+  memset(&path, 0, sizeof(path));
+  f2e_resolve_command_path(config, argc, argv, &path);
+  return path.depth > 0 ? path.commands[path.depth - 1] : F2E_SCOPE_ROOT;
+}
+
+char *f2e_help_table_for_argv_from_file(const char *config_path,
+                                        const char *command_name,
+                                        int argc,
+                                        const char *const argv[],
+                                        int terminal_columns) {
+  F2EConfig *config = (F2EConfig *)malloc(sizeof(F2EConfig));
+  if (!config) {
+    return NULL;
+  }
+  if (!config_path || !f2e_load_config(config_path, config)) {
+    free(config);
+    return NULL;
+  }
+  int scope = f2e_help_scope_from_argv(config, argc, argv);
+  char *table = f2e_help_table_scoped(config, command_name, terminal_columns, scope);
+  free(config);
+  return table;
+}
+
+char *f2e_help_table_for_argv(const char *command_name, int argc, const char *const argv[], int terminal_columns) {
+  char *path = f2e_default_config_path();
+  if (!path) {
+    return NULL;
+  }
+  char *table = f2e_help_table_for_argv_from_file(path, command_name, argc, argv, terminal_columns);
+  free(path);
+  return table;
+}
+
+int f2e_print_table_for_argv_from_file(const char *config_path,
+                                       const char *command_name,
+                                       int argc,
+                                       const char *const argv[],
+                                       int terminal_columns) {
+  char *table = f2e_help_table_for_argv_from_file(config_path, command_name, argc, argv, terminal_columns);
+  if (!table) {
+    return 1;
+  }
+  int ok = f2e_print_stream_locked(stdout, table);
+  f2e_free(table);
+  return ok ? 0 : 1;
+}
+
+int f2e_print_table_for_argv(const char *command_name, int argc, const char *const argv[], int terminal_columns) {
+  char *table = f2e_help_table_for_argv(command_name, argc, argv, terminal_columns);
+  if (!table) {
+    return 1;
+  }
+  int ok = f2e_print_stream_locked(stdout, table);
+  f2e_free(table);
+  return ok ? 0 : 1;
+}
+
 int f2e_print_table_from_file(const char *config_path, const char *command_name, int terminal_columns) {
   char *table = f2e_help_table_from_file(config_path, command_name, terminal_columns);
   if (!table) {
