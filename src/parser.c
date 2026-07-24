@@ -138,8 +138,14 @@ typedef enum {
   F2E_SECTION_PARSE = 1,
   F2E_SECTION_FLAG = 2,
   F2E_SECTION_HELP = 3,
-  F2E_SECTION_ENV_AUDIT = 4
+  F2E_SECTION_ENV_AUDIT = 4,
+  F2E_SECTION_COMMAND = 5
 } F2EConfigSection;
+
+typedef struct {
+  int commands[F2E_MAX_COMMAND_DEPTH];
+  size_t depth;
+} F2ECommandPath;
 
 typedef struct {
   F2EBuffer buffer;
