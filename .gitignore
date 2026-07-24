@@ -10,3 +10,5 @@ __pycache__/
 *.log
 .gradle/
 **/.gradle/
+.build/
+.zig-cache/

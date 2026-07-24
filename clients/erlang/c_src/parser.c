@@ -39,6 +39,9 @@
 #define F2E_MAX_COMMANDS 96
 #define F2E_MAX_COMMAND_DEPTH 16
 #define F2E_SCOPE_ROOT (-1)
+/* lenient scope: no subcommand was matched (e.g. a wrapper script stripped
+   it), so scoped flags resolve globally when the name is unambiguous */
+#define F2E_SCOPE_LENIENT (-2)
 #define F2E_MAX_PAIRS (F2E_MAX_FLAGS + F2E_MAX_META_PAIRS + F2E_MAX_COMMANDS)
 #define F2E_MAX_ENV_FILE_KEYS 512
 #define F2E_DEFAULT_COMMAND_ENV "FLAGS2ENV_COMMAND"
@@ -87,6 +90,8 @@ typedef struct {
   char env[F2E_MAX_ENV];
   char help[F2E_MAX_VALUE];
   int parent; /* index into F2EConfig.commands; F2E_SCOPE_ROOT for top-level commands */
+  int allow_unknown;
+  int allow_unknown_set; /* command overrides [parse] allow_unknown for its scope */
 } F2ECommand;
 
 typedef struct {
@@ -406,12 +411,62 @@ static int f2e_scope_parent(const F2EConfig *config, int scope) {
   return config->commands[scope].parent;
 }
 
+/* Searches every scope; sets *ambiguous when distinct flags share the name. */
+static const F2EFlag *f2e_find_flag_any_scope_by_alias(const F2EConfig *config, const char *alias, int *ambiguous) {
+  const F2EFlag *found = NULL;
+  for (size_t i = 0; i < config->flag_count; i++) {
+    const F2EFlag *flag = &config->flags[i];
+    for (size_t j = 0; j < flag->alias_count; j++) {
+      if (!f2e_streq(flag->aliases[j], alias)) {
+        continue;
+      }
+      if (found && found != flag) {
+        if (ambiguous) {
+          *ambiguous = 1;
+        }
+        return NULL;
+      }
+      found = flag;
+    }
+  }
+  return found;
+}
+
+static const F2EFlag *f2e_find_flag_any_scope_by_short(const F2EConfig *config, char short_name, int *ambiguous) {
+  const F2EFlag *found = NULL;
+  for (size_t i = 0; i < config->flag_count; i++) {
+    const F2EFlag *flag = &config->flags[i];
+    if (flag->short_name != short_name) {
+      continue;
+    }
+    if (found && found != flag) {
+      if (ambiguous) {
+        *ambiguous = 1;
+      }
+      return NULL;
+    }
+    found = flag;
+  }
+  return found;
+}
+
 /*
  * Flag lookups resolve against a command scope: the scope's own flags win,
  * then each ancestor up to the global (root) flags. A subcommand can thereby
  * reuse an alias or short flag that means something else elsewhere.
+ *
+ * F2E_SCOPE_LENIENT is used when commands are declared but argv selected
+ * none (a wrapper may have consumed the subcommand): root flags win, and a
+ * name that is unambiguous across all scopes resolves as if it were global.
  */
 static const F2EFlag *f2e_find_flag_by_alias_const(const F2EConfig *config, int scope, const char *alias) {
+  if (scope == F2E_SCOPE_LENIENT) {
+    const F2EFlag *root = f2e_find_flag_by_alias_const(config, F2E_SCOPE_ROOT, alias);
+    if (root) {
+      return root;
+    }
+    return f2e_find_flag_any_scope_by_alias(config, alias, NULL);
+  }
   for (;;) {
     for (size_t i = 0; i < config->flag_count; i++) {
       const F2EFlag *flag = &config->flags[i];
@@ -436,6 +491,13 @@ static F2EFlag *f2e_find_flag_by_alias(F2EConfig *config, int scope, const char 
 }
 
 static F2EFlag *f2e_find_flag_by_short(F2EConfig *config, int scope, char short_name) {
+  if (scope == F2E_SCOPE_LENIENT) {
+    F2EFlag *root = f2e_find_flag_by_short(config, F2E_SCOPE_ROOT, short_name);
+    if (root) {
+      return root;
+    }
+    return (F2EFlag *)f2e_find_flag_any_scope_by_short(config, short_name, NULL);
+  }
   for (;;) {
     for (size_t i = 0; i < config->flag_count; i++) {
       if (config->flags[i].command == scope && config->flags[i].short_name == short_name) {
@@ -1105,8 +1167,15 @@ static int f2e_load_config(const char *config_path, F2EConfig *config) {
       char *table = f2e_trim(trimmed + 1);
       current_command = F2E_SCOPE_ROOT;
       const char prefix[] = "flags.";
+      const char global_prefix[] = "global.flags.";
       if (strncmp(table, prefix, sizeof(prefix) - 1) == 0) {
         char *name = f2e_trim(table + sizeof(prefix) - 1);
+        current = f2e_add_flag(config, name);
+        section = F2E_SECTION_FLAG;
+      } else if (strncmp(table, global_prefix, sizeof(global_prefix) - 1) == 0) {
+        /* explicit spelling of the global namespace: [global.flags.x] is the
+           same as [flags.x] and applies to every subcommand scope */
+        char *name = f2e_trim(table + sizeof(global_prefix) - 1);
         current = f2e_add_flag(config, name);
         section = F2E_SECTION_FLAG;
       } else if (f2e_load_commands_table(config, table, &section, &current, &current_command)) {
@@ -1272,6 +1341,15 @@ static int f2e_load_config(const char *config_path, F2EConfig *config) {
         char parsed[F2E_MAX_ENV];
         if (f2e_parse_bare_value(value, parsed, sizeof(parsed))) {
           f2e_strlcpy(command->env, parsed, sizeof(command->env));
+        }
+      } else if (f2e_streq(key, "allow_unknown") ||
+                 f2e_streq(key, "allow_hidden") ||
+                 f2e_streq(key, "allow_unrecognized") ||
+                 f2e_streq(key, "allow_unknown_options")) {
+        int parsed = 0;
+        if (f2e_parse_config_bool(value, &parsed)) {
+          command->allow_unknown = parsed;
+          command->allow_unknown_set = 1;
         }
       }
       continue;
@@ -2003,13 +2081,30 @@ static int f2e_token_looks_like_known_option(F2EConfig *config, int scope, const
     if (f2e_find_flag_by_alias(config, scope, copy)) {
       return 1;
     }
+    if (scope == F2E_SCOPE_LENIENT) {
+      /* an ambiguous name is still a declared option; it is accepted but not
+         applied, rather than reported as unknown */
+      int ambiguous = 0;
+      f2e_find_flag_any_scope_by_alias(config, copy, &ambiguous);
+      if (ambiguous) {
+        return 1;
+      }
+    }
     if (strncmp(copy, "no-", 3) == 0) {
       F2EFlag *flag = f2e_find_flag_by_alias(config, scope, copy + 3);
       return flag && flag->type == F2E_TYPE_BOOL;
     }
     return 0;
   }
-  return f2e_find_flag_by_short(config, scope, token[1]) != NULL;
+  if (f2e_find_flag_by_short(config, scope, token[1])) {
+    return 1;
+  }
+  if (scope == F2E_SCOPE_LENIENT) {
+    int ambiguous = 0;
+    f2e_find_flag_any_scope_by_short(config, token[1], &ambiguous);
+    return ambiguous;
+  }
+  return 0;
 }
 
 static int f2e_token_looks_like_option(const char *token) {
@@ -2071,14 +2166,22 @@ static int f2e_token_sets_allow_unknown(const char *token, int *out) {
   return 0;
 }
 
-static int f2e_resolve_allow_unknown(const F2EConfig *config, int argc, const char *const argv[]) {
+/*
+ * Resolves the starting allow-unknown state. forced_out reports whether a
+ * runtime source (env var or --allow-unknown token) chose the value; a forced
+ * value applies everywhere, while a config-derived value can still be
+ * overridden per command scope by [commands.*] allow_unknown.
+ */
+static int f2e_resolve_allow_unknown(const F2EConfig *config, int argc, const char *const argv[], int *forced_out) {
   int allow_unknown = config ? config->allow_unknown : 0;
+  int forced = 0;
   int parsed = 0;
   if (f2e_runtime_bool_from_env("FLAGS2ENV_ALLOW_UNKNOWN", &parsed) ||
       f2e_runtime_bool_from_env("F2E_ALLOW_UNKNOWN", &parsed) ||
       f2e_runtime_bool_from_env("FLAGS2ENV_ALLOW_HIDDEN", &parsed) ||
       f2e_runtime_bool_from_env("F2E_ALLOW_HIDDEN", &parsed)) {
     allow_unknown = parsed;
+    forced = 1;
   }
 
   for (int i = 0; i < argc; i++) {
@@ -2091,7 +2194,11 @@ static int f2e_resolve_allow_unknown(const F2EConfig *config, int argc, const ch
     }
     if (f2e_token_sets_allow_unknown(token, &parsed)) {
       allow_unknown = parsed;
+      forced = 1;
     }
+  }
+  if (forced_out) {
+    *forced_out = forced;
   }
   return allow_unknown;
 }
@@ -4099,6 +4206,45 @@ static char *f2e_generate_types_from_config(const F2EConfig *config, const char 
   return NULL;
 }
 
+static int f2e_codegen_env_is_declared(const F2EConfig *config, const char *env) {
+  for (size_t i = 0; i < config->flag_count; i++) {
+    if (f2e_streq(config->flags[i].env, env)) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+/*
+ * Generated types describe every env key the parser may emit, so command
+ * marker envs and parse.command_env are appended as synthetic optional
+ * fields (bool markers, string command path) before rendering.
+ */
+static void f2e_codegen_append_command_envs(F2EConfig *config) {
+  for (size_t i = 0; i < config->command_count; i++) {
+    const F2ECommand *command = &config->commands[i];
+    if (command->env[0] == '\0' || f2e_codegen_env_is_declared(config, command->env)) {
+      continue;
+    }
+    F2EFlag *flag = f2e_add_flag(config, command->name);
+    if (!flag) {
+      return;
+    }
+    f2e_strlcpy(flag->env, command->env, sizeof(flag->env));
+    flag->type = F2E_TYPE_BOOL;
+    f2e_strlcpy(flag->help, command->help, sizeof(flag->help));
+  }
+  if (config->command_count > 0 && config->command_env[0] != '\0' &&
+      !f2e_codegen_env_is_declared(config, config->command_env)) {
+    F2EFlag *flag = f2e_add_flag(config, "command");
+    if (flag) {
+      f2e_strlcpy(flag->env, config->command_env, sizeof(flag->env));
+      flag->type = F2E_TYPE_STRING;
+      f2e_strlcpy(flag->help, "Space-joined subcommand path selected by argv.", sizeof(flag->help));
+    }
+  }
+}
+
 char *f2e_generate_types_from_file(const char *config_path, const char *language, const char *type_name) {
   F2EConfig *config = (F2EConfig *)malloc(sizeof(F2EConfig));
   if (!config) {
@@ -4107,6 +4253,14 @@ char *f2e_generate_types_from_file(const char *config_path, const char *language
   if (!config_path || !f2e_load_config(config_path, config) || f2e_config_has_audit_errors(config)) {
     free(config);
     return NULL;
+  }
+  f2e_codegen_append_command_envs(config);
+  for (size_t i = 0; i < config->flag_count; i++) {
+    /* a command-scoped default is only emitted when its command runs, so the
+       generated field must be optional */
+    if (config->flags[i].command != F2E_SCOPE_ROOT) {
+      config->flags[i].has_default = 0;
+    }
   }
   char *source = f2e_generate_types_from_config(config, language, type_name);
   free(config);
@@ -5163,8 +5317,13 @@ static void f2e_scan_argv(F2EConfig *config,
                           F2EJsonList *unknown_options,
                           F2EJsonList *errors,
                           int allow_unknown,
+                          int allow_unknown_forced,
+                          int lenient,
                           F2ECommandPath *path_out) {
-  int scope = F2E_SCOPE_ROOT;
+  int scope = lenient ? F2E_SCOPE_LENIENT : F2E_SCOPE_ROOT;
+  /* lenient mode keeps the command-mode positional handling (leading tokens
+     are skipped, never triggering stop_at_first_positional) but resolves no
+     commands, mirroring the dry-run pass that found none */
   int matching = config->command_count > 0;
   int matched_any = 0;
 
@@ -5172,10 +5331,13 @@ static void f2e_scan_argv(F2EConfig *config,
     const char *token = argv[i];
     if (!token || token[0] != '-' || token[1] == '\0') {
       if (matching && token && token[0] != '\0') {
-        int next = f2e_find_command_by_token(config, scope, token);
+        int next = lenient ? -1 : f2e_find_command_by_token(config, scope, token);
         if (next >= 0) {
           scope = next;
           matched_any = 1;
+          if (!allow_unknown_forced && config->commands[next].allow_unknown_set) {
+            allow_unknown = config->commands[next].allow_unknown;
+          }
           if (path_out && path_out->depth < F2E_MAX_COMMAND_DEPTH) {
             path_out->commands[path_out->depth++] = next;
           }
@@ -5214,6 +5376,7 @@ static void f2e_scan_argv(F2EConfig *config,
       int parsed_allow_unknown = 0;
       if (f2e_token_sets_allow_unknown(token, &parsed_allow_unknown)) {
         allow_unknown = parsed_allow_unknown;
+        allow_unknown_forced = 1;
       } else if (!allow_unknown && unknown_options) {
         f2e_json_list_append(unknown_options, token);
       }
@@ -5229,7 +5392,7 @@ static void f2e_scan_argv(F2EConfig *config,
 
 /* Dry-run scan that only resolves the command path selected by argv. */
 static void f2e_resolve_command_path(F2EConfig *config, int argc, const char *const argv[], F2ECommandPath *path_out) {
-  f2e_scan_argv(config, NULL, 0, argc, argv, NULL, NULL, NULL, 1, path_out);
+  f2e_scan_argv(config, NULL, 0, argc, argv, NULL, NULL, NULL, 1, 1, 0, path_out);
 }
 
 char *f2e_parse_from_file(const char *config_path, int argc, const char *const argv[]) {
@@ -5259,12 +5422,18 @@ char *f2e_parse_from_file(const char *config_path, int argc, const char *const a
   int track_positionals = config->positionals_env[0] != '\0' && f2e_json_list_init(&positionals);
   int track_unknown_options = config->unknown_options_env[0] != '\0' && f2e_json_list_init(&unknown_options);
   int track_errors = config->errors_env[0] != '\0' && f2e_json_list_init(&errors);
-  int allow_unknown = f2e_resolve_allow_unknown(config, argc, argv);
+  int allow_unknown_forced = 0;
+  int allow_unknown = f2e_resolve_allow_unknown(config, argc, argv, &allow_unknown_forced);
 
+  int lenient = 0;
   if (config->command_count > 0) {
     F2ECommandPath path;
     memset(&path, 0, sizeof(path));
     f2e_resolve_command_path(config, argc, argv, &path);
+    /* a wrapper script may have consumed the subcommand before argv reached
+       this parser; when nothing matched, fall back to lenient global
+       resolution instead of treating scoped flags as unknown */
+    lenient = path.depth == 0;
     char joined[F2E_MAX_VALUE];
     int tail = path.depth > 0 ? path.commands[path.depth - 1] : F2E_SCOPE_ROOT;
     if (f2e_command_path_label(config, tail, joined, sizeof(joined))) {
@@ -5290,6 +5459,8 @@ char *f2e_parse_from_file(const char *config_path, int argc, const char *const a
                 track_unknown_options ? &unknown_options : NULL,
                 track_errors ? &errors : NULL,
                 allow_unknown,
+                allow_unknown_forced,
+                lenient,
                 NULL);
 
   if (track_positionals && positionals.count > 0) {

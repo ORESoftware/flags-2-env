@@ -101,6 +101,8 @@ typedef struct {
   size_t command_count;
   char command_env[F2E_MAX_ENV];
   int too_many_commands;
+  char invalid_command_table[F2E_MAX_VALUE];
+  int has_invalid_command_table;
   int allow_separated_values;
   int stop_at_first_positional;
   char positionals_env[F2E_MAX_ENV];
