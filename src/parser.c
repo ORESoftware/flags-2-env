@@ -3551,6 +3551,9 @@ static char *f2e_completion_script_bash_commands(const F2EConfig *config, const 
 }
 
 static char *f2e_completion_script_bash(const F2EConfig *config, const char *command_name) {
+  if (config->command_count > 0) {
+    return f2e_completion_script_bash_commands(config, command_name);
+  }
   F2EBuffer options;
   F2EBuffer value_options;
   F2EBuffer bool_value_options;
