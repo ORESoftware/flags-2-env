@@ -107,6 +107,8 @@ type = "bool"
 
 `command`, `subcommands`, and `subcommand` are accepted spellings of the `commands` keyword, and `[commands.<name>]` property lines support `help`/`description`, `aliases`, and `env`.
 
+Nesting always spells out the keyword — `[commands.publish.commands.init.flags.access]`, never `[commands.publish.init.flags.access]` — and the shorthand is an audit error rather than a silent no-op. Because keyword and name positions strictly alternate, command names can never clash with the keywords: `[commands.commands]` is a subcommand literally named `commands` (invoked as `mycli commands`), while `[flags.commands]` would be an unrelated `--commands` flag.
+
 Parsing walks argv left to right. Leading positionals that match no top-level command (the program name, a wrapper token) are skipped; the first positional that matches a command selects it, and each following positional may select a nested subcommand. The first positional that matches no subcommand of the current scope ends command matching — so in `docker run ubuntu ls -la`, `run` is the command and `ubuntu`/`ls` stay positionals. Matched command tokens are not recorded as positionals.
 
 Flags resolve against the active command scope first, then its ancestors, then the global `[flags.*]` set — a subcommand may reuse a short flag or alias that means something else elsewhere, and unshadowed global flags keep working after the subcommand. Command-scoped flags are only valid inside their command: `mycli init --pack` reports `--pack` as an unknown option when `pack` is declared under `[commands.run]`. Flag defaults only apply to global flags and flags of the commands actually selected.
