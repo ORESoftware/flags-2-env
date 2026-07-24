@@ -462,6 +462,10 @@ static napi_value f2e_node_init(napi_env env, napi_value exports) {
   napi_create_function(env, "isHelpJson", NAPI_AUTO_LENGTH, f2e_node_is_help_json, NULL, &is_help_json);
   napi_set_named_property(env, exports, "isHelpJson", is_help_json);
 
+  napi_value resolve_commands_json;
+  napi_create_function(env, "resolveCommandsJson", NAPI_AUTO_LENGTH, f2e_node_resolve_commands_json, NULL, &resolve_commands_json);
+  napi_set_named_property(env, exports, "resolveCommandsJson", resolve_commands_json);
+
   napi_value help_table;
   napi_create_function(env, "helpTable", NAPI_AUTO_LENGTH, f2e_node_help_table, NULL, &help_table);
   napi_set_named_property(env, exports, "helpTable", help_table);
