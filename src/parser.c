@@ -5389,7 +5389,7 @@ static void f2e_scan_argv(F2EConfig *config,
 
 /* Dry-run scan that only resolves the command path selected by argv. */
 static void f2e_resolve_command_path(F2EConfig *config, int argc, const char *const argv[], F2ECommandPath *path_out) {
-  f2e_scan_argv(config, NULL, 0, argc, argv, NULL, NULL, NULL, 1, 1, path_out);
+  f2e_scan_argv(config, NULL, 0, argc, argv, NULL, NULL, NULL, 1, 1, 0, path_out);
 }
 
 char *f2e_parse_from_file(const char *config_path, int argc, const char *const argv[]) {
