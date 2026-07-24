@@ -525,7 +525,7 @@ esac
 
 subcommand_completion_bash="$("$CLI" completion bash gitish "$SUBCOMMANDS_DIR/.cli-flags.toml")"
 case "$subcommand_completion_bash" in
-  *'add commit ci remote'*'--verbose'*)
+  *'--verbose'*"cmds='add commit ci remote'"*)
     ;;
   *)
     printf 'Bash completion should offer top-level commands:\n%s\n' "$subcommand_completion_bash" >&2
