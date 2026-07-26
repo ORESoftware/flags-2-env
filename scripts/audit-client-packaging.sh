@@ -924,6 +924,11 @@ require_contains scripts/docker-check-new-clients.sh 'apt-get install -y --no-in
 require_contains scripts/docker-check-new-clients.sh 'gfortran-12 -c clients/fortran/src/flags2env\.f90'
 require_contains scripts/docker-check-new-clients.sh '\[--only LABEL\]'
 require_contains scripts/docker-check-new-clients.sh 'unknown or disabled client label'
+require_contains scripts/docker-check-new-clients.sh 'run php php:8\.3-cli-bookworm'
+require_contains scripts/docker-check-new-clients.sh 'getcomposer\.org/download/2\.10\.2/composer\.phar'
+require_contains scripts/docker-check-new-clients.sh '5ee7125f8a30a34d246cefdc0bc85b8a783b28f2aec968994118512350d28027'
+require_contains scripts/docker-check-new-clients.sh 'composer archive --format=zip --dir=/tmp --file=flags2env-php-archive'
+forbid_contains scripts/docker-check-new-clients.sh 'apt-get install[^&]* composer'
 require_contains scripts/docker-check-new-clients.sh 'clients/fortran/src/parser\.c'
 forbid_contains scripts/docker-check-new-clients.sh ' -c src/parser\.c -o /tmp/flags2env-parser\.o'
 require_same_file src/parser.c clients/fortran/src/parser.c
