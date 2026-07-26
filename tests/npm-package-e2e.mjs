@@ -193,6 +193,14 @@ process.stdout.write("esm ok");`,
   );
   assert.equal(installedManifest.name, "@oresoftware/f2e");
   assert.equal(installedManifest.bin.f2e, "./clients/nodejs/cli.mjs");
+  assert.equal(installedManifest.dependencies["node-gyp"], "^12.4.0");
+  const installedNodeGyp = JSON.parse(
+    readFileSync(
+      join(consumerDir, "node_modules", "node-gyp", "package.json"),
+      "utf8",
+    ),
+  );
+  assert.equal(installedNodeGyp.version, "12.4.0");
   process.stdout.write("npm package e2e passed\n");
 } finally {
   rmSync(workspace, { recursive: true, force: true });
