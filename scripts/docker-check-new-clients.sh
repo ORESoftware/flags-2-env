@@ -4,6 +4,8 @@ set -eu
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 FULL=0
 DRY_RUN=0
+ONLY=""
+MATCHED=0
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -13,8 +15,16 @@ while [ "$#" -gt 0 ]; do
     --dry-run)
       DRY_RUN=1
       ;;
+    --only)
+      shift
+      if [ "$#" -eq 0 ]; then
+        printf '%s\n' '--only requires a client label' >&2
+        exit 2
+      fi
+      ONLY="$1"
+      ;;
     *)
-      printf 'usage: %s [--full] [--dry-run]\n' "$0" >&2
+      printf 'usage: %s [--full] [--dry-run] [--only LABEL]\n' "$0" >&2
       exit 2
       ;;
   esac
@@ -25,6 +35,10 @@ run() {
   label="$1"
   image="$2"
   command="$3"
+  if [ -n "$ONLY" ] && [ "$ONLY" != "$label" ]; then
+    return
+  fi
+  MATCHED=1
   if [ "$DRY_RUN" -eq 1 ]; then
     printf '[dry-run] docker check %s: %s\n' "$label" "$image"
     printf '[dry-run] docker command %s: %s\n' "$label" "$command"
@@ -105,7 +119,7 @@ EOF'
 run fortran gcc:13-bookworm \
   'apt-get update && apt-get install -y --no-install-recommends gfortran-12 && cc -std=c99 -Wall -Wextra -Wpedantic -O2 -fPIC -c clients/fortran/src/parser.c -Iclients/fortran/src -o /tmp/flags2env-parser.o && gfortran-12 -c clients/fortran/src/flags2env.f90 -J /tmp -o /tmp/flags2env-fortran.o && gfortran-12 -I /tmp clients/fortran/test.f90 /tmp/flags2env-fortran.o /tmp/flags2env-parser.o -o /tmp/flags2env-fortran-test && /tmp/flags2env-fortran-test'
 
-run zig kassany/bookworm-ziglang:0.13.0 \
+run zig kassany/bookworm-ziglang:0.14.0 \
   'zig version && cd clients/zig && zig build test'
 
 run lua debian:bookworm \
@@ -156,4 +170,9 @@ if [ "$FULL" -eq 1 ]; then
 
   run julia julia:1.10 \
     'make clean && make all && LD_LIBRARY_PATH=build julia --project=clients/julia -e "using Pkg; Pkg.instantiate(); Pkg.test()"'
+fi
+
+if [ -n "$ONLY" ] && [ "$MATCHED" -eq 0 ]; then
+  printf 'unknown or disabled client label: %s\n' "$ONLY" >&2
+  exit 2
 fi

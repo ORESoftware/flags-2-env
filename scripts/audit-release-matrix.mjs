@@ -410,7 +410,9 @@ const packageControls = {
     ["scripts/docker-check-new-clients.sh", /clients\/fortran\/src\/parser\.c/, "Fortran Docker smoke builds package-local parser source"],
   ],
   zig: [
+    ["clients/zig/build.zig.zon", /\.minimum_zig_version = "0\.14\.0"/, "Zig package minimum toolchain version"],
     ["clients/zig/build.zig.zon", /\.paths/, "Zig package manifest path allowlist"],
+    ["clients/zig/build.zig.zon", /"test\.zig"/, "Zig package includes its smoke test"],
     ["clients/zig/build.zig.zon", /"README\.md"/, "Zig package includes README"],
     ["clients/zig/build.zig.zon", /"LICENSE"/, "Zig package includes license file"],
     ["clients/zig/build.zig", /b\.addModule\("flags2env"/, "Zig package module"],
@@ -419,6 +421,7 @@ const packageControls = {
     ["clients/zig/build.zig", /b\.path\("native"\)/, "Zig package uses package-local include path"],
     ["clients/zig/README.md", /Zig bindings/, "Zig package README"],
     ["clients/zig/LICENSE", /MIT License/, "Zig package license file"],
+    ["scripts/docker-check-new-clients.sh", /run zig kassany\/bookworm-ziglang:0\.14\.0/, "Zig Docker smoke uses the package minimum toolchain"],
   ],
   crystal: [
     ["clients/crystal/shard.yml", /^name: flags2env$/m, "Shard package name"],
