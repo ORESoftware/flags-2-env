@@ -103,7 +103,7 @@ int main() {
 EOF'
 
 run fortran gcc:13-bookworm \
-  'apt-get update && apt-get install -y --no-install-recommends gfortran && cc -std=c99 -Wall -Wextra -Wpedantic -O2 -fPIC -c clients/fortran/src/parser.c -Iclients/fortran/src -o /tmp/flags2env-parser.o && gfortran -c clients/fortran/src/flags2env.f90 -J /tmp -o /tmp/flags2env-fortran.o && gfortran -I /tmp clients/fortran/test.f90 /tmp/flags2env-fortran.o /tmp/flags2env-parser.o -o /tmp/flags2env-fortran-test && /tmp/flags2env-fortran-test'
+  'apt-get update && apt-get install -y --no-install-recommends gfortran-12 && cc -std=c99 -Wall -Wextra -Wpedantic -O2 -fPIC -c clients/fortran/src/parser.c -Iclients/fortran/src -o /tmp/flags2env-parser.o && gfortran-12 -c clients/fortran/src/flags2env.f90 -J /tmp -o /tmp/flags2env-fortran.o && gfortran-12 -I /tmp clients/fortran/test.f90 /tmp/flags2env-fortran.o /tmp/flags2env-parser.o -o /tmp/flags2env-fortran-test && /tmp/flags2env-fortran-test'
 
 run zig kassany/bookworm-ziglang:0.13.0 \
   'zig version && cd clients/zig && zig build test'

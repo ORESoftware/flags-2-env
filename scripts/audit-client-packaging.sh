@@ -920,6 +920,8 @@ require_contains clients/fortran/fpm.toml '^\[library\]'
 require_contains clients/fortran/fpm.toml '^source-dir = "src"$'
 require_contains clients/fortran/fpm.toml '^\[\[test\]\]'
 require_contains clients/fortran/fpm.toml '^main = "test\.f90"$'
+require_contains scripts/docker-check-new-clients.sh 'apt-get install -y --no-install-recommends gfortran-12'
+require_contains scripts/docker-check-new-clients.sh 'gfortran-12 -c clients/fortran/src/flags2env\.f90'
 require_contains scripts/docker-check-new-clients.sh 'clients/fortran/src/parser\.c'
 forbid_contains scripts/docker-check-new-clients.sh ' -c src/parser\.c -o /tmp/flags2env-parser\.o'
 require_same_file src/parser.c clients/fortran/src/parser.c
