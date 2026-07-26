@@ -101,7 +101,7 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            node: "18"
+            node: "20"
           - os: ubuntu-latest
             node: "22"
           - os: ubuntu-latest
@@ -211,6 +211,9 @@ jobs:
           go-version: "stable"
 
       - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Python package build tooling
+        run: python -m pip install --disable-pip-version-check build
 
       - name: Pack the current flags-2-env source
         id: flags2env
