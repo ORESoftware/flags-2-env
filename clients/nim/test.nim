@@ -1,4 +1,5 @@
 import std/json
+import std/os
 import ./flags2env
 
 let config = "flags2env-nim-smoke.toml"
