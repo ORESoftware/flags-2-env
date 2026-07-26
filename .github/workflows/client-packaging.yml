@@ -13,10 +13,12 @@ on:
       - ".github/workflows/client-packaging.yml"
       - ".npmignore"
       - "Makefile"
+      - "package-lock.json"
       - "package.json"
       - "clients/**"
       - "packaging/**"
       - "scripts/audit-client-packaging.sh"
+      - "scripts/audit-changed-cli-flags.sh"
       - "scripts/audit-release-matrix.mjs"
       - "scripts/docker-check-new-clients.sh"
       - "scripts/publish-client.sh"
@@ -28,10 +30,12 @@ on:
       - ".github/workflows/client-packaging.yml"
       - ".npmignore"
       - "Makefile"
+      - "package-lock.json"
       - "package.json"
       - "clients/**"
       - "packaging/**"
       - "scripts/audit-client-packaging.sh"
+      - "scripts/audit-changed-cli-flags.sh"
       - "scripts/audit-release-matrix.mjs"
       - "scripts/docker-check-new-clients.sh"
       - "scripts/publish-client.sh"
@@ -46,12 +50,22 @@ jobs:
   audit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
 
       - name: Install practical smoke-test toolchains
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends build-essential zsh ruby
+
+      - name: Install and audit Node.js development dependencies
+        run: |
+          npm ci
+          npm audit
 
       - name: Build native CLI
         run: make clean && make all
@@ -72,7 +86,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Run Docker client checks
         env:
@@ -103,7 +117,7 @@ jobs:
           - csharp
           - json-schema
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Compile and run generated interface
         run: tests/codegen-docker/run.sh "${{ matrix.runtime }}"

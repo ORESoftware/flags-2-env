@@ -25,6 +25,7 @@ endif
 CLI := $(BUILD_DIR)/flags2env
 PROCESS_SMOKE := $(BUILD_DIR)/process-smoke
 API_HARDENING := $(BUILD_DIR)/api-hardening
+ALLOCATION_FAILURE := $(BUILD_DIR)/allocation-failure
 PARSER_OBJ := $(BUILD_DIR)/parser.o
 
 .PHONY: all borrow-check clean codegen-docker-test core-docker-test parity-test readme-test test shared static cli FORCE
@@ -54,9 +55,10 @@ cli: $(CLI)
 $(CLI): $(SRC) $(CLI_SRC) $(HEADER) FORCE | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(SRC) $(CLI_SRC) -o $@
 
-test: borrow-check readme-test parity-test $(PROCESS_SMOKE) $(API_HARDENING)
+test: borrow-check readme-test parity-test $(PROCESS_SMOKE) $(API_HARDENING) $(ALLOCATION_FAILURE)
 	./tests/run.sh
 	$(API_HARDENING)
+	$(ALLOCATION_FAILURE) tests/subcommands-deep/.cli-flags.toml
 	$(PROCESS_SMOKE) --port 7777 -d
 
 codegen-docker-test:
@@ -82,6 +84,9 @@ $(PROCESS_SMOKE): $(SRC) tests/process_smoke.c $(HEADER) | $(BUILD_DIR)
 
 $(API_HARDENING): $(SRC) tests/api_hardening.c $(HEADER) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -Isrc $(SRC) tests/api_hardening.c -o $@
+
+$(ALLOCATION_FAILURE): $(SRC) tests/allocation_failure.c $(HEADER) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -Isrc tests/allocation_failure.c -o $@
 
 clean:
 	rm -rf $(BUILD_DIR)

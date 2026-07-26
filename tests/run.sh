@@ -203,6 +203,26 @@ case "$actual" in
     ;;
 esac
 
+actual="$("$ROOT_DIR/scripts/audit-changed-cli-flags.sh" \
+  "tests/audit-invalid-subcommand-nesting/.cli-flags.toml" \
+  "tests/env-audit-drift/.env")"
+case "$actual" in
+  *'cli-flags audit: skipping expected-negative fixture tests/audit-invalid-subcommand-nesting/.cli-flags.toml'*)
+    ;;
+  *)
+    printf 'Expected changed-config helper to skip negative fixtures:\n%s\n' "$actual" >&2
+    exit 1
+    ;;
+esac
+case "$actual" in
+  *'cli-flags audit: skipping expected-negative fixture tests/env-audit-drift/.cli-flags.toml'*)
+    ;;
+  *)
+    printf 'Expected changed-env helper to skip negative fixtures:\n%s\n' "$actual" >&2
+    exit 1
+    ;;
+esac
+
 set +e
 actual="$("$CLI" audit env "$ROOT_DIR/tests/env-audit-drift/.cli-flags.toml" "$ROOT_DIR/tests/env-audit-drift/.env")"
 status=$?

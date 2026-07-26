@@ -1,0 +1,27 @@
+[package]
+org = "oresoftware"
+name = "flags-2-env"
+version = "0.1.0"
+description = "Portable nested CLI flag-to-environment parser and polyglot bindings"
+license = "MIT"
+keywords = ["cli", "flags", "environment", "polyglot"]
+
+[package.repository]
+vcs = "git"
+url = "https://github.com/ORESoftware/flags-2-env"
+
+[publish]
+include_readme = true
+tag_format = "v{version}"
+exclude = [
+  ".build/**",
+  "clients/**/.dart_tool/**",
+  "clients/**/.gradle/**",
+  "clients/**/.zig-cache/**",
+  "clients/**/_build/**",
+  "clients/**/build/**",
+  "clients/**/target/**",
+]
+
+[scripts]
+test = "make test"

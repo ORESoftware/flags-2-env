@@ -68,7 +68,7 @@ let main _ =
     | value -> value
 
   NativeLibrary.SetDllImportResolver(
-    typeof<Flags2Env>.Assembly,
+    typeof<LibraryMarker>.Assembly,
     DllImportResolver(fun libraryName _ _ ->
       if libraryName = "flags2env" then NativeLibrary.Load nativeLibrary
       else nativeint 0))

@@ -3,12 +3,16 @@ name: CLI Flags Audit
 on:
   pull_request:
     paths:
+      - ".github/workflows/cli-flags-audit.yml"
+      - "scripts/audit-changed-cli-flags.sh"
       - ".cli-flags.toml"
       - "**/.cli-flags.toml"
       - ".env"
       - "**/.env"
   push:
     paths:
+      - ".github/workflows/cli-flags-audit.yml"
+      - "scripts/audit-changed-cli-flags.sh"
       - ".cli-flags.toml"
       - "**/.cli-flags.toml"
       - ".env"
@@ -21,7 +25,7 @@ jobs:
   audit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
