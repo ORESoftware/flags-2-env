@@ -90,8 +90,10 @@ const packageControls = {
     ["clients/java/pom.xml", /<excludes>[\s\S]*<exclude>\*\*\/publish\.sh<\/exclude>/, "Maven resources exclude publish wrappers"],
     ["clients/java/native/flags2env_jni.c", /#include "parser\.h"/, "JNI source includes package-local parser header"],
     ["clients/java/Dockerfile", /clients\/java\/native\/parser\.c/, "Java Docker smoke builds package-local parser source"],
+    ["clients/java/pom.xml", /<artifactId>maven-source-plugin<\/artifactId>[\s\S]*?<goal>jar-no-fork<\/goal>/, "Maven package lifecycle attaches the sources artifact"],
+    ["clients/java/pom.xml", /<artifactId>maven-javadoc-plugin<\/artifactId>[\s\S]*?<goal>jar<\/goal>/, "Maven package lifecycle attaches the javadoc artifact"],
     ["scripts/docker-check-new-clients.sh", /run java maven:3\.9-eclipse-temurin-21/, "Docker smoke includes Java Maven runtime"],
-    ["scripts/docker-check-new-clients.sh", /source:jar-no-fork javadoc:jar/, "Docker smoke builds Maven sources and javadoc artifacts"],
+    ["scripts/docker-check-new-clients.sh", /mvn -q -f clients\/java\/pom\.xml -DskipTests package/, "Docker smoke runs the Maven package lifecycle"],
     ["scripts/docker-check-new-clients.sh", /Maven artifact includes forbidden local file/, "Docker smoke rejects forbidden Maven artifact files"],
   ],
   kotlin: [
