@@ -36,8 +36,35 @@ run_stage() {
     build)
       make clean all
       ;;
+    borrow)
+      make borrow-check
+      ;;
+    readme)
+      make readme-test
+      ;;
+    parity)
+      make parity-test
+      ;;
+    native-build)
+      make build/process-smoke build/api-hardening build/allocation-failure
+      ;;
+    shell-tests)
+      ./tests/run.sh
+      ;;
+    api-hardening)
+      build/api-hardening
+      ;;
+    allocation-failure)
+      build/allocation-failure tests/subcommands-deep/.cli-flags.toml
+      ;;
+    process-smoke)
+      build/process-smoke --port 7777 -d
+      ;;
     test)
-      make test
+      local test_stage
+      for test_stage in borrow readme parity native-build shell-tests api-hardening allocation-failure process-smoke; do
+        run_stage "$test_stage"
+      done
       ;;
     package)
       npm run pack:audit
@@ -57,11 +84,11 @@ case "${1:-all}" in
       run_stage "$stage"
     done
     ;;
-  preflight | dependencies | build | test | package)
+  preflight | dependencies | build | borrow | readme | parity | native-build | shell-tests | api-hardening | allocation-failure | process-smoke | test | package)
     run_stage "$1"
     ;;
   *)
-    printf 'usage: %s [all|preflight|dependencies|build|test|package]\n' "$0" >&2
+    printf 'usage: %s [all|preflight|dependencies|build|borrow|readme|parity|native-build|shell-tests|api-hardening|allocation-failure|process-smoke|test|package]\n' "$0" >&2
     exit 64
     ;;
 esac
