@@ -1,0 +1,42 @@
+name: Capture bundled Rust Windows test (temporary)
+
+on:
+  pull_request:
+    types: [synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  capture:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.head_ref == 'feat/den-390-bundled-rust-runtime' &&
+      github.actor == 'ORESoftware'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+          persist-credentials: true
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: stable
+      - name: Capture diagnostic
+        working-directory: clients/rust
+        run: |
+          cargo test 2>&1 | Out-File -FilePath ../../.den-390-windows.txt -Encoding utf8
+          "exit_status=$LASTEXITCODE" | Out-File -FilePath ../../.den-390-windows.txt -Append -Encoding utf8
+          exit 0
+      - name: Commit diagnostic
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .den-390-windows.txt
+          git commit -m 'chore: capture bundled Rust Windows diagnostic'
+          git push origin HEAD:feat/den-390-bundled-rust-runtime
