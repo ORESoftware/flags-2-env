@@ -1,3 +1,6 @@
+pub mod bundled;
+pub use bundled::BundledFlags2Env;
+
 use libloading::{Library, Symbol};
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
@@ -53,18 +56,38 @@ fn json_string_map(value: Option<&serde_json::Value>) -> HashMap<String, String>
         .unwrap_or_default()
 }
 
+/// Dynamically loaded flags2env backend.
+///
+/// Prefer [`BundledFlags2Env`] for self-contained CLI/server binaries and
+/// minimal containers. Keep this type for callers that intentionally select a
+/// separately installed shared library at runtime.
 pub struct Flags2Env {
     library: Library,
 }
 
 impl Flags2Env {
+    /// Load a flags2env shared library from `path`, or from the platform default
+    /// library name when `path` is absent.
+    ///
+    /// # Safety
+    ///
+    /// The selected library must be a trusted, ABI-compatible flags2env build
+    /// exporting the expected `f2e_*` symbols with the ownership contract from
+    /// `parser.h`. Loading an untrusted or incompatible dynamic library can run
+    /// arbitrary initialization code or cause undefined behavior when symbols
+    /// are called. Keep the returned value alive while any loaded symbol is in
+    /// use; this type does so internally for all public methods.
     pub unsafe fn load(path: Option<&str>) -> Result<Self, libloading::Error> {
         Ok(Self {
             library: Library::new(path.unwrap_or(default_library_name()))?,
         })
     }
 
-    pub fn parse(&self, argv: &[String], config_path: Option<&str>) -> Result<HashMap<String, String>, Box<dyn std::error::Error>> {
+    pub fn parse(
+        &self,
+        argv: &[String],
+        config_path: Option<&str>,
+    ) -> Result<HashMap<String, String>, Box<dyn std::error::Error>> {
         let argv_json = CString::new(serde_json::to_string(argv)?)?;
 
         unsafe {
@@ -86,15 +109,20 @@ impl Flags2Env {
         }
     }
 
-    pub fn parse_process(&self, config_path: Option<&str>) -> Result<HashMap<String, String>, Box<dyn std::error::Error>> {
+    pub fn parse_process(
+        &self,
+        config_path: Option<&str>,
+    ) -> Result<HashMap<String, String>, Box<dyn std::error::Error>> {
         unsafe {
             let free: Symbol<FreeFn> = self.library.get(b"f2e_free")?;
             let result = if let Some(config_path) = config_path {
                 let config_path = CString::new(config_path)?;
-                let parse: Symbol<ParseProcessFn> = self.library.get(b"f2e_parse_process_from_file")?;
+                let parse: Symbol<ParseProcessFn> =
+                    self.library.get(b"f2e_parse_process_from_file")?;
                 parse(config_path.as_ptr())
             } else {
-                let parse: Symbol<ParseProcessDefaultFn> = self.library.get(b"f2e_parse_process")?;
+                let parse: Symbol<ParseProcessDefaultFn> =
+                    self.library.get(b"f2e_parse_process")?;
                 parse()
             };
             if result.is_null() {
@@ -191,12 +219,19 @@ impl Flags2Env {
         })
     }
 
-    pub fn apply(&self, env_map: &mut HashMap<String, String>, argv: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn apply(
+        &self,
+        env_map: &mut HashMap<String, String>,
+        argv: &[String],
+    ) -> Result<(), Box<dyn std::error::Error>> {
         env_map.extend(self.parse(argv, None)?);
         Ok(())
     }
 
-    pub fn apply_process(&self, env_map: &mut HashMap<String, String>) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn apply_process(
+        &self,
+        env_map: &mut HashMap<String, String>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         env_map.extend(self.parse_process(None)?);
         Ok(())
     }
