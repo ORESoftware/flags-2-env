@@ -90,10 +90,12 @@ run_python_readme() {
 
 run_shell_suite() {
   local log_path="$cache_root/shell-suite.trace.log"
+  local shell_suite_path
   local status
 
+  shell_suite_path="$(build_declared_readme_path python3 ruby)"
   set +e
-  sh -x ./tests/run.sh >"$log_path" 2>&1
+  env PATH="$shell_suite_path" sh -x ./tests/run.sh >"$log_path" 2>&1
   status=$?
   set -e
 
