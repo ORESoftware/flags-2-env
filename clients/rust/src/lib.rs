@@ -66,6 +66,17 @@ pub struct Flags2Env {
 }
 
 impl Flags2Env {
+    /// Load a flags2env shared library from `path`, or from the platform default
+    /// library name when `path` is absent.
+    ///
+    /// # Safety
+    ///
+    /// The selected library must be a trusted, ABI-compatible flags2env build
+    /// exporting the expected `f2e_*` symbols with the ownership contract from
+    /// `parser.h`. Loading an untrusted or incompatible dynamic library can run
+    /// arbitrary initialization code or cause undefined behavior when symbols
+    /// are called. Keep the returned value alive while any loaded symbol is in
+    /// use; this type does so internally for all public methods.
     pub unsafe fn load(path: Option<&str>) -> Result<Self, libloading::Error> {
         Ok(Self {
             library: Library::new(path.unwrap_or(default_library_name()))?,
