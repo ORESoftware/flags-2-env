@@ -93,14 +93,10 @@ run_stage() {
       PATH="$(build_declared_readme_path)" ./scripts/test-readme-snippets.mjs
       ;;
     readme-python)
-      FLAGS2ENV_NATIVE_LIB="$(native_library_path)" \
-        PATH="$(build_declared_readme_path python3)" \
-        ./scripts/test-readme-snippets.mjs
+      env FLAGS2ENV_NATIVE_LIB="$(native_library_path)" PATH="$(build_declared_readme_path python3)" ./scripts/test-readme-snippets.mjs
       ;;
     readme-ruby)
-      FLAGS2ENV_NATIVE_LIB="$(native_library_path)" \
-        PATH="$(build_declared_readme_path ruby)" \
-        ./scripts/test-readme-snippets.mjs
+      env FLAGS2ENV_NATIVE_LIB="$(native_library_path)" PATH="$(build_declared_readme_path ruby)" ./scripts/test-readme-snippets.mjs
       ;;
     readme)
       local readme_stage
