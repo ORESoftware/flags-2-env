@@ -95,7 +95,7 @@ run_shell_suite() {
 
   shell_suite_path="$(build_declared_readme_path python3 ruby)"
   set +e
-  env PATH="$shell_suite_path" sh -x ./tests/run.sh >"$log_path" 2>&1
+  env PATH="$shell_suite_path" bash -c 'PS4="+${LINENO}: "; set -x; source "$0"' ./tests/run.sh >"$log_path" 2>&1
   status=$?
   set -e
 
@@ -106,6 +106,25 @@ run_shell_suite() {
   fi
 
   tail -n 20 "$log_path"
+}
+
+shell_suite_failure_line() {
+  local log_path="$cache_root/shell-suite.trace.log"
+  local failure_line
+  local status
+
+  set +e
+  run_shell_suite >/dev/null 2>&1
+  status=$?
+  set -e
+
+  if ((status == 0)); then
+    printf '0\n'
+    return 0
+  fi
+
+  failure_line="$(grep -E '^\+[0-9]+: exit 1$' "$log_path" | tail -n 1 | sed -E 's/^\+([0-9]+):.*/\1/' || true)"
+  printf '%s\n' "${failure_line:-unknown}"
 }
 
 run_stage() {
@@ -154,6 +173,9 @@ run_stage() {
     shell-tests)
       run_shell_suite
       ;;
+    shell-tests-line)
+      shell_suite_failure_line
+      ;;
     api-hardening)
       build/api-hardening
       ;;
@@ -187,11 +209,11 @@ case "${1:-all}" in
       run_stage "$stage"
     done
     ;;
-  preflight | dependencies | build | borrow | readme-core | readme-python | readme-ruby | readme | parity | native-build | shell-tests | api-hardening | allocation-failure | process-smoke | test | package)
+  preflight | dependencies | build | borrow | readme-core | readme-python | readme-ruby | readme | parity | native-build | shell-tests | shell-tests-line | api-hardening | allocation-failure | process-smoke | test | package)
     run_stage "$1"
     ;;
   *)
-    printf 'usage: %s [all|preflight|dependencies|build|borrow|readme-core|readme-python|readme-ruby|readme|parity|native-build|shell-tests|api-hardening|allocation-failure|process-smoke|test|package]\n' "$0" >&2
+    printf 'usage: %s [all|preflight|dependencies|build|borrow|readme-core|readme-python|readme-ruby|readme|parity|native-build|shell-tests|shell-tests-line|api-hardening|allocation-failure|process-smoke|test|package]\n' "$0" >&2
     exit 64
     ;;
 esac
