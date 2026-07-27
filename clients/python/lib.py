@@ -18,7 +18,8 @@ def _default_library_name() -> str:
 
 
 def _load_library(library_path: str | None = None) -> ctypes.CDLL:
-    lib = ctypes.CDLL(library_path or _default_library_name())
+    resolved_path = library_path or os.environ.get("FLAGS2ENV_NATIVE_LIB") or _default_library_name()
+    lib = ctypes.CDLL(resolved_path)
     lib.f2e_parse_json_argv.argtypes = [ctypes.c_char_p]
     lib.f2e_parse_json_argv.restype = ctypes.c_void_p
     lib.f2e_parse_json_argv_from_file.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
