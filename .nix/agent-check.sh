@@ -26,7 +26,7 @@ run_stage() {
       git diff --check
       nixfmt --check flake.nix .nix/dev-shell.nix
       shellcheck .nix/agent-check.sh
-      shfmt -d .nix/agent-check.sh
+      shfmt -i 2 -d .nix/agent-check.sh
       actionlint .github/workflows/nix.yml
       nix flake check --show-trace
       ;;
