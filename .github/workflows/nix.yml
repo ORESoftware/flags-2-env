@@ -74,8 +74,29 @@ jobs:
       - name: Build C and Node artifacts
         run: nix develop -c agent-check build
 
-      - name: Run C and cross-language tests
-        run: nix develop -c agent-check test
+      - name: Run borrow checker
+        run: nix develop -c agent-check borrow
+
+      - name: Verify README snippets
+        run: nix develop -c agent-check readme
+
+      - name: Verify CLI parity
+        run: nix develop -c agent-check parity
+
+      - name: Build native test binaries
+        run: nix develop -c agent-check native-build
+
+      - name: Run shell and CLI suite
+        run: nix develop -c agent-check shell-tests
+
+      - name: Run API hardening tests
+        run: nix develop -c agent-check api-hardening
+
+      - name: Run allocation failure tests
+        run: nix develop -c agent-check allocation-failure
+
+      - name: Run process smoke tests
+        run: nix develop -c agent-check process-smoke
 
       - name: Audit package and release outputs
         run: nix develop -c agent-check package
