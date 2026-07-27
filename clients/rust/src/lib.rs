@@ -1,3 +1,6 @@
+pub mod bundled;
+pub use bundled::BundledFlags2Env;
+
 use libloading::{Library, Symbol};
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
@@ -53,6 +56,11 @@ fn json_string_map(value: Option<&serde_json::Value>) -> HashMap<String, String>
         .unwrap_or_default()
 }
 
+/// Dynamically loaded flags2env backend.
+///
+/// Prefer [`BundledFlags2Env`] for self-contained CLI/server binaries and
+/// minimal containers. Keep this type for callers that intentionally select a
+/// separately installed shared library at runtime.
 pub struct Flags2Env {
     library: Library,
 }
