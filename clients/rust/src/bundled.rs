@@ -209,10 +209,7 @@ fn json_string_map(value: Option<&serde_json::Value>) -> HashMap<String, String>
         .map(|object| {
             object
                 .iter()
-                .filter_map(|(key, item)| {
-                    item.as_str()
-                        .map(|text| (key.clone(), text.to_string()))
-                })
+                .filter_map(|(key, item)| item.as_str().map(|text| (key.clone(), text.to_string())))
                 .collect()
         })
         .unwrap_or_default()

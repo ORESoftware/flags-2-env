@@ -72,7 +72,11 @@ impl Flags2Env {
         })
     }
 
-    pub fn parse(&self, argv: &[String], config_path: Option<&str>) -> Result<HashMap<String, String>, Box<dyn std::error::Error>> {
+    pub fn parse(
+        &self,
+        argv: &[String],
+        config_path: Option<&str>,
+    ) -> Result<HashMap<String, String>, Box<dyn std::error::Error>> {
         let argv_json = CString::new(serde_json::to_string(argv)?)?;
 
         unsafe {
@@ -94,15 +98,20 @@ impl Flags2Env {
         }
     }
 
-    pub fn parse_process(&self, config_path: Option<&str>) -> Result<HashMap<String, String>, Box<dyn std::error::Error>> {
+    pub fn parse_process(
+        &self,
+        config_path: Option<&str>,
+    ) -> Result<HashMap<String, String>, Box<dyn std::error::Error>> {
         unsafe {
             let free: Symbol<FreeFn> = self.library.get(b"f2e_free")?;
             let result = if let Some(config_path) = config_path {
                 let config_path = CString::new(config_path)?;
-                let parse: Symbol<ParseProcessFn> = self.library.get(b"f2e_parse_process_from_file")?;
+                let parse: Symbol<ParseProcessFn> =
+                    self.library.get(b"f2e_parse_process_from_file")?;
                 parse(config_path.as_ptr())
             } else {
-                let parse: Symbol<ParseProcessDefaultFn> = self.library.get(b"f2e_parse_process")?;
+                let parse: Symbol<ParseProcessDefaultFn> =
+                    self.library.get(b"f2e_parse_process")?;
                 parse()
             };
             if result.is_null() {
@@ -199,12 +208,19 @@ impl Flags2Env {
         })
     }
 
-    pub fn apply(&self, env_map: &mut HashMap<String, String>, argv: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn apply(
+        &self,
+        env_map: &mut HashMap<String, String>,
+        argv: &[String],
+    ) -> Result<(), Box<dyn std::error::Error>> {
         env_map.extend(self.parse(argv, None)?);
         Ok(())
     }
 
-    pub fn apply_process(&self, env_map: &mut HashMap<String, String>) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn apply_process(
+        &self,
+        env_map: &mut HashMap<String, String>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         env_map.extend(self.parse_process(None)?);
         Ok(())
     }
