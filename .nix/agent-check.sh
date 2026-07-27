@@ -17,6 +17,44 @@ node_prefix="$(dirname "$(dirname "$(readlink -f "$(command -v node)")")")"
 export npm_config_nodedir="${npm_config_nodedir:-$node_prefix}"
 mkdir -p "$XDG_CACHE_HOME" "$npm_config_cache"
 
+build_declared_readme_path() {
+  local command_name command_path command_dir
+  local -a command_dirs=()
+
+  for command_name in \
+    ar \
+    bash \
+    cc \
+    cp \
+    dirname \
+    env \
+    gcc \
+    ld \
+    ln \
+    make \
+    mkdir \
+    node \
+    npm \
+    npx \
+    pkg-config \
+    python3 \
+    readlink \
+    rm \
+    ruby \
+    sed \
+    sh \
+    uname; do
+    command_path="$(command -v "$command_name")"
+    command_dir="$(dirname "$command_path")"
+    if [[ ! " ${command_dirs[*]} " =~ \ ${command_dir}\  ]]; then
+      command_dirs+=("$command_dir")
+    fi
+  done
+
+  local IFS=:
+  printf '%s\n' "${command_dirs[*]}"
+}
+
 run_stage() {
   local stage="$1"
 
@@ -40,7 +78,7 @@ run_stage() {
       make borrow-check
       ;;
     readme)
-      make readme-test
+      PATH="$(build_declared_readme_path)" ./scripts/test-readme-snippets.mjs
       ;;
     parity)
       make parity-test
