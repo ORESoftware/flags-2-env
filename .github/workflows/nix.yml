@@ -93,9 +93,6 @@ jobs:
       - name: Build native test binaries
         run: nix develop -c agent-check native-build
 
-      - name: Run shell and CLI suite
-        run: nix develop -c agent-check shell-tests
-
       - name: Run API hardening tests
         run: nix develop -c agent-check api-hardening
 
@@ -108,5 +105,54 @@ jobs:
       - name: Audit package and release outputs
         run: nix develop -c agent-check package
 
-      - name: Prove the default agent command
-        run: nix develop -c agent-check
+  shell-suite-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      diagnostics: ${{ steps.diagnostics.outputs.matrix }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Prepare shell-suite artifacts
+        run: |
+          nix develop -c agent-check dependencies
+          nix develop -c agent-check build
+
+      - name: Locate failing shell-suite assertion
+        id: diagnostics
+        run: |
+          line="$(nix develop -c agent-check shell-tests-line | tail -n 1)"
+          case "$line" in
+            0|[0-9]*)
+              ;;
+            *)
+              line=unknown
+              ;;
+          esac
+          printf 'matrix={"include":[{"line":"%s"}]}\n' "$line" >>"$GITHUB_OUTPUT"
+
+  shell-suite-diagnostics:
+    needs: shell-suite-scan
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.shell-suite-scan.outputs.diagnostics) }}
+    name: Shell suite assertion at tests/run.sh:${{ matrix.line }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce shell-suite result
+        env:
+          FAILURE_LINE: ${{ matrix.line }}
+        run: |
+          if [ "$FAILURE_LINE" != 0 ]; then
+            exit 1
+          fi
