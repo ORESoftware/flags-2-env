@@ -88,6 +88,24 @@ run_python_readme() {
   return "$status"
 }
 
+run_shell_suite() {
+  local log_path="$cache_root/shell-suite.trace.log"
+  local status
+
+  set +e
+  sh -x ./tests/run.sh >"$log_path" 2>&1
+  status=$?
+  set -e
+
+  if ((status != 0)); then
+    printf '%s\n' 'shell suite failed; final traced context follows:' >&2
+    tail -n 120 "$log_path" >&2
+    return "$status"
+  fi
+
+  tail -n 20 "$log_path"
+}
+
 run_stage() {
   local stage="$1"
 
@@ -132,7 +150,7 @@ run_stage() {
       make build/process-smoke build/api-hardening build/allocation-failure
       ;;
     shell-tests)
-      ./tests/run.sh
+      run_shell_suite
       ;;
     api-hardening)
       build/api-hardening
