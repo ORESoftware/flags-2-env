@@ -1,0 +1,41 @@
+name: Rust client
+
+on:
+  pull_request:
+    paths:
+      - 'clients/rust/**'
+      - '.github/workflows/rust-client.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'clients/rust/**'
+      - '.github/workflows/rust-client.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  rust-client:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: clients/rust
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: stable
+          components: rustfmt,clippy
+      - name: Format
+        run: cargo fmt --check
+      - name: Test bundled and dynamic APIs
+        run: cargo test
+      - name: Lint
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Verify publishable package
+        run: cargo package --allow-dirty
