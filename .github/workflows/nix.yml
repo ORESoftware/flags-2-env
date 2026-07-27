@@ -46,6 +46,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+          show-progress: false
 
       - name: Install Nix
         uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342
@@ -77,8 +78,14 @@ jobs:
       - name: Run borrow checker
         run: nix develop -c agent-check borrow
 
-      - name: Verify README snippets
-        run: nix develop -c agent-check readme
+      - name: Verify Node and C README snippets
+        run: nix develop -c agent-check readme-core
+
+      - name: Verify Python README adapter
+        run: nix develop -c agent-check readme-python
+
+      - name: Verify Ruby README adapter
+        run: nix develop -c agent-check readme-ruby
 
       - name: Verify CLI parity
         run: nix develop -c agent-check parity
