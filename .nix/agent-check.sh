@@ -17,6 +17,17 @@ node_prefix="$(dirname "$(dirname "$(readlink -f "$(command -v node)")")")"
 export npm_config_nodedir="${npm_config_nodedir:-$node_prefix}"
 mkdir -p "$XDG_CACHE_HOME" "$npm_config_cache"
 
+native_library_path() {
+  case "$(uname -s)" in
+    Darwin)
+      printf '%s\n' "$repo_root/build/libflags2env.dylib"
+      ;;
+    *)
+      printf '%s\n' "$repo_root/build/libflags2env.so"
+      ;;
+  esac
+}
+
 build_declared_readme_path() {
   local command_name command_path command_dir
   local -a command_dirs=()
@@ -82,10 +93,14 @@ run_stage() {
       PATH="$(build_declared_readme_path)" ./scripts/test-readme-snippets.mjs
       ;;
     readme-python)
-      PATH="$(build_declared_readme_path python3)" ./scripts/test-readme-snippets.mjs
+      FLAGS2ENV_NATIVE_LIB="$(native_library_path)" \
+        PATH="$(build_declared_readme_path python3)" \
+        ./scripts/test-readme-snippets.mjs
       ;;
     readme-ruby)
-      PATH="$(build_declared_readme_path ruby)" ./scripts/test-readme-snippets.mjs
+      FLAGS2ENV_NATIVE_LIB="$(native_library_path)" \
+        PATH="$(build_declared_readme_path ruby)" \
+        ./scripts/test-readme-snippets.mjs
       ;;
     readme)
       local readme_stage
