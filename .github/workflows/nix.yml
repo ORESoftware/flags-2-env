@@ -56,10 +56,11 @@ jobs:
       - name: Check Nix formatting
         run: nix develop -c nixfmt --check flake.nix .nix/dev-shell.nix
 
-      - name: Check agent shell
-        run: |
-          nix develop -c shellcheck .nix/agent-check.sh
-          nix develop -c shfmt -d .nix/agent-check.sh
+      - name: Lint the agent shell
+        run: nix develop -c shellcheck .nix/agent-check.sh
+
+      - name: Check agent shell formatting
+        run: nix develop -c shfmt -d .nix/agent-check.sh
 
       - name: Check GitHub Actions
         run: nix develop -c actionlint .github/workflows/nix.yml
