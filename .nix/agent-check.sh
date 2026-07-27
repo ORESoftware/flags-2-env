@@ -20,30 +20,31 @@ mkdir -p "$XDG_CACHE_HOME" "$npm_config_cache"
 build_declared_readme_path() {
   local command_name command_path command_dir
   local -a command_dirs=()
+  local -a command_names=(
+    ar
+    bash
+    cc
+    cp
+    dirname
+    env
+    gcc
+    ld
+    ln
+    make
+    mkdir
+    node
+    npm
+    npx
+    pkg-config
+    readlink
+    rm
+    sed
+    sh
+    uname
+  )
+  command_names+=("$@")
 
-  for command_name in \
-    ar \
-    bash \
-    cc \
-    cp \
-    dirname \
-    env \
-    gcc \
-    ld \
-    ln \
-    make \
-    mkdir \
-    node \
-    npm \
-    npx \
-    pkg-config \
-    python3 \
-    readlink \
-    rm \
-    ruby \
-    sed \
-    sh \
-    uname; do
+  for command_name in "${command_names[@]}"; do
     command_path="$(command -v "$command_name")"
     command_dir="$(dirname "$command_path")"
     if [[ ! " ${command_dirs[*]} " =~ \ ${command_dir}\  ]]; then
@@ -77,8 +78,20 @@ run_stage() {
     borrow)
       make borrow-check
       ;;
-    readme)
+    readme-core)
       PATH="$(build_declared_readme_path)" ./scripts/test-readme-snippets.mjs
+      ;;
+    readme-python)
+      PATH="$(build_declared_readme_path python3)" ./scripts/test-readme-snippets.mjs
+      ;;
+    readme-ruby)
+      PATH="$(build_declared_readme_path ruby)" ./scripts/test-readme-snippets.mjs
+      ;;
+    readme)
+      local readme_stage
+      for readme_stage in readme-core readme-python readme-ruby; do
+        run_stage "$readme_stage"
+      done
       ;;
     parity)
       make parity-test
@@ -122,11 +135,11 @@ case "${1:-all}" in
       run_stage "$stage"
     done
     ;;
-  preflight | dependencies | build | borrow | readme | parity | native-build | shell-tests | api-hardening | allocation-failure | process-smoke | test | package)
+  preflight | dependencies | build | borrow | readme-core | readme-python | readme-ruby | readme | parity | native-build | shell-tests | api-hardening | allocation-failure | process-smoke | test | package)
     run_stage "$1"
     ;;
   *)
-    printf 'usage: %s [all|preflight|dependencies|build|borrow|readme|parity|native-build|shell-tests|api-hardening|allocation-failure|process-smoke|test|package]\n' "$0" >&2
+    printf 'usage: %s [all|preflight|dependencies|build|borrow|readme-core|readme-python|readme-ruby|readme|parity|native-build|shell-tests|api-hardening|allocation-failure|process-smoke|test|package]\n' "$0" >&2
     exit 64
     ;;
 esac
