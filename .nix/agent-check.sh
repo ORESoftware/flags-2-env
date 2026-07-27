@@ -67,6 +67,27 @@ build_declared_readme_path() {
   printf '%s\n' "${command_dirs[*]}"
 }
 
+run_python_readme() {
+  local compatibility_path="$repo_root/build/libflags2env.dylib"
+  local created_compatibility_link=0
+  local status
+
+  if [[ "$(uname -s)" != Darwin && ! -e "$compatibility_path" ]]; then
+    ln -s "$(native_library_path)" "$compatibility_path"
+    created_compatibility_link=1
+  fi
+
+  set +e
+  env FLAGS2ENV_NATIVE_LIB="$(native_library_path)" PATH="$(build_declared_readme_path python3)" ./scripts/test-readme-snippets.mjs
+  status=$?
+  set -e
+
+  if ((created_compatibility_link == 1)); then
+    rm -f "$compatibility_path"
+  fi
+  return "$status"
+}
+
 run_stage() {
   local stage="$1"
 
@@ -93,7 +114,7 @@ run_stage() {
       PATH="$(build_declared_readme_path)" ./scripts/test-readme-snippets.mjs
       ;;
     readme-python)
-      env FLAGS2ENV_NATIVE_LIB="$(native_library_path)" PATH="$(build_declared_readme_path python3)" ./scripts/test-readme-snippets.mjs
+      run_python_readme
       ;;
     readme-ruby)
       env FLAGS2ENV_NATIVE_LIB="$(native_library_path)" PATH="$(build_declared_readme_path ruby)" ./scripts/test-readme-snippets.mjs
