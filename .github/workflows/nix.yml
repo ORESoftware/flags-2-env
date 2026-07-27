@@ -67,5 +67,17 @@ jobs:
       - name: Evaluate and build flake checks
         run: nix flake check --show-trace
 
-      - name: Run the C and Node agent contract
+      - name: Install Node dependencies
+        run: nix develop -c agent-check dependencies
+
+      - name: Build C and Node artifacts
+        run: nix develop -c agent-check build
+
+      - name: Run C and cross-language tests
+        run: nix develop -c agent-check test
+
+      - name: Audit package and release outputs
+        run: nix develop -c agent-check package
+
+      - name: Prove the default agent command
         run: nix develop -c agent-check
