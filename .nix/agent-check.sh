@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# The nested Bash trace program intentionally receives literal shell variables.
+# shellcheck disable=SC2016
+
 export CI="${CI:-1}"
 export NO_COLOR="${NO_COLOR:-1}"
 export CC="${CC:-gcc}"
