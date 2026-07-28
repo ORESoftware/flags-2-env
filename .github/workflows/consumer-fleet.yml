@@ -8,6 +8,7 @@ on:
       - "scripts/render-consumer-fleet.py"
       - "scripts/verify-shell-contract.py"
       - "tests/test_consumer_fleet.py"
+      - "tests/test_shell_contract_verifier.py"
   push:
     branches: [main]
     paths:
@@ -16,6 +17,7 @@ on:
       - "scripts/render-consumer-fleet.py"
       - "scripts/verify-shell-contract.py"
       - "tests/test_consumer_fleet.py"
+      - "tests/test_shell_contract_verifier.py"
   schedule:
     - cron: "17 7 * * *"
   workflow_dispatch:
@@ -47,12 +49,18 @@ jobs:
         with:
           args: .github/workflows/consumer-fleet.yml
 
-      - name: Compile and test the matrix validator
+      - name: Compile and test fleet safety tooling
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m py_compile scripts/render-consumer-fleet.py tests/test_consumer_fleet.py
-          python3 -m unittest tests/test_consumer_fleet.py
+          python3 -m py_compile \
+            scripts/render-consumer-fleet.py \
+            scripts/verify-shell-contract.py \
+            tests/test_consumer_fleet.py \
+            tests/test_shell_contract_verifier.py
+          python3 -m unittest \
+            tests/test_consumer_fleet.py \
+            tests/test_shell_contract_verifier.py
 
       - name: Render the immutable read-only matrix
         id: fleet
