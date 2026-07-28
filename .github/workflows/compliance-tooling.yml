@@ -1,0 +1,38 @@
+name: Consumer compliance tooling
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/reusable-consumer-compliance.yml"
+      - ".github/workflows/compliance-tooling.yml"
+      - "scripts/verify-consumer-compliance.py"
+      - "tests/compliance/**"
+      - "docs/consumer-compliance.md"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/reusable-consumer-compliance.yml"
+      - ".github/workflows/compliance-tooling.yml"
+      - "scripts/verify-consumer-compliance.py"
+      - "tests/compliance/**"
+      - "docs/consumer-compliance.md"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Validate workflows
+        uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+        with:
+          args: .github/workflows/reusable-consumer-compliance.yml .github/workflows/compliance-tooling.yml
+      - name: Compile policy checker
+        run: python3 -m py_compile scripts/verify-consumer-compliance.py
+      - name: Run policy fixtures
+        run: bash tests/compliance/run.sh
