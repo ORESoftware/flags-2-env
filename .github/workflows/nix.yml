@@ -114,3 +114,67 @@ jobs:
 
       - name: Prove the default agent command
         run: nix develop -c agent-check
+
+  shell-suite-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      diagnostics: ${{ steps.diagnostics.outputs.matrix }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Capture shell-suite diagnostic
+        id: diagnostics
+        run: |
+          set +e
+          nix develop -c agent-check dependencies >/dev/null
+          nix develop -c agent-check build >/dev/null
+          nix develop -c agent-check shell-tests >shell-suite.stdout 2>shell-suite.stderr
+          status=$?
+          set -e
+          STATUS="$status" python3 - <<'PY' >matrix.json
+          import json
+          import os
+          import re
+
+          status = int(os.environ["STATUS"])
+          lines = []
+          for path in ("shell-suite.stderr", "shell-suite.stdout"):
+              try:
+                  with open(path, encoding="utf-8", errors="replace") as stream:
+                      lines.extend(line.strip() for line in stream if line.strip())
+              except OSError:
+                  pass
+          lines = [
+              line for line in lines
+              if not line.startswith("shell suite failed")
+              and not line.startswith("__F2E_FAILURE_LINE__")
+          ]
+          message = lines[-1] if lines else "clean" if status == 0 else "no-diagnostic-output"
+          message = re.sub(r"[^A-Za-z0-9._+/:=-]+", "-", message).strip("-")[:100]
+          print(json.dumps({"include": [{"status": status, "message": message or "empty"}]}, separators=(",", ":")))
+          PY
+          printf 'matrix=%s\n' "$(cat matrix.json)" >>"$GITHUB_OUTPUT"
+
+  shell-suite-diagnostics:
+    needs: shell-suite-scan
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.shell-suite-scan.outputs.diagnostics) }}
+    name: Shell suite exit ${{ matrix.status }} — ${{ matrix.message }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce shell-suite result
+        env:
+          FAILURE_STATUS: ${{ matrix.status }}
+        run: test "$FAILURE_STATUS" -eq 0
