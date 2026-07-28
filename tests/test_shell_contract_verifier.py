@@ -46,6 +46,17 @@ class ShellContractVerifierTests(unittest.TestCase):
         self.assertIn("--agent-tasks-rds-database-url", options)
         self.assertIn("env=AGENT_TASKS_RDS_DATABASE_URL; type=string", details)
 
+    def test_literal_pipe_inside_description_does_not_split_the_column(self) -> None:
+        output = """
++------------+----------+---------------------------------------+
+| Option(s)  | Default  | Description                           |
++------------+----------+---------------------------------------+
+| --format   | sql      | Output format: sql | json for CI      |
++------------+----------+---------------------------------------+
+"""
+        descriptions = MODULE.table_column(output, {"Description", "Details"})
+        self.assertIn("Output format: sql json for CI", descriptions)
+
     def test_command_basename_normalizes_paths_and_rejects_metacharacters(self) -> None:
         self.assertEqual(MODULE.command_basename("../zed"), "zed")
         self.assertEqual(MODULE.command_basename("/usr/bin/zed"), "zed")
