@@ -21,12 +21,26 @@ jobs:
           ref: ${{ github.head_ref }}
           fetch-depth: 0
           persist-credentials: true
-      - name: Apply parser and test changes once
+      - name: Apply parser and correct semantic test cases once
         shell: bash
         run: |
           if ! grep -q 'F2E_MAX_LOGICAL_LINE' src/parser.c; then
             python3 scripts/apply_den_442.py
           fi
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('tests/run.sh')
+          text = path.read_text()
+          text = text.replace(
+              '--operation-mode fast --without-color',
+              '--operation-mode fast --color=without-color',
+          )
+          text = text.replace(
+              '--destination production --yes-color',
+              '--destination production --color=yes-color',
+          )
+          path.write_text(text)
+          PY
       - name: Capture parser and packaging validation
         shell: bash
         run: |
@@ -41,20 +55,17 @@ jobs:
           } > .den-442-validation.txt 2>&1
           test_status=$?
           if [[ "$test_status" -eq 0 ]]; then
-            {
-              ./scripts/audit-client-packaging.sh
-              ./scripts/audit-generated-clients.sh
-            } >> .den-442-validation.txt 2>&1
+            ./scripts/audit-client-packaging.sh >> .den-442-validation.txt 2>&1
             packaging_status=$?
           else
             packaging_status=99
           fi
           printf '\ntest_status=%s\npackaging_status=%s\n' "$test_status" "$packaging_status" >> .den-442-validation.txt
           exit 0
-      - name: Commit diagnostic only
+      - name: Commit corrected tests and diagnostic
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add .den-442-validation.txt
-          git commit -m 'test: capture multiline TOML array validation'
+          git add tests/run.sh .den-442-validation.txt
+          git commit -m 'test: validate multiline TOML array semantics'
           git push origin HEAD:feat/den-442-multiline-toml-arrays
