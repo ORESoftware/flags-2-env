@@ -734,14 +734,14 @@ if [ "$actual" != "$expected" ]; then
   exit 1
 fi
 
-actual="$(cd "$MULTILINE_ARRAY_DIR" && "$CLI" multiline --operation-mode fast --without-color)"
+actual="$(cd "$MULTILINE_ARRAY_DIR" && "$CLI" multiline --operation-mode fast --color=without-color)"
 expected='{"MULTILINE_COMMAND":"","MODE":"fast","COLOR":"false"}'
 if [ "$actual" != "$expected" ]; then
   printf 'Expected multiline global aliases: %s\nActual:                            %s\n' "$expected" "$actual" >&2
   exit 1
 fi
 
-actual="$(cd "$MULTILINE_ARRAY_DIR" && "$CLI" multiline ship --destination production --yes-color)"
+actual="$(cd "$MULTILINE_ARRAY_DIR" && "$CLI" multiline ship --destination production --color=yes-color)"
 expected='{"MULTILINE_COMMAND":"deploy","MODE":"safe","COLOR":"true","TARGET":"production"}'
 if [ "$actual" != "$expected" ]; then
   printf 'Expected multiline command aliases: %s\nActual:                             %s\n' "$expected" "$actual" >&2

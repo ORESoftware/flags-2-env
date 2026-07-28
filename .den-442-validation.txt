@@ -21,8 +21,10 @@ cc -std=c99 -Wall -Wextra -Wpedantic -O2 -Isrc src/parser.c tests/process_smoke.
 cc -std=c99 -Wall -Wextra -Wpedantic -O2 -Isrc src/parser.c tests/api_hardening.c -o build/api-hardening
 cc -std=c99 -Wall -Wextra -Wpedantic -O2 -Isrc tests/allocation_failure.c -o build/allocation-failure
 bash completion tests passed
-Expected multiline global aliases: {"MULTILINE_COMMAND":"","MODE":"fast","COLOR":"false"}
-Actual:                            {"MULTILINE_COMMAND":"","MODE":"fast","COLOR":"true"}
+Expected invalid multiline element audit failure:
+{"ok":false,"errorCount":1,"warningCount":0,"errors":["env.ignore must be a list of env var names"],"warnings":[]}
+Actual status: 1
+Actual: {"ok":false,"errorCount":1,"warningCount":0,"errors":["no [flags.*] or [commands.*] tables declared"],"warnings":[]}
 allocation-failure: bash completion (60 allocation points)
 allocation-failure: zsh completion (60 allocation points)
 allocation-failure: TypeScript generation (6 allocation points)
@@ -32,7 +34,6 @@ allocation-failure: structured argv parse (20 allocation points)
 allocation-failure: help rendering (50 allocation points)
 allocation-failure: value coercion (9 allocation points)
 client packaging audit passed
-/home/runner/work/_temp/f5d2ac81-d53a-4c29-9c89-18038fb82baf.sh: line 14: ./scripts/audit-generated-clients.sh: No such file or directory
 
 test_status=0
-packaging_status=127
+packaging_status=0
