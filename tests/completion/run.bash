@@ -11,15 +11,13 @@ fail() {
   exit 1
 }
 
+if ! type complete >/dev/null 2>&1 || ! type compgen >/dev/null 2>&1; then
+  fail 'Bash programmable-completion builtins complete and compgen are required'
+fi
+
 load_completion() {
-  # tests/run.sh separately verifies the generated `complete -o default -F ...`
-  # registration command byte-for-byte. This harness exercises the generated
-  # function directly, so isolate it from whether the host Bash build exposes
-  # the interactive programmable-completion builtin.
-  complete() { :; }
   # shellcheck disable=SC1090
   source /dev/stdin <<<"$("$CLI" completion bash "$1" "$2")"
-  unset -f complete
 }
 
 # complete_words <function> <words...> — last word is the one being completed
