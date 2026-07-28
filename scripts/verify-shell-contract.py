@@ -210,9 +210,9 @@ source "$COMPLETION_FILE"
 spec="$(complete -p -- "$COMMAND_NAME")"
 [[ "$spec" =~ -F[[:space:]]+([^[:space:]]+) ]]
 fn="${BASH_REMATCH[1]}"
-COMP_WORDS=("$COMMAND_NAME" "")
+COMP_WORDS=("$COMMAND_NAME" "-")
 COMP_CWORD=1
-COMP_LINE="$COMMAND_NAME "
+COMP_LINE="$COMMAND_NAME -"
 COMP_POINT="${#COMP_LINE}"
 COMPREPLY=()
 "$fn"
