@@ -21,14 +21,19 @@ jobs:
           ref: ${{ github.head_ref }}
           fetch-depth: 0
           persist-credentials: true
-      - name: Apply parser and test changes
-        run: python3 scripts/apply_den_442.py
+      - name: Apply parser and test changes once
+        shell: bash
+        run: |
+          if ! grep -q 'F2E_MAX_LOGICAL_LINE' src/parser.c; then
+            python3 scripts/apply_den_442.py
+          fi
       - name: Capture validation results
         shell: bash
         run: |
           set +e
           {
             make clean
+            make all
             make test
           } > .den-442-validation.txt 2>&1
           test_status=$?
@@ -48,5 +53,5 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add src clients tests/run.sh .den-442-validation.txt
-          git commit -m 'DEN-442: support multiline TOML arrays'
+          git commit -m 'test: validate multiline TOML arrays'
           git push origin HEAD:feat/den-442-multiline-toml-arrays
