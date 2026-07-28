@@ -1,0 +1,208 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export CI="${CI:-1}"
+export NO_COLOR="${NO_COLOR:-1}"
+export CC="${CC:-gcc}"
+export AR="${AR:-ar}"
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+cache_root="${NIX_AGENT_CACHE_ROOT:-$repo_root/.cache/nix-agent}"
+export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$cache_root/xdg}"
+export npm_config_cache="${npm_config_cache:-$cache_root/npm}"
+export npm_config_build_from_source="${npm_config_build_from_source:-true}"
+node_prefix="$(dirname "$(dirname "$(readlink -f "$(command -v node)")")")"
+export npm_config_nodedir="${npm_config_nodedir:-$node_prefix}"
+mkdir -p "$XDG_CACHE_HOME" "$npm_config_cache"
+
+native_library_path() {
+  case "$(uname -s)" in
+    Darwin)
+      printf '%s\n' "$repo_root/build/libflags2env.dylib"
+      ;;
+    *)
+      printf '%s\n' "$repo_root/build/libflags2env.so"
+      ;;
+  esac
+}
+
+build_declared_readme_path() {
+  local command_name command_path command_dir
+  local -a command_dirs=()
+  local -a command_names=(
+    ar
+    awk
+    bash
+    cc
+    cp
+    cut
+    dirname
+    env
+    gcc
+    grep
+    ld
+    ln
+    make
+    mkdir
+    node
+    npm
+    npx
+    pkg-config
+    readlink
+    rm
+    sed
+    sh
+    tail
+    uname
+  )
+  command_names+=("$@")
+
+  for command_name in "${command_names[@]}"; do
+    command_path="$(command -v "$command_name")"
+    command_dir="$(dirname "$command_path")"
+    if [[ ! " ${command_dirs[*]} " =~ \ ${command_dir}\  ]]; then
+      command_dirs+=("$command_dir")
+    fi
+  done
+
+  local IFS=:
+  printf '%s\n' "${command_dirs[*]}"
+}
+
+run_python_readme() {
+  local compatibility_path="$repo_root/build/libflags2env.dylib"
+  local created_compatibility_link=0
+  local status
+
+  if [[ "$(uname -s)" != Darwin && ! -e "$compatibility_path" ]]; then
+    ln -s "$(native_library_path)" "$compatibility_path"
+    created_compatibility_link=1
+  fi
+
+  set +e
+  env FLAGS2ENV_NATIVE_LIB="$(native_library_path)" PATH="$(build_declared_readme_path python3)" ./scripts/test-readme-snippets.mjs
+  status=$?
+  set -e
+
+  if ((created_compatibility_link == 1)); then
+    rm -f "$compatibility_path"
+  fi
+  return "$status"
+}
+
+run_shell_suite() {
+  local log_path="$cache_root/shell-suite.trace.log"
+  local shell_suite_path
+  local status
+
+  shell_suite_path="$(build_declared_readme_path python3 ruby)"
+  set +e
+  # Pass the test path as both Bash's $0 and $1. tests/run.sh deliberately uses
+  # $0 to resolve the repository root, even when sourced for ERR diagnostics.
+  # The nested Bash program intentionally receives literal Bash variables.
+  # shellcheck disable=SC2016
+  env PATH="$shell_suite_path" bash -Eeuo pipefail -c '
+    trap '\''printf "__F2E_FAILURE_LINE__:%s\n" "$LINENO" >&2'\'' ERR
+    source "$1"
+  ' ./tests/run.sh ./tests/run.sh >"$log_path" 2>&1
+  status=$?
+  set -e
+
+  if ((status != 0)); then
+    printf '%s\n' 'shell suite failed; final context follows:' >&2
+    tail -n 120 "$log_path" >&2
+    return "$status"
+  fi
+
+  tail -n 20 "$log_path"
+}
+
+run_stage() {
+  local stage="$1"
+
+  printf '\n==> agent-check stage: %s\n' "$stage"
+  case "$stage" in
+    preflight)
+      git diff --check
+      nixfmt --check flake.nix .nix/dev-shell.nix
+      shellcheck .nix/agent-check.sh
+      shfmt -i 2 -ci -d .nix/agent-check.sh
+      actionlint .github/workflows/nix.yml
+      nix flake check --show-trace
+      ;;
+    dependencies)
+      npm ci
+      ;;
+    build)
+      make clean all
+      ;;
+    borrow)
+      make borrow-check
+      ;;
+    readme-core)
+      PATH="$(build_declared_readme_path)" ./scripts/test-readme-snippets.mjs
+      ;;
+    readme-python)
+      run_python_readme
+      ;;
+    readme-ruby)
+      env FLAGS2ENV_NATIVE_LIB="$(native_library_path)" PATH="$(build_declared_readme_path ruby)" ./scripts/test-readme-snippets.mjs
+      ;;
+    readme)
+      local readme_stage
+      for readme_stage in readme-core readme-python readme-ruby; do
+        run_stage "$readme_stage"
+      done
+      ;;
+    parity)
+      make parity-test
+      ;;
+    native-build)
+      make build/process-smoke build/api-hardening build/allocation-failure
+      ;;
+    shell-tests)
+      run_shell_suite
+      ;;
+    api-hardening)
+      build/api-hardening
+      ;;
+    allocation-failure)
+      build/allocation-failure tests/subcommands-deep/.cli-flags.toml
+      ;;
+    process-smoke)
+      build/process-smoke --port 7777 -d
+      ;;
+    test)
+      local test_stage
+      for test_stage in borrow readme parity native-build shell-tests api-hardening allocation-failure process-smoke; do
+        run_stage "$test_stage"
+      done
+      ;;
+    package)
+      npm run pack:audit
+      npm run pack:dry-run
+      npm run release:audit
+      ;;
+    *)
+      printf 'unknown agent-check stage: %s\n' "$stage" >&2
+      return 64
+      ;;
+  esac
+}
+
+case "${1:-all}" in
+  all)
+    for stage in preflight dependencies build test package; do
+      run_stage "$stage"
+    done
+    ;;
+  preflight | dependencies | build | borrow | readme-core | readme-python | readme-ruby | readme | parity | native-build | shell-tests | api-hardening | allocation-failure | process-smoke | test | package)
+    run_stage "$1"
+    ;;
+  *)
+    printf 'usage: %s [all|preflight|dependencies|build|borrow|readme-core|readme-python|readme-ruby|readme|parity|native-build|shell-tests|api-hardening|allocation-failure|process-smoke|test|package]\n' "$0" >&2
+    exit 64
+    ;;
+esac
