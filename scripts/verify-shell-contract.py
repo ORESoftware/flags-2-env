@@ -179,6 +179,35 @@ def normalized(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
 
+def table_column(output: str, headers: set[str]) -> str:
+    """Reconstruct one rendered table column across terminal-wrapped rows.
+
+    flags2env supports compact two-column help as well as caller-selected four-
+    and five-column layouts. Long values can wrap independently in adjacent
+    columns, so searching the normalized whole table can interleave unrelated
+    text. Locate the requested header dynamically and concatenate only that
+    cell from every continuation row.
+    """
+
+    clean = ANSI_ESCAPE.sub("", output).replace("│", "|").replace("\r", "")
+    column_index: int | None = None
+    fragments: list[str] = []
+    for line in clean.splitlines():
+        cells = line.split("|")
+        if column_index is None:
+            for index, cell in enumerate(cells):
+                if cell.strip() in headers:
+                    column_index = index
+                    break
+            continue
+        if column_index >= len(cells):
+            continue
+        value = cells[column_index].strip()
+        if value and value not in headers:
+            fragments.append(value)
+    return normalized(" ".join(fragments))
+
+
 def check_help(
     cli: Path,
     command: str,
@@ -201,16 +230,12 @@ def check_help(
             if output.lstrip().startswith("{") or '{"' in output:
                 raise RuntimeError(f"{label} --help printed JSON:\n{output}")
 
-            # Do not infer the description column from a fixed number of table
-            # cells. Contracts can select two, four, or five help columns, and
-            # narrow terminals can switch to a compact Details layout. The
-            # user-visible contract is that the normalized description appears
-            # somewhere in the rendered help output, independent of layout.
-            rendered = normalized(output)
+            option_column = table_column(output, {"Option(s)"}).replace(" ", "")
+            description_column = table_column(output, {"Description", "Details"})
             for names, description in visible_flags(root, scope):
-                if not any(name in output for name in names):
+                if not any(name in option_column for name in names):
                     raise RuntimeError(f"{label} --help omitted {names}:\n{output}")
-                if description and normalized(description) not in rendered:
+                if description and normalized(description) not in description_column:
                     raise RuntimeError(
                         f"{label} --help omitted description {description!r}:\n{output}"
                     )
