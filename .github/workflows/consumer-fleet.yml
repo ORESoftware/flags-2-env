@@ -34,7 +34,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       matrix: ${{ steps.fleet.outputs.matrix }}
-      tooling_ref: ${{ steps.fleet.outputs.tooling_ref }}
+      tooling_ref: ${{ steps.source.outputs.tooling_ref }}
       consumer_count: ${{ steps.fleet.outputs.consumer_count }}
     steps:
       - name: Check out fleet definition
@@ -63,10 +63,24 @@ jobs:
             --fleet consumer-fleet.json \
             --github-output "$GITHUB_OUTPUT"
 
+      - name: Select the exact canonical tooling commit under review
+        id: source
+        env:
+          SOURCE_REF: ${{ github.event.pull_request.head.sha || github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_REF" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "tooling source is not an immutable full commit: $SOURCE_REF" >&2
+            exit 1
+          }
+          echo "tooling_ref=$SOURCE_REF" >> "$GITHUB_OUTPUT"
+
       - name: Summarize fleet scope
         env:
+          BASELINE_REF: ${{ steps.fleet.outputs.tooling_ref }}
           CONSUMER_COUNT: ${{ steps.fleet.outputs.consumer_count }}
-          TOOLING_REF: ${{ steps.fleet.outputs.tooling_ref }}
+          TOOLING_REF: ${{ steps.source.outputs.tooling_ref }}
         shell: bash
         run: |
           set -euo pipefail
@@ -74,7 +88,8 @@ jobs:
             echo "### flags2env consumer fleet"
             echo
             echo "- Contracts: $CONSUMER_COUNT"
-            echo "- Canonical tooling: \`$TOOLING_REF\`"
+            echo "- Tooling under review: \`$TOOLING_REF\`"
+            echo "- Minimum reviewed baseline: \`$BASELINE_REF\`"
             echo "- Checkout permissions: read-only"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -140,12 +155,22 @@ jobs:
           CONTRACT: ${{ steps.contract.outputs.path }}
         shell: bash
         run: |
-          set -euo pipefail
+          set -o pipefail
+          log="$RUNNER_TEMP/${COMMAND_NAME}-shell-contract.log"
           python3 flags2env-tooling/scripts/verify-shell-contract.py \
             --cli flags2env-tooling/build/flags2env \
             --contract "$CONTRACT" \
             --command "$COMMAND_NAME" \
-            --install
+            --install 2>&1 | tee "$log"
+
+      - name: Upload bounded shell-contract diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ${{ matrix.command }}-shell-contract-log
+          path: ${{ runner.temp }}/${{ matrix.command }}-shell-contract.log
+          if-no-files-found: ignore
+          retention-days: 1
 
       - name: Record immutable evidence
         env:
