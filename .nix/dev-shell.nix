@@ -4,6 +4,7 @@ let
     (with pkgs; [
       actionlint
       binutils
+      gawk
       gcc
       git
       gnumake
