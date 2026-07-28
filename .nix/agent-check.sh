@@ -33,6 +33,7 @@ build_declared_readme_path() {
   local -a command_dirs=()
   local -a command_names=(
     ar
+    awk
     bash
     cc
     cp
