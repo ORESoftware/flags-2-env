@@ -42,6 +42,9 @@ jobs:
       matrix: ${{ steps.fleet.outputs.matrix }}
       tooling_ref: ${{ steps.source.outputs.tooling_ref }}
       consumer_count: ${{ steps.fleet.outputs.consumer_count }}
+      central_count: ${{ steps.fleet.outputs.central_count }}
+      in_repo_count: ${{ steps.fleet.outputs.in_repo_count }}
+      in_repo_evidence: ${{ steps.fleet.outputs.in_repo_evidence }}
     steps:
       - name: Check out fleet definition
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -91,22 +94,39 @@ jobs:
           }
           echo "tooling_ref=$SOURCE_REF" >> "$GITHUB_OUTPUT"
 
-      - name: Summarize fleet scope
+      - name: Summarize fleet scope and private-repository evidence
         env:
           BASELINE_REF: ${{ steps.fleet.outputs.tooling_ref }}
+          CENTRAL_COUNT: ${{ steps.fleet.outputs.central_count }}
           CONSUMER_COUNT: ${{ steps.fleet.outputs.consumer_count }}
+          IN_REPO_COUNT: ${{ steps.fleet.outputs.in_repo_count }}
+          IN_REPO_EVIDENCE: ${{ steps.fleet.outputs.in_repo_evidence }}
           TOOLING_REF: ${{ steps.source.outputs.tooling_ref }}
         shell: bash
         run: |
           set -euo pipefail
-          {
-            echo "### flags2env consumer fleet"
-            echo
-            echo "- Contracts: $CONSUMER_COUNT"
-            echo "- Tooling under review: \`$TOOLING_REF\`"
-            echo "- Minimum reviewed baseline: \`$BASELINE_REF\`"
-            echo "- Checkout permissions: read-only"
-          } >> "$GITHUB_STEP_SUMMARY"
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          import os
+
+          evidence = json.loads(os.environ["IN_REPO_EVIDENCE"])
+          print("### flags2env consumer fleet")
+          print()
+          print(f"- Total contracts: {os.environ['CONSUMER_COUNT']}")
+          print(f"- Central read-only matrix: {os.environ['CENTRAL_COUNT']}")
+          print(f"- In-repository verification: {os.environ['IN_REPO_COUNT']}")
+          print(f"- Tooling under review: `{os.environ['TOOLING_REF']}`")
+          print(f"- Minimum reviewed baseline: `{os.environ['BASELINE_REF']}`")
+          print("- Central checkout permissions: read-only")
+          if evidence:
+              print("- Private-repository evidence:")
+              for item in evidence:
+                  label = f"{item['repository']}:{item['contract']}"
+                  print(
+                      f"  - [{label}]({item['evidence_pr']}) via "
+                      f"`{item['workflow']}`"
+                  )
+          PY
 
   shell-contract:
     name: ${{ matrix.label }}
