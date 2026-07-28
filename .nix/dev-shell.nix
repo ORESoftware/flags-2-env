@@ -3,6 +3,7 @@ let
   shellPackages =
     (with pkgs; [
       actionlint
+      bashInteractive
       binutils
       gawk
       gcc
