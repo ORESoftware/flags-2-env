@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# The nested Bash trace program intentionally receives literal shell variables.
-# shellcheck disable=SC2016
-
 export CI="${CI:-1}"
 export NO_COLOR="${NO_COLOR:-1}"
 export CC="${CC:-gcc}"
@@ -98,6 +95,8 @@ run_shell_suite() {
 
   shell_suite_path="$(build_declared_readme_path python3 ruby)"
   set +e
+  # The nested Bash trace program intentionally receives literal shell variables.
+  # shellcheck disable=SC2016
   env PATH="$shell_suite_path" bash -c 'PS4="+${LINENO}: "; set -x; source "$0"' ./tests/run.sh >"$log_path" 2>&1
   status=$?
   set -e
