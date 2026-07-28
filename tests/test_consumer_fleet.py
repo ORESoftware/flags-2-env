@@ -33,15 +33,47 @@ class ConsumerFleetTests(unittest.TestCase):
                 check=False,
             )
 
+    def run_document_with_outputs(
+        self, document: dict[str, object]
+    ) -> tuple[subprocess.CompletedProcess[str], dict[str, str]]:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "fleet.json"
+            output = root / "github-output"
+            path.write_text(json.dumps(document), encoding="utf-8")
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--fleet",
+                    str(path),
+                    "--github-output",
+                    str(output),
+                    "--print",
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            values: dict[str, str] = {}
+            if output.exists():
+                for line in output.read_text(encoding="utf-8").splitlines():
+                    name, value = line.split("=", 1)
+                    values[name] = value
+            return result, values
+
+    def in_repo_entry(self, document: dict[str, object]) -> dict[str, object]:
+        consumers = document["consumers"]
+        assert isinstance(consumers, list)
+        for entry in consumers:
+            if isinstance(entry, dict) and entry.get("verification") == "in-repo":
+                return entry
+        self.fail("fixture has no in-repo consumer")
+
     def test_repository_matrix_is_valid_and_has_unique_labels(self) -> None:
-        result = subprocess.run(
-            [sys.executable, str(SCRIPT), "--fleet", str(FLEET), "--print"],
-            cwd=ROOT,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-        )
+        result, outputs = self.run_document_with_outputs(self.load())
         self.assertEqual(result.returncode, 0, result.stderr)
         matrix = json.loads(result.stdout)
         entries = matrix["include"]
@@ -51,6 +83,29 @@ class ConsumerFleetTests(unittest.TestCase):
             "ORESoftware/k8s-cluster:remote/deployments/browser-mcp-rs/.cli-flags.toml",
             {entry["label"] for entry in entries},
         )
+        self.assertEqual(len(entries), int(outputs["central_count"]))
+        self.assertEqual(23, int(outputs["consumer_count"]))
+        self.assertEqual(3, int(outputs["in_repo_count"]))
+
+        central_repositories = {entry["repository"] for entry in entries}
+        evidence = json.loads(outputs["in_repo_evidence"])
+        self.assertEqual(
+            {
+                "ORESoftware/shared-auth-server.rs",
+                "ORESoftware/sonusauris-app-proxy",
+                "sagitta-stack/sagitta-mcp-server.rs",
+            },
+            {entry["repository"] for entry in evidence},
+        )
+        self.assertTrue(
+            central_repositories.isdisjoint(
+                {entry["repository"] for entry in evidence}
+            )
+        )
+        for entry in evidence:
+            self.assertEqual("in-repo", entry["verification"])
+            self.assertTrue(entry["workflow"].startswith(".github/workflows/"))
+            self.assertIn(f"/{entry['repository']}/pull/".casefold(), entry["evidence_pr"].casefold())
 
     def test_mutable_tooling_reference_is_rejected(self) -> None:
         document = self.load()
@@ -90,6 +145,51 @@ class ConsumerFleetTests(unittest.TestCase):
         result = self.run_document(document)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("must be sorted", result.stderr)
+
+    def test_in_repo_consumer_requires_complete_evidence(self) -> None:
+        document = self.load()
+        entry = self.in_repo_entry(document)
+        entry.pop("evidence_pr")
+        result = self.run_document(document)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("evidence_pr", result.stderr)
+
+    def test_in_repo_evidence_must_match_the_consumer_repository(self) -> None:
+        document = self.load()
+        entry = self.in_repo_entry(document)
+        entry["evidence_pr"] = "https://github.com/ORESoftware/flags-2-env/pull/8"
+        result = self.run_document(document)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("does not match consumer", result.stderr)
+
+    def test_in_repo_workflow_must_stay_under_github_workflows(self) -> None:
+        document = self.load()
+        entry = self.in_repo_entry(document)
+        entry["workflow"] = "../flags2env.yml"
+        result = self.run_document(document)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unsafe workflow path", result.stderr)
+
+    def test_unsupported_verification_mode_is_rejected(self) -> None:
+        document = self.load()
+        consumers = document["consumers"]
+        assert isinstance(consumers, list)
+        entry = consumers[0]
+        assert isinstance(entry, dict)
+        entry["verification"] = "external"
+        result = self.run_document(document)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unsupported verification mode", result.stderr)
+
+    def test_explicit_central_verification_is_allowed_without_evidence(self) -> None:
+        document = self.load()
+        consumers = document["consumers"]
+        assert isinstance(consumers, list)
+        entry = consumers[0]
+        assert isinstance(entry, dict)
+        entry["verification"] = "central"
+        result = self.run_document(document)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == "__main__":
