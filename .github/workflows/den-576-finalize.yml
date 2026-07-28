@@ -28,18 +28,44 @@ jobs:
       - name: Apply the exact verifier fix
         run: python3 scripts/den-576-fix-description.py
 
-      - name: Validate verifier and fleet contracts
+      - name: Capture verifier and fleet validation
+        shell: bash
         run: |
-          set -euo pipefail
-          git diff --check
-          python3 -m unittest tests.test_shell_contract_verifier tests.test_consumer_fleet
-          python3 scripts/render-consumer-matrix.py consumer-fleet.json >/tmp/matrix.json
-          python3 - <<'PY'
+          set +e
+          {
+            set -x
+            git diff --check
+            python3 -m unittest -v \
+              tests.test_shell_contract_verifier \
+              tests.test_consumer_fleet
+            python3 scripts/render-consumer-matrix.py consumer-fleet.json >validation-matrix.json
+            python3 - <<'PY'
           import json
           from pathlib import Path
-          matrix = json.loads(Path('/tmp/matrix.json').read_text())
+          matrix = json.loads(Path('validation-matrix.json').read_text())
+          print(f"matrix entries: {len(matrix['include'])}")
           assert len(matrix['include']) == 23
           PY
+          } >validation.log 2>&1
+          status=$?
+          printf '%s\n' "$status" >validation.status
+          cat validation.log
+          exit 0
+
+      - name: Upload validation diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: den-576-validation
+          path: |
+            validation.log
+            validation.status
+            validation-matrix.json
+          if-no-files-found: warn
+          retention-days: 1
+
+      - name: Enforce validation result
+        run: test "$(cat validation.status)" = 0
 
       - name: Commit the reviewable verifier fix
         env:
