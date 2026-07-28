@@ -6,7 +6,9 @@ on:
       - ".github/workflows/consumer-fleet.yml"
       - "consumer-fleet.json"
       - "scripts/render-consumer-fleet.py"
+      - "scripts/verify-consumer-compliance.py"
       - "scripts/verify-shell-contract.py"
+      - "tests/test_consumer_compliance_policy.py"
       - "tests/test_consumer_fleet.py"
       - "tests/test_shell_contract_verifier.py"
   push:
@@ -15,7 +17,9 @@ on:
       - ".github/workflows/consumer-fleet.yml"
       - "consumer-fleet.json"
       - "scripts/render-consumer-fleet.py"
+      - "scripts/verify-consumer-compliance.py"
       - "scripts/verify-shell-contract.py"
+      - "tests/test_consumer_compliance_policy.py"
       - "tests/test_consumer_fleet.py"
       - "tests/test_shell_contract_verifier.py"
   schedule:
@@ -55,10 +59,13 @@ jobs:
           set -euo pipefail
           python3 -m py_compile \
             scripts/render-consumer-fleet.py \
+            scripts/verify-consumer-compliance.py \
             scripts/verify-shell-contract.py \
+            tests/test_consumer_compliance_policy.py \
             tests/test_consumer_fleet.py \
             tests/test_shell_contract_verifier.py
           python3 -m unittest \
+            tests/test_consumer_compliance_policy.py \
             tests/test_consumer_fleet.py \
             tests/test_shell_contract_verifier.py
 
