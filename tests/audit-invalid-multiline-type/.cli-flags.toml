@@ -1,0 +1,5 @@
+[env]
+ignore = [
+  "DATABASE_URL",
+  7,
+]
