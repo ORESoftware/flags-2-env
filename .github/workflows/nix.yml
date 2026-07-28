@@ -128,31 +128,33 @@ jobs:
           nix develop -c agent-check dependencies
           nix develop -c agent-check build
 
-      - name: Locate failing shell-suite assertion
+      - name: Capture shell-suite result
         id: diagnostics
         run: |
-          line="$(nix develop -c agent-check shell-tests-line | tail -n 1)"
-          case "$line" in
-            0|[0-9]*)
-              ;;
-            *)
-              line=unknown
-              ;;
-          esac
-          printf 'matrix={"include":[{"line":"%s"}]}\n' "$line" >>"$GITHUB_OUTPUT"
+          set +e
+          nix develop -c agent-check shell-tests >shell-suite.stdout 2>shell-suite.stderr
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            message=clean
+          else
+            message=$(grep -vE '^(__F2E_FAILURE_LINE__|shell suite failed)' shell-suite.stderr | tail -n 1)
+            if [ -z "$message" ]; then
+              message=$(tail -n 1 shell-suite.stdout)
+            fi
+            message=$(printf '%s' "${message:-no-diagnostic-output}" | sed -E 's/[^A-Za-z0-9._+/:=-]+/-/g' | cut -c1-100)
+          fi
+          printf 'matrix={"include":[{"status":%s,"message":"%s"}]}\n' "$status" "$message" >>"$GITHUB_OUTPUT"
 
   shell-suite-diagnostics:
     needs: shell-suite-scan
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.shell-suite-scan.outputs.diagnostics) }}
-    name: Shell suite assertion at tests/run.sh:${{ matrix.line }}
+    name: Shell suite exit ${{ matrix.status }} — ${{ matrix.message }}
     runs-on: ubuntu-latest
     steps:
       - name: Enforce shell-suite result
         env:
-          FAILURE_LINE: ${{ matrix.line }}
-        run: |
-          if [ "$FAILURE_LINE" != 0 ]; then
-            exit 1
-          fi
+          FAILURE_STATUS: ${{ matrix.status }}
+        run: test "$FAILURE_STATUS" -eq 0
