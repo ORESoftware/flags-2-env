@@ -179,6 +179,31 @@ def normalized(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
 
+def semantic_tokens(value: str) -> list[str]:
+    # Terminal renderers may vary spacing around punctuation when columns wrap
+    # (for example `sql | json`, `machine-readable`, or `CI/AI`). Keep the
+    # exact normalized substring as the strongest check, then compare ordered
+    # semantic tokens within the already-isolated description column.
+    return [
+        token.casefold()
+        for token in re.findall(r"[A-Za-z0-9]+", normalized(value))
+    ]
+
+
+def description_matches(expected: str, rendered_column: str) -> bool:
+    exact = normalized(expected)
+    if exact in rendered_column:
+        return True
+    expected_tokens = semantic_tokens(expected)
+    if not expected_tokens:
+        return True
+    rendered_tokens = iter(semantic_tokens(rendered_column))
+    return all(
+        any(candidate == token for candidate in rendered_tokens)
+        for token in expected_tokens
+    )
+
+
 def table_column(output: str, headers: set[str]) -> str:
     """Reconstruct one rendered table column across terminal-wrapped rows.
 
@@ -240,9 +265,12 @@ def check_help(
             for names, description in visible_flags(root, scope):
                 if not any(name in option_column for name in names):
                     raise RuntimeError(f"{label} --help omitted {names}:\n{output}")
-                if description and normalized(description) not in description_column:
+                if description and not description_matches(
+                    description, description_column
+                ):
                     raise RuntimeError(
-                        f"{label} --help omitted description {description!r}:\n{output}"
+                        f"{label} --help omitted description {description!r}; "
+                        f"rendered description column was {description_column!r}:\n{output}"
                     )
 
 

@@ -57,6 +57,18 @@ class ShellContractVerifierTests(unittest.TestCase):
         descriptions = MODULE.table_column(output, {"Description", "Details"})
         self.assertIn("Output format: sql json for CI", descriptions)
 
+    def test_description_matching_tolerates_terminal_punctuation_spacing(self) -> None:
+        expected = (
+            "Output format for diff: sql | json "
+            "(machine-readable change plan for CI/AI review)."
+        )
+        rendered = (
+            "Output format for diff: sql  json machine readable change plan "
+            "for CI / AI review"
+        )
+        self.assertTrue(MODULE.description_matches(expected, rendered))
+        self.assertFalse(MODULE.description_matches(expected, "Output format only"))
+
     def test_command_basename_normalizes_paths_and_rejects_metacharacters(self) -> None:
         self.assertEqual(MODULE.command_basename("../zed"), "zed")
         self.assertEqual(MODULE.command_basename("/usr/bin/zed"), "zed")
