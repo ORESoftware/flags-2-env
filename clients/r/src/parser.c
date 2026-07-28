@@ -6464,6 +6464,63 @@ static size_t f2e_coerce_slot_for_key(const F2EConfig *config, const char *key) 
   return SIZE_MAX;
 }
 
+static int f2e_coerce_value_is_true(const F2ECoerceValue *value) {
+  if (!value || !value->present) {
+    return 0;
+  }
+  if (value->kind == F2E_JSON_INPUT_BOOL) {
+    return f2e_streq(value->raw, "true");
+  }
+  return value->kind == F2E_JSON_INPUT_STRING && f2e_streq(value->text, "true");
+}
+
+static int f2e_command_is_same_or_descendant(const F2EConfig *config,
+                                             int candidate,
+                                             int ancestor) {
+  while (candidate >= 0 && (size_t)candidate < config->command_count) {
+    if (candidate == ancestor) {
+      return 1;
+    }
+    candidate = config->commands[candidate].parent;
+  }
+  return 0;
+}
+
+/*
+ * Command-scoped defaults are only materialized when the input identifies an
+ * active command. Parsed maps always carry parse.command_env; command marker
+ * envs are also accepted for callers that construct a map directly.
+ */
+static int f2e_coerce_command_is_active(const F2EConfig *config,
+                                        const F2ECoerceValue *values,
+                                        int command) {
+  if (!config || !values || command < 0 || (size_t)command >= config->command_count) {
+    return 0;
+  }
+
+  const F2ECoerceValue *path =
+      &values[config->flag_count + config->command_count];
+  if (path->present && path->kind == F2E_JSON_INPUT_STRING) {
+    for (size_t i = 0; i < config->command_count; i++) {
+      char label[F2E_MAX_VALUE];
+      if (f2e_command_path_label(config, (int)i, label, sizeof(label)) &&
+          f2e_streq(label, path->text) &&
+          f2e_command_is_same_or_descendant(config, (int)i, command)) {
+        return 1;
+      }
+    }
+  }
+
+  for (size_t i = 0; i < config->command_count; i++) {
+    const F2ECoerceValue *marker = &values[config->flag_count + i];
+    if (f2e_coerce_value_is_true(marker) &&
+        f2e_command_is_same_or_descendant(config, (int)i, command)) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
 static int f2e_copy_json_span(char *out, size_t out_size, const char *start, const char *end) {
   if (!out || out_size == 0 || !start || !end || end < start) {
     return 0;
@@ -6825,6 +6882,11 @@ static char *f2e_coerce_report_from_config(const F2EConfig *config, const char *
     const F2EFlag *flag = &config->flags[i];
     const F2ECoerceValue *input = values[i].present ? &values[i] : NULL;
     if (!input && !flag->has_default) {
+      continue;
+    }
+    if (!input &&
+        flag->command != F2E_SCOPE_ROOT &&
+        !f2e_coerce_command_is_active(config, values, flag->command)) {
       continue;
     }
 
