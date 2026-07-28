@@ -114,13 +114,19 @@
       "repository": "ORESoftware/shared-auth-server.rs",
       "contract": ".cli-flags.toml",
       "command": "shared-auth-server",
-      "kind": "server"
+      "kind": "server",
+      "verification": "in-repo",
+      "workflow": ".github/workflows/flags2env-compliance.yml",
+      "evidence_pr": "https://github.com/ORESoftware/shared-auth-server.rs/pull/2"
     },
     {
       "repository": "ORESoftware/sonusauris-app-proxy",
       "contract": ".cli-flags.toml",
       "command": "sonusauris-app-proxy",
-      "kind": "server"
+      "kind": "server",
+      "verification": "in-repo",
+      "workflow": ".github/workflows/flags2env-compliance.yml",
+      "evidence_pr": "https://github.com/ORESoftware/sonusauris-app-proxy/pull/4"
     },
     {
       "repository": "declarative-migrations/declarative-postgres-migrate.rs",
@@ -138,7 +144,10 @@
       "repository": "sagitta-stack/sagitta-mcp-server.rs",
       "contract": ".cli-flags.toml",
       "command": "sagitta-mcp-server",
-      "kind": "mcp"
+      "kind": "mcp",
+      "verification": "in-repo",
+      "workflow": ".github/workflows/flags2env-compliance.yml",
+      "evidence_pr": "https://github.com/sagitta-stack/sagitta-mcp-server.rs/pull/2"
     }
   ]
 }
