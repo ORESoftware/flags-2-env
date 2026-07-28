@@ -190,19 +190,24 @@ def table_column(output: str, headers: set[str]) -> str:
     """
 
     clean = ANSI_ESCAPE.sub("", output).replace("│", "|").replace("\r", "")
-    column_index: int | None = None
+    bounds: tuple[int, int] | None = None
     fragments: list[str] = []
     for line in clean.splitlines():
-        cells = line.split("|")
-        if column_index is None:
-            for index, cell in enumerate(cells):
-                if cell.strip() in headers:
-                    column_index = index
+        if bounds is None:
+            for header in headers:
+                header_index = line.find(header)
+                if header_index < 0:
+                    continue
+                left = line.rfind("|", 0, header_index)
+                right = line.find("|", header_index + len(header))
+                if left >= 0 and right > left:
+                    bounds = (left + 1, right)
                     break
             continue
-        if column_index >= len(cells):
+        start, end = bounds
+        if len(line) <= end or line[start - 1] != "|" or line[end] != "|":
             continue
-        value = cells[column_index].strip()
+        value = line[start:end].strip()
         if value and value not in headers:
             fragments.append(value)
     return normalized(" ".join(fragments))
