@@ -1,0 +1,61 @@
+[help]
+url = "https://example.com/multiline"
+columns = [
+  "options",
+  "env", # inline comments remain outside quoted values
+  "description",
+]
+
+[parse]
+allow_unknown = false
+command_env = "MULTILINE_COMMAND"
+
+[env]
+ignore = [
+  "DATABASE_URL",
+  "OTEL_EXPORTER_OTLP_HEADERS",
+]
+
+[flags.mode]
+env = "MODE"
+aliases = [
+  "mode",
+  "operation-mode",
+]
+type = "string"
+default = "safe"
+help = "Execution mode."
+
+[flags.color]
+env = "COLOR"
+aliases = [
+  "color",
+]
+true_aliases = [
+  "color",
+  "yes-color",
+]
+false_aliases = [
+  "no-color",
+  "without-color",
+]
+type = "boolean"
+default = true
+help = "Color output."
+
+[commands.deploy]
+aliases = [
+  "ship",
+  "release",
+]
+help = "Deploy a release."
+
+[commands.deploy.flags.target]
+env = "TARGET"
+aliases = [
+  "target",
+  "destination",
+]
+type = "string"
+default = "staging"
+help = "Deployment target."
