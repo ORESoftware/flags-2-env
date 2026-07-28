@@ -36,7 +36,12 @@ def command_basename(command: str) -> str:
     return base
 
 
-def run(argv: list[str], cwd: Path, env: dict[str, str], stdin: str | None = None) -> subprocess.CompletedProcess[str]:
+def run(
+    argv: list[str],
+    cwd: Path,
+    env: dict[str, str],
+    stdin: str | None = None,
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         argv,
         cwd=cwd,
@@ -63,7 +68,11 @@ def terminal_help(
     pid, master = pty.fork()
     if pid == 0:
         try:
-            fcntl.ioctl(1, termios.TIOCSWINSZ, struct.pack("HHHH", 40, columns, 0, 0))
+            fcntl.ioctl(
+                1,
+                termios.TIOCSWINSZ,
+                struct.pack("HHHH", 40, columns, 0, 0),
+            )
             os.chdir(cwd)
             os.execve(str(cli), argv, child_env)
         except BaseException as error:  # pragma: no cover
@@ -85,10 +94,14 @@ def terminal_help(
     finally:
         os.close(master)
     _, status = os.waitpid(pid, 0)
-    return os.waitstatus_to_exitcode(status), b"".join(chunks).decode("utf-8", "replace")
+    return os.waitstatus_to_exitcode(status), b"".join(chunks).decode(
+        "utf-8", "replace"
+    )
 
 
-def scopes(config: dict[str, Any], path: tuple[str, ...] = ()) -> Iterator[tuple[str, ...]]:
+def scopes(
+    config: dict[str, Any], path: tuple[str, ...] = ()
+) -> Iterator[tuple[str, ...]]:
     yield path
     commands = config.get("commands", {})
     if not isinstance(commands, dict):
@@ -110,7 +123,11 @@ def at_scope(root: dict[str, Any], path: tuple[str, ...]) -> dict[str, Any]:
 
 def option_names(name: str, spec: dict[str, Any]) -> list[str]:
     aliases = spec.get("aliases")
-    long_names = [value for value in aliases if isinstance(value, str) and value] if isinstance(aliases, list) else []
+    long_names = (
+        [value for value in aliases if isinstance(value, str) and value]
+        if isinstance(aliases, list)
+        else []
+    )
     if not long_names:
         long_names = [name.replace("_", "-")]
     result = [f"--{value}" for value in long_names]
@@ -120,8 +137,12 @@ def option_names(name: str, spec: dict[str, Any]) -> list[str]:
     return result
 
 
-def visible_flags(root: dict[str, Any], path: tuple[str, ...]) -> list[tuple[list[str], str | None]]:
-    containers = [at_scope(root, path[:index]) for index in range(len(path), 0, -1)] + [root]
+def visible_flags(
+    root: dict[str, Any], path: tuple[str, ...]
+) -> list[tuple[list[str], str | None]]:
+    containers = [at_scope(root, path[:index]) for index in range(len(path), 0, -1)] + [
+        root
+    ]
     global_table = root.get("global", {})
     if isinstance(global_table, dict):
         containers.append(global_table)
@@ -140,7 +161,14 @@ def visible_flags(root: dict[str, Any], path: tuple[str, ...]) -> list[tuple[lis
                 continue
             claimed.add(names[0])
             description = spec.get("help", spec.get("description"))
-            result.append((names, description if isinstance(description, str) and description else None))
+            result.append(
+                (
+                    names,
+                    description
+                    if isinstance(description, str) and description
+                    else None,
+                )
+            )
     return result
 
 
@@ -151,39 +179,41 @@ def normalized(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
 
-def description_column(output: str) -> str:
-    fragments: list[str] = []
-    clean = ANSI_ESCAPE.sub("", output).replace("│", "|")
-    for line in clean.splitlines():
-        cells = line.split("|")
-        if len(cells) == 7:
-            value = cells[5].strip()
-        elif len(cells) == 4:
-            value = cells[2].strip()
-        else:
-            continue
-        if value and value not in {"Description", "Details"}:
-            fragments.append(value)
-    return normalized(" ".join(fragments))
-
-
-def check_help(cli: Path, command: str, contract: Path, root: dict[str, Any], env: dict[str, str]) -> None:
+def check_help(
+    cli: Path,
+    command: str,
+    contract: Path,
+    root: dict[str, Any],
+    env: dict[str, str],
+) -> None:
     for scope in scopes(root):
         label = " ".join((command, *scope))
         for columns in (132, 70):
-            status, output = terminal_help(cli, command, scope, contract.parent, env, columns)
+            status, output = terminal_help(
+                cli, command, scope, contract.parent, env, columns
+            )
             if status != 0:
-                raise RuntimeError(f"{label} --help exited {status} at COLUMNS={columns}:\n{output}")
+                raise RuntimeError(
+                    f"{label} --help exited {status} at COLUMNS={columns}:\n{output}"
+                )
             if "Option(s)" not in output:
                 raise RuntimeError(f"{label} --help has no options table:\n{output}")
             if output.lstrip().startswith("{") or '{"' in output:
                 raise RuntimeError(f"{label} --help printed JSON:\n{output}")
-            descriptions = description_column(output)
+
+            # Do not infer the description column from a fixed number of table
+            # cells. Contracts can select two, four, or five help columns, and
+            # narrow terminals can switch to a compact Details layout. The
+            # user-visible contract is that the normalized description appears
+            # somewhere in the rendered help output, independent of layout.
+            rendered = normalized(output)
             for names, description in visible_flags(root, scope):
                 if not any(name in output for name in names):
                     raise RuntimeError(f"{label} --help omitted {names}:\n{output}")
-                if description and normalized(description) not in descriptions:
-                    raise RuntimeError(f"{label} --help omitted description {description!r}:\n{output}")
+                if description and normalized(description) not in rendered:
+                    raise RuntimeError(
+                        f"{label} --help omitted description {description!r}:\n{output}"
+                    )
 
 
 def completion_tokens(root: dict[str, Any]) -> list[str]:
@@ -199,7 +229,14 @@ def completion_tokens(root: dict[str, Any]) -> list[str]:
     return result
 
 
-def check_bash(script: str, command: str, expected: list[str], cwd: Path, env: dict[str, str], path: Path) -> None:
+def check_bash(
+    script: str,
+    command: str,
+    expected: list[str],
+    cwd: Path,
+    env: dict[str, str],
+    path: Path,
+) -> None:
     path.write_text(script, encoding="utf-8")
     syntax = run(["bash", "-n", str(path)], cwd, env)
     if syntax.returncode:
@@ -222,12 +259,23 @@ printf '%s\n' "${COMPREPLY[@]}"
     probe_env.update(COMPLETION_FILE=str(path), COMMAND_NAME=command)
     result = run(["bash", "--noprofile", "--norc", "-c", probe], cwd, probe_env)
     if result.returncode:
-        raise RuntimeError(f"Bash completion failed to register/execute:\n{result.stdout}{result.stderr}")
+        raise RuntimeError(
+            f"Bash completion failed to register/execute:\n{result.stdout}{result.stderr}"
+        )
     if expected and not any(token in result.stdout.splitlines() for token in expected):
-        raise RuntimeError(f"Bash completion returned none of {expected!r}:\n{result.stdout}")
+        raise RuntimeError(
+            f"Bash completion returned none of {expected!r}:\n{result.stdout}"
+        )
 
 
-def check_zsh(script: str, command: str, expected: list[str], cwd: Path, env: dict[str, str], directory: Path) -> None:
+def check_zsh(
+    script: str,
+    command: str,
+    expected: list[str],
+    cwd: Path,
+    env: dict[str, str],
+    directory: Path,
+) -> None:
     zsh = shutil.which("zsh")
     if not zsh:
         raise RuntimeError("zsh is required")
@@ -248,15 +296,29 @@ autoload +X "$registered"
 [[ -n "${functions[$registered]-}" ]]
 '''
     probe_env = dict(env)
-    probe_env.update(COMPLETION_DIR=str(directory), COMMAND_NAME=command, ZCOMPDUMP=str(directory / ".zcompdump"))
+    probe_env.update(
+        COMPLETION_DIR=str(directory),
+        COMMAND_NAME=command,
+        ZCOMPDUMP=str(directory / ".zcompdump"),
+    )
     result = run([zsh, "-f", "-c", probe], cwd, probe_env)
     if result.returncode:
-        raise RuntimeError(f"Zsh completion failed to register/autoload:\n{result.stdout}{result.stderr}")
+        raise RuntimeError(
+            f"Zsh completion failed to register/autoload:\n{result.stdout}{result.stderr}"
+        )
     if expected and not any(token in script for token in expected):
-        raise RuntimeError(f"Zsh completion omitted all declared candidates {expected!r}")
+        raise RuntimeError(
+            f"Zsh completion omitted all declared candidates {expected!r}"
+        )
 
 
-def check_install(cli: Path, command: str, contract: Path, env: dict[str, str], home: Path) -> None:
+def check_install(
+    cli: Path,
+    command: str,
+    contract: Path,
+    env: dict[str, str],
+    home: Path,
+) -> None:
     home.mkdir()
     bash_dir, zsh_dir = home / "bash", home / "zfunc"
     bashrc, zshrc = home / ".bashrc", home / ".zshrc"
@@ -271,9 +333,22 @@ def check_install(cli: Path, command: str, contract: Path, env: dict[str, str], 
     )
     for shell in ("bash", "zsh"):
         for _ in range(2):
-            result = run([str(cli), "completion", "install", shell, command, str(contract)], contract.parent, install_env)
+            result = run(
+                [
+                    str(cli),
+                    "completion",
+                    "install",
+                    shell,
+                    command,
+                    str(contract),
+                ],
+                contract.parent,
+                install_env,
+            )
             if result.returncode or "Installed" not in result.stdout:
-                raise RuntimeError(f"{shell} completion install failed:\n{result.stdout}{result.stderr}")
+                raise RuntimeError(
+                    f"{shell} completion install failed:\n{result.stdout}{result.stderr}"
+                )
 
     safe = command_basename(command)
     if not (bash_dir / safe).is_file() or not (zsh_dir / f"_{safe}").is_file():
@@ -285,15 +360,32 @@ def check_install(cli: Path, command: str, contract: Path, env: dict[str, str], 
 
     bash_env = dict(install_env)
     bash_env.update(RC=str(bashrc), COMMAND=command)
-    if run(["bash", "--noprofile", "--norc", "-c", 'source "$RC"; complete -p -- "$COMMAND"'], contract.parent, bash_env).returncode:
+    if run(
+        [
+            "bash",
+            "--noprofile",
+            "--norc",
+            "-c",
+            'source "$RC"; complete -p -- "$COMMAND"',
+        ],
+        contract.parent,
+        bash_env,
+    ).returncode:
         raise RuntimeError("installed Bash completion is not registered")
 
     zsh = shutil.which("zsh")
     if not zsh or run([zsh, "-n", str(zshrc)], contract.parent, install_env).returncode:
         raise RuntimeError("installed Zsh rc snippet is not valid syntax")
     zsh_env = dict(install_env)
-    zsh_env.update(COMPLETION_DIR=str(zsh_dir), COMMAND=command, ZCOMPDUMP=str(home / ".zcompdump"))
-    zsh_probe = 'fpath=("$COMPLETION_DIR" $fpath); autoload -Uz compinit; compinit -i -d "$ZCOMPDUMP"; [[ -n "${_comps[$COMMAND]-}" ]]'
+    zsh_env.update(
+        COMPLETION_DIR=str(zsh_dir),
+        COMMAND=command,
+        ZCOMPDUMP=str(home / ".zcompdump"),
+    )
+    zsh_probe = (
+        'fpath=("$COMPLETION_DIR" $fpath); autoload -Uz compinit; '
+        'compinit -i -d "$ZCOMPDUMP"; [[ -n "${_comps[$COMMAND]-}" ]]'
+    )
     if run([zsh, "-f", "-c", zsh_probe], contract.parent, zsh_env).returncode:
         raise RuntimeError("installed Zsh completion is not registered")
 
@@ -327,14 +419,38 @@ def main() -> int:
             temp = Path(raw)
             check_help(cli, args.command, contract, root, env)
             expected = completion_tokens(root)
-            bash = run([str(cli), "completion", "bash", args.command, str(contract)], contract.parent, env)
-            zsh = run([str(cli), "completion", "zsh", args.command, str(contract)], contract.parent, env)
+            bash = run(
+                [str(cli), "completion", "bash", args.command, str(contract)],
+                contract.parent,
+                env,
+            )
+            zsh = run(
+                [str(cli), "completion", "zsh", args.command, str(contract)],
+                contract.parent,
+                env,
+            )
             if bash.returncode or zsh.returncode:
-                raise RuntimeError(f"completion generation failed:\n{bash.stderr}{zsh.stderr}")
-            check_bash(bash.stdout, args.command, expected, contract.parent, env, temp / "completion.bash")
+                raise RuntimeError(
+                    f"completion generation failed:\n{bash.stderr}{zsh.stderr}"
+                )
+            check_bash(
+                bash.stdout,
+                args.command,
+                expected,
+                contract.parent,
+                env,
+                temp / "completion.bash",
+            )
             zfunc = temp / "zfunc"
             zfunc.mkdir()
-            check_zsh(zsh.stdout, args.command, expected, contract.parent, env, zfunc)
+            check_zsh(
+                zsh.stdout,
+                args.command,
+                expected,
+                contract.parent,
+                env,
+                zfunc,
+            )
             if args.install:
                 check_install(cli, args.command, contract, env, temp / "home")
     except RuntimeError as error:
@@ -342,7 +458,8 @@ def main() -> int:
 
     print(
         f"flags2env shell contract: ok command={args.command} "
-        f"scopes={sum(1 for _ in scopes(root))} install={'yes' if args.install else 'no'}"
+        f"scopes={sum(1 for _ in scopes(root))} "
+        f"install={'yes' if args.install else 'no'}"
     )
     return 0
 
