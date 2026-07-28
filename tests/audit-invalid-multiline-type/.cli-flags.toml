@@ -1,0 +1,10 @@
+[flags.mode]
+env = "MODE"
+type = "string"
+default = "safe"
+
+[env]
+ignore = [
+  "DATABASE_URL",
+  7,
+]
