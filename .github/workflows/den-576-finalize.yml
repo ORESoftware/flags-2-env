@@ -1,0 +1,53 @@
+name: Finalize DEN-576 terminal-description verifier
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - scripts/den-576-fix-description.py
+      - .github/workflows/den-576-finalize.yml
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: >-
+      github.head_ref == 'feat/den-576-consumer-fleet' &&
+      github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply the exact verifier fix
+        run: python3 scripts/den-576-fix-description.py
+
+      - name: Validate verifier and fleet contracts
+        run: |
+          set -euo pipefail
+          git diff --check
+          python3 -m unittest tests.test_shell_contract_verifier tests.test_consumer_fleet
+          python3 scripts/render-consumer-matrix.py consumer-fleet.json >/tmp/matrix.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          matrix = json.loads(Path('/tmp/matrix.json').read_text())
+          assert len(matrix['include']) == 23
+          PY
+
+      - name: Commit the reviewable verifier fix
+        env:
+          HEAD_BRANCH: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add scripts/verify-shell-contract.py tests/test_shell_contract_verifier.py
+          git commit -m 'fix(DEN-576): tolerate terminal punctuation wrapping in descriptions'
+          git push origin "HEAD:$HEAD_BRANCH"
