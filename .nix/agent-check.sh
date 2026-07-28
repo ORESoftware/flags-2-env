@@ -36,9 +36,11 @@ build_declared_readme_path() {
     bash
     cc
     cp
+    cut
     dirname
     env
     gcc
+    grep
     ld
     ln
     make
@@ -51,6 +53,7 @@ build_declared_readme_path() {
     rm
     sed
     sh
+    tail
     uname
   )
   command_names+=("$@")
@@ -95,12 +98,14 @@ run_shell_suite() {
 
   shell_suite_path="$(build_declared_readme_path python3 ruby)"
   set +e
+  # Pass the test path as both Bash's $0 and $1. tests/run.sh deliberately uses
+  # $0 to resolve the repository root, even when sourced for ERR diagnostics.
   # The nested Bash program intentionally receives literal Bash variables.
   # shellcheck disable=SC2016
   env PATH="$shell_suite_path" bash -Eeuo pipefail -c '
     trap '\''printf "__F2E_FAILURE_LINE__:%s\n" "$LINENO" >&2'\'' ERR
     source "$1"
-  ' _ ./tests/run.sh >"$log_path" 2>&1
+  ' ./tests/run.sh ./tests/run.sh >"$log_path" 2>&1
   status=$?
   set -e
 
@@ -111,25 +116,6 @@ run_shell_suite() {
   fi
 
   tail -n 20 "$log_path"
-}
-
-shell_suite_failure_line() {
-  local log_path="$cache_root/shell-suite.trace.log"
-  local failure_line
-  local status
-
-  set +e
-  run_shell_suite >/dev/null 2>&1
-  status=$?
-  set -e
-
-  if ((status == 0)); then
-    printf '0\n'
-    return 0
-  fi
-
-  failure_line="$(grep -E '^__F2E_FAILURE_LINE__:[0-9]+$' "$log_path" | tail -n 1 | cut -d: -f2 || true)"
-  printf '%s\n' "${failure_line:-unknown}"
 }
 
 run_stage() {
@@ -178,9 +164,6 @@ run_stage() {
     shell-tests)
       run_shell_suite
       ;;
-    shell-tests-line)
-      shell_suite_failure_line
-      ;;
     api-hardening)
       build/api-hardening
       ;;
@@ -214,11 +197,11 @@ case "${1:-all}" in
       run_stage "$stage"
     done
     ;;
-  preflight | dependencies | build | borrow | readme-core | readme-python | readme-ruby | readme | parity | native-build | shell-tests | shell-tests-line | api-hardening | allocation-failure | process-smoke | test | package)
+  preflight | dependencies | build | borrow | readme-core | readme-python | readme-ruby | readme | parity | native-build | shell-tests | api-hardening | allocation-failure | process-smoke | test | package)
     run_stage "$1"
     ;;
   *)
-    printf 'usage: %s [all|preflight|dependencies|build|borrow|readme-core|readme-python|readme-ruby|readme|parity|native-build|shell-tests|shell-tests-line|api-hardening|allocation-failure|process-smoke|test|package]\n' "$0" >&2
+    printf 'usage: %s [all|preflight|dependencies|build|borrow|readme-core|readme-python|readme-ruby|readme|parity|native-build|shell-tests|api-hardening|allocation-failure|process-smoke|test|package]\n' "$0" >&2
     exit 64
     ;;
 esac
