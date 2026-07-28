@@ -11,6 +11,10 @@ fail() {
   exit 1
 }
 
+if ! type complete >/dev/null 2>&1 || ! type compgen >/dev/null 2>&1; then
+  fail 'Bash programmable-completion builtins complete and compgen are required'
+fi
+
 load_completion() {
   # shellcheck disable=SC1090
   source /dev/stdin <<<"$("$CLI" completion bash "$1" "$2")"
