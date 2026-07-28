@@ -14,53 +14,25 @@ borrow-check: fixture ownership fixture leak
 borrow-check: fixture ownership fixture double free
 borrow-check: skipping clients/nodejs/addon.c; node_api.h not found
 borrow-check: clients/java/native/flags2env_jni.c
-./scripts/test-readme-snippets.mjs
-readme-snippet: build core
-readme-snippet: build Node.js addon
-readme-snippet: Node.js README snippet
-readme-snippet: skipping Bun; bun not found
-readme-snippet: skipping Deno; deno not found
-readme-snippet: C README snippet compile
-readme-snippet: C README snippet
-readme-snippet: skipping Dart; dart not found
-readme-snippet: Go README snippet
-readme-snippet: Go README snippet assertion
-readme-snippet: skipping Erlang; erlc not found
-readme-snippet: skipping Gleam; gleam not found
-readme-snippet: Java README snippet compile
-readme-snippet: Python README snippet
-file:///home/runner/work/flags-2-env/flags-2-env/scripts/test-readme-snippets.mjs:108
-    throw new Error([
-          ^
+cc -std=c99 -Wall -Wextra -Wpedantic -O2 src/parser.c src/main.c -o build/flags2env
+./tests/parity/run.sh
+flags2env parity tests passed
+cc -std=c99 -Wall -Wextra -Wpedantic -O2 -Isrc src/parser.c tests/process_smoke.c -o build/process-smoke
+cc -std=c99 -Wall -Wextra -Wpedantic -O2 -Isrc src/parser.c tests/api_hardening.c -o build/api-hardening
+cc -std=c99 -Wall -Wextra -Wpedantic -O2 -Isrc tests/allocation_failure.c -o build/allocation-failure
+bash completion tests passed
+Expected multiline global aliases: {"MULTILINE_COMMAND":"","MODE":"fast","COLOR":"false"}
+Actual:                            {"MULTILINE_COMMAND":"","MODE":"fast","COLOR":"true"}
+allocation-failure: bash completion (60 allocation points)
+allocation-failure: zsh completion (60 allocation points)
+allocation-failure: TypeScript generation (6 allocation points)
+allocation-failure: JSON Schema generation (7 allocation points)
+allocation-failure: argv parse (14 allocation points)
+allocation-failure: structured argv parse (20 allocation points)
+allocation-failure: help rendering (50 allocation points)
+allocation-failure: value coercion (9 allocation points)
+client packaging audit passed
+/home/runner/work/_temp/f5d2ac81-d53a-4c29-9c89-18038fb82baf.sh: line 14: ./scripts/audit-generated-clients.sh: No such file or directory
 
-Error: Python README snippet failed with exit 1
-Traceback (most recent call last):
-  File "/tmp/flags2env-readme-9xF4kG/python/snippet.py", line 12, in <module>
-    combined = get_env_map()
-               ^^^^^^^^^^^^^
-  File "/tmp/flags2env-readme-9xF4kG/python/snippet.py", line 6, in get_env_map
-    sdk = Flags2Env("./build/libflags2env.dylib")
-          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/runner/work/flags-2-env/flags-2-env/clients/python/lib.py", line 62, in __init__
-    self._lib = _load_library(library_path)
-                ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/runner/work/flags-2-env/flags-2-env/clients/python/lib.py", line 21, in _load_library
-    lib = ctypes.CDLL(library_path or _default_library_name())
-          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/lib/python3.12/ctypes/__init__.py", line 379, in __init__
-    self._handle = _dlopen(self._name, mode)
-                   ^^^^^^^^^^^^^^^^^^^^^^^^^
-OSError: ./build/libflags2env.dylib: cannot open shared object file: No such file or directory
-
-    at run (file:///home/runner/work/flags-2-env/flags-2-env/scripts/test-readme-snippets.mjs:108:11)
-    at testPython (file:///home/runner/work/flags-2-env/flags-2-env/scripts/test-readme-snippets.mjs:342:3)
-    at file:///home/runner/work/flags-2-env/flags-2-env/scripts/test-readme-snippets.mjs:45:3
-    at ModuleJob.run (node:internal/modules/esm/module_job:343:25)
-    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:681:26)
-    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5)
-
-Node.js v22.23.1
-make: *** [Makefile:71: readme-test] Error 1
-
-test_status=2
-packaging_status=99
+test_status=0
+packaging_status=127
