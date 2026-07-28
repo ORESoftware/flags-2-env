@@ -159,12 +159,24 @@ jobs:
               line for line in lines
               if not line.startswith("shell suite failed")
               and not line.startswith("__F2E_FAILURE_LINE__")
+              and not line.startswith("==> agent-check stage:")
           ]
           message = lines[-1] if lines else "clean" if status == 0 else "no-diagnostic-output"
           message = re.sub(r"[^A-Za-z0-9._+/:=-]+", "-", message).strip("-")[:100]
           print(json.dumps({"include": [{"status": status, "message": message or "empty"}]}, separators=(",", ":")))
           PY
           printf 'matrix=%s\n' "$(cat matrix.json)" >>"$GITHUB_OUTPUT"
+
+      - name: Upload shell-suite diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: shell-suite-diagnostics
+          path: |
+            shell-suite.stdout
+            shell-suite.stderr
+          retention-days: 1
+          if-no-files-found: warn
 
   shell-suite-diagnostics:
     needs: shell-suite-scan
