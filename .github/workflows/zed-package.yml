@@ -113,16 +113,19 @@ jobs:
           test -f "$target/.cli-flags.toml"
           test -f "$target/scripts/verify-shell-contract.py"
           test -e "$consumer/zed_modules/.bin/flags2env"
+          test ! -e "$consumer/.cli-flags.toml"
+          cp "$target/.cli-flags.toml" "$consumer/.cli-flags.toml"
+          cmp -s "$target/.cli-flags.toml" "$consumer/.cli-flags.toml"
           help="$(
             cd "$consumer"
             COLUMNS=132 \
-            FLAGS2ENV_CONFIG="$target/.cli-flags.toml" \
               "$GITHUB_WORKSPACE/zed-cli/target/debug/zed" run flags2env -- --help
           )"
           case "$help" in
             *'Option(s)'*'Path to the .cli-flags.toml file.'*) ;;
             *) printf 'Unexpected help from zed run flags2env:\n%s\n' "$help" >&2; exit 1 ;;
           esac
+          rm -f "$consumer/.cli-flags.toml"
           rm -rf "$root"
 
       - name: Upload Zed package diagnostics
