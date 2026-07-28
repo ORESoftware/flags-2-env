@@ -1,4 +1,9 @@
 rm -rf build
+mkdir -p build
+cc -std=c99 -Wall -Wextra -Wpedantic -O2 -fPIC -c src/parser.c -o build/parser.o
+cc -shared  build/parser.o -o build/libflags2env.so
+ZERO_AR_DATE=1 ar rcs build/libflags2env.a build/parser.o
+cc -std=c99 -Wall -Wextra -Wpedantic -O2 src/parser.c src/main.c -o build/flags2env
 ./scripts/borrow-check.sh
 borrow-check: src/parser.c
 borrow-check: src/main.c
@@ -30,10 +35,10 @@ file:///home/runner/work/flags-2-env/flags-2-env/scripts/test-readme-snippets.mj
 
 Error: Python README snippet failed with exit 1
 Traceback (most recent call last):
-  File "/tmp/flags2env-readme-jLMSYy/python/snippet.py", line 12, in <module>
+  File "/tmp/flags2env-readme-9xF4kG/python/snippet.py", line 12, in <module>
     combined = get_env_map()
                ^^^^^^^^^^^^^
-  File "/tmp/flags2env-readme-jLMSYy/python/snippet.py", line 6, in get_env_map
+  File "/tmp/flags2env-readme-9xF4kG/python/snippet.py", line 6, in get_env_map
     sdk = Flags2Env("./build/libflags2env.dylib")
           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   File "/home/runner/work/flags-2-env/flags-2-env/clients/python/lib.py", line 62, in __init__
