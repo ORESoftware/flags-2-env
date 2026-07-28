@@ -42,6 +42,31 @@ Ordinary pull-request checks need only `contents: read`.
 
 The canonical C audit remains the source of truth for syntax, aliases, subcommand scoping, type validation, duplicate destinations, and generated help/completion behavior. The Python policy checker adds cross-repository security and pinning rules. The shell-contract verifier exercises the canonical output in real terminal and shell runtimes.
 
+## Central consumer-fleet verification
+
+`consumer-fleet.json` is the committed inventory of active contracts whose canonical help and completion surfaces must remain usable. Each entry names the repository, relative `.cli-flags.toml` path, command basename, and executable kind. Multiple contracts in one monorepo are separate entries, so adding one passing root contract cannot hide a broken nested server or worker.
+
+`.github/workflows/consumer-fleet.yml` validates that inventory before any dynamic checkout, then checks out every consumer and the canonical tooling without persisted credentials. For each contract it:
+
+1. runs the canonical audit;
+2. renders root and subcommand help in wide and narrow pseudo-terminals;
+3. checks every visible option and description;
+4. parses, registers, and executes generated Bash completion;
+5. parses, registers through `compinit`, and autoloads generated Zsh completion;
+6. installs both completion variants twice and verifies idempotency;
+7. records the consumer and tooling commit SHAs in the Actions summary.
+
+The fleet workflow runs when its data or tooling changes, on a daily schedule, and on manual dispatch. It is a cross-repository compatibility signal, not a replacement for the reusable workflow above: consumers still need repository-owned runtime and final-artifact smokes to prove their actual executable, container, protocol, parser pin, and secret boundary.
+
+To add a consumer, append one sorted entry to `consumer-fleet.json` and run:
+
+```sh
+python3 -m unittest tests/test_consumer_fleet.py
+python3 scripts/render-consumer-fleet.py --print
+```
+
+The renderer rejects mutable tooling refs, unsafe repositories or paths, duplicate contracts, unsupported kinds, unsafe command basenames, and unsorted entries before GitHub Actions evaluates the matrix.
+
 ## Consumer smoke scripts
 
 Smoke scripts should be deterministic and credential-free. They should:
@@ -56,4 +81,4 @@ Smoke scripts should be deterministic and credential-free. They should:
 
 ## Scope exclusions
 
-Do not add this workflow to browser-only, Flutter/mobile, desktop GUI, static-site, SDK-only, interface/schema, documentation, or infrastructure-only repositories unless they also ship a real process-level CLI or service.
+Do not add this workflow to browser-only, Flutter/mobile, desktop GUI, static-site, SDK-only, interface/schema, documentation, or infrastructure-only repositories unless they also ship a real process-level CLI or service. Record exclusions in the repository-classification work rather than omitting them silently.
