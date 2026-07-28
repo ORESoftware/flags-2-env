@@ -27,14 +27,17 @@ jobs:
           if ! grep -q 'F2E_MAX_LOGICAL_LINE' src/parser.c; then
             python3 scripts/apply_den_442.py
           fi
-      - name: Capture validation results
+      - name: Capture parser and packaging validation
         shell: bash
         run: |
           set +e
           {
-            make clean
-            make all
-            make test
+            make clean all
+            make borrow-check parity-test build/process-smoke build/api-hardening build/allocation-failure
+            ./tests/run.sh
+            ./build/api-hardening
+            ./build/allocation-failure tests/subcommands-deep/.cli-flags.toml
+            ./build/process-smoke --port 7777 -d
           } > .den-442-validation.txt 2>&1
           test_status=$?
           if [[ "$test_status" -eq 0 ]]; then
@@ -48,10 +51,10 @@ jobs:
           fi
           printf '\ntest_status=%s\npackaging_status=%s\n' "$test_status" "$packaging_status" >> .den-442-validation.txt
           exit 0
-      - name: Commit implementation and diagnostic
+      - name: Commit diagnostic only
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src clients tests/run.sh .den-442-validation.txt
-          git commit -m 'test: validate multiline TOML arrays'
+          git add .den-442-validation.txt
+          git commit -m 'test: capture multiline TOML array validation'
           git push origin HEAD:feat/den-442-multiline-toml-arrays
