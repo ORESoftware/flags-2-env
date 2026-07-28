@@ -1,0 +1,90 @@
+Unable to find image 'rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667' locally
+docker.io/rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667: Pulling from rhysd/actionlint
+589002ba0eae: Pulling fs layer
+c09af8888d6a: Pulling fs layer
+4ccd7d76ca98: Pulling fs layer
+b6b4b7b0e257: Pulling fs layer
+b6b4b7b0e257: Waiting
+c09af8888d6a: Verifying Checksum
+c09af8888d6a: Download complete
+589002ba0eae: Download complete
+4ccd7d76ca98: Download complete
+589002ba0eae: Pull complete
+b6b4b7b0e257: Verifying Checksum
+b6b4b7b0e257: Download complete
+c09af8888d6a: Pull complete
+4ccd7d76ca98: Pull complete
+b6b4b7b0e257: Pull complete
+Digest: sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+Status: Downloaded newer image for rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+invalid boolean value "never" for -color: parse error
+Usage: actionlint [FLAGS] [FILES...] [-]
+
+  actionlint is a linter for GitHub Actions workflow files.
+
+  To check all YAML files in current repository, just run actionlint without
+  arguments. It automatically finds the nearest '.github/workflows' directory:
+
+    $ actionlint
+
+  To check specific files, pass the file paths as arguments:
+
+    $ actionlint file1.yaml file2.yaml
+
+  To check content which is not saved in file yet (e.g. output from some
+  command), pass - argument. It reads stdin and checks it as workflow file:
+
+    $ actionlint -
+
+  To serialize errors into JSON, use -format option. It allows to format error
+  messages flexibly with Go template syntax.
+
+    $ actionlint -format '{{json .}}'
+
+Documents:
+
+  - List of checks: https://github.com/rhysd/actionlint/tree/v1.7.12/docs/checks.md
+  - Usage:          https://github.com/rhysd/actionlint/tree/v1.7.12/docs/usage.md
+  - Configuration:  https://github.com/rhysd/actionlint/tree/v1.7.12/docs/config.md
+
+Flags:
+  -color
+    	Always enable colorful output. This is useful to force colorful outputs
+  -config-file string
+    	File path to config file
+  -debug
+    	Enable debug output (for development)
+  -format string
+    	Custom template to format error messages in Go template syntax. See the usage documentation for more details
+  -ignore value
+    	Regular expression matching to error messages you want to ignore. This flag is repeatable
+  -init-config
+    	Generate default config file at .github/actionlint.yaml in current project
+  -no-color
+    	Disable colorful output
+  -oneline
+    	Use one line per one error. Useful for reading error messages from programs
+  -pyflakes string
+    	Command name or file path of "pyflakes" external command. If empty, pyflakes integration will be disabled (default "pyflakes")
+  -shellcheck string
+    	Command name or file path of "shellcheck" external command. If empty, shellcheck integration will be disabled (default "shellcheck")
+  -stdin-filename string
+    	File name when reading input from stdin (default "<stdin>")
+  -verbose
+    	Enable verbose output
+  -version
+    	Show version and how this binary was installed
+flags2env compliance: ok kind=server flags=2 parser_ref=377bff1a4e7424eb98377997a232ddc0fc700f59
+flags2env compliance: flags.database exposes secret-bearing env DATABASE_URL; keep it environment-only
+flags2env compliance: parse.allow_unknown must be false or omitted for compliant executables
+flags2env compliance: flags2env Cargo rev must exactly match parser_ref
+flags2env compliance: flags2env dependency must not combine rev with branch, tag, or version
+flags2env compliance: Cargo.lock does not contain the exact flags2env git revision
+flags2env compliance: parser_ref must be a full 40-character lowercase commit SHA
+flags2env compliance: flags2env Cargo rev must exactly match parser_ref
+flags2env compliance: Cargo.lock does not contain the exact flags2env git revision
+consumer compliance tests passed
+
+actionlint_status=2
+compile_status=0
+fixture_status=0
