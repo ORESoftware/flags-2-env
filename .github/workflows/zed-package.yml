@@ -71,6 +71,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          exec > >(tee -a "$RUNNER_TEMP/zed-package.log") 2>&1
           grep -Fxq 'version = 1' .zpkg.lock
           first="$RUNNER_TEMP/zed-pack-first"
           second="$RUNNER_TEMP/zed-pack-second"
@@ -103,6 +104,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          exec > >(tee -a "$RUNNER_TEMP/zed-package.log") 2>&1
           root="$RUNNER_TEMP/zed-r2g"
           ../zed-cli/target/debug/zed r2g --r2g-root "$root"
           consumer="$root/oresoftware-flags-2-env/consumer"
@@ -122,3 +124,14 @@ jobs:
             *) printf 'Unexpected help from zed run flags2env:\n%s\n' "$help" >&2; exit 1 ;;
           esac
           rm -rf "$root"
+
+      - name: Upload Zed package diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: zed-package-diagnostics
+          path: |
+            ${{ runner.temp }}/zed-package.log
+            ${{ runner.temp }}/zed-package-files.txt
+          if-no-files-found: error
+          retention-days: 7
