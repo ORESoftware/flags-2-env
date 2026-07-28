@@ -1,0 +1,72 @@
+name: Shell completion and terminal help
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/shell-contract.yml"
+      - ".cli-flags.toml"
+      - ".zpkg.toml"
+      - ".zpkg.lock"
+      - "Makefile"
+      - "scripts/verify-shell-contract.py"
+      - "src/**"
+      - "tests/subcommands/.cli-flags.toml"
+  push:
+    paths:
+      - ".github/workflows/shell-contract.yml"
+      - ".cli-flags.toml"
+      - ".zpkg.toml"
+      - ".zpkg.lock"
+      - "Makefile"
+      - "scripts/verify-shell-contract.py"
+      - "src/**"
+      - "tests/subcommands/.cli-flags.toml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shell-contract-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shell-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Install real shell runtimes
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes zsh
+
+      - name: Validate package metadata and verifier syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fxq 'version = 1' .zpkg.lock
+          python3 -m py_compile scripts/verify-shell-contract.py
+
+      - name: Build canonical CLI
+        run: make cli
+
+      - name: Exercise package help and idempotent completion installation
+        run: |
+          python3 scripts/verify-shell-contract.py \
+            --cli build/flags2env \
+            --contract .cli-flags.toml \
+            --command flags2env \
+            --install
+
+      - name: Exercise nested subcommand help and completion
+        run: |
+          python3 scripts/verify-shell-contract.py \
+            --cli build/flags2env \
+            --contract tests/subcommands/.cli-flags.toml \
+            --command gitish
