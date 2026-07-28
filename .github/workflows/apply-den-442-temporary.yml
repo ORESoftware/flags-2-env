@@ -1,0 +1,40 @@
+name: Apply DEN-442 multiline arrays (temporary)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.head_ref == 'feat/den-442-multiline-toml-arrays' &&
+      github.actor == 'ORESoftware'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Apply parser and test changes
+        run: python3 scripts/apply_den_442.py
+      - name: Validate canonical parser
+        run: |
+          make clean
+          make test
+      - name: Validate client packaging and generated parity
+        run: |
+          ./scripts/audit-client-packaging.sh
+          ./scripts/audit-generated-clients.sh
+      - name: Commit the validated implementation
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src clients tests/run.sh
+          git commit -m 'DEN-442: support multiline TOML arrays'
+          git push origin HEAD:feat/den-442-multiline-toml-arrays
