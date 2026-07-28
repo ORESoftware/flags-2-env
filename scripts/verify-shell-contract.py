@@ -151,6 +151,19 @@ def normalized(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
 
+def description_column(output: str) -> str:
+    fragments: list[str] = []
+    clean = ANSI_ESCAPE.sub("", output).replace("│", "|")
+    for line in clean.splitlines():
+        cells = line.split("|")
+        if len(cells) != 7:
+            continue
+        value = cells[5].strip()
+        if value and value != "Description":
+            fragments.append(value)
+    return normalized(" ".join(fragments))
+
+
 def check_help(cli: Path, command: str, contract: Path, root: dict[str, Any], env: dict[str, str]) -> None:
     for scope in scopes(root):
         label = " ".join((command, *scope))
@@ -162,11 +175,11 @@ def check_help(cli: Path, command: str, contract: Path, root: dict[str, Any], en
                 raise RuntimeError(f"{label} --help has no options table:\n{output}")
             if output.lstrip().startswith("{") or '{"' in output:
                 raise RuntimeError(f"{label} --help printed JSON:\n{output}")
-            flat = normalized(output)
+            descriptions = description_column(output)
             for names, description in visible_flags(root, scope):
                 if not any(name in output for name in names):
                     raise RuntimeError(f"{label} --help omitted {names}:\n{output}")
-                if description and normalized(description) not in flat:
+                if description and normalized(description) not in descriptions:
                     raise RuntimeError(f"{label} --help omitted description {description!r}:\n{output}")
 
 
