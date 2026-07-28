@@ -241,7 +241,7 @@ def check_zsh(script: str, command: str, expected: list[str], cwd: Path, env: di
 set -eu
 fpath=("$COMPLETION_DIR" $fpath)
 autoload -Uz compinit
-compinit -d "$ZCOMPDUMP"
+compinit -i -d "$ZCOMPDUMP"
 registered="${_comps[$COMMAND_NAME]-}"
 [[ -n "$registered" ]]
 autoload +X "$registered"
@@ -287,10 +287,14 @@ def check_install(cli: Path, command: str, contract: Path, env: dict[str, str], 
     bash_env.update(RC=str(bashrc), COMMAND=command)
     if run(["bash", "--noprofile", "--norc", "-c", 'source "$RC"; complete -p -- "$COMMAND"'], contract.parent, bash_env).returncode:
         raise RuntimeError("installed Bash completion is not registered")
+
     zsh = shutil.which("zsh")
+    if not zsh or run([zsh, "-n", str(zshrc)], contract.parent, install_env).returncode:
+        raise RuntimeError("installed Zsh rc snippet is not valid syntax")
     zsh_env = dict(install_env)
-    zsh_env.update(RC=str(zshrc), COMMAND=command)
-    if not zsh or run([zsh, "-f", "-c", 'source "$RC"; [[ -n "${_comps[$COMMAND]-}" ]]'], contract.parent, zsh_env).returncode:
+    zsh_env.update(COMPLETION_DIR=str(zsh_dir), COMMAND=command, ZCOMPDUMP=str(home / ".zcompdump"))
+    zsh_probe = 'fpath=("$COMPLETION_DIR" $fpath); autoload -Uz compinit; compinit -i -d "$ZCOMPDUMP"; [[ -n "${_comps[$COMMAND]-}" ]]'
+    if run([zsh, "-f", "-c", zsh_probe], contract.parent, zsh_env).returncode:
         raise RuntimeError("installed Zsh completion is not registered")
 
 
