@@ -31,6 +31,7 @@
               binutils
               coreutils
               findutils
+              gawk
               gcc
               git
               gnumake
