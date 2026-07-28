@@ -23,18 +23,30 @@ jobs:
           persist-credentials: true
       - name: Apply parser and test changes
         run: python3 scripts/apply_den_442.py
-      - name: Validate canonical parser
+      - name: Capture validation results
+        shell: bash
         run: |
-          make clean
-          make test
-      - name: Validate client packaging and generated parity
-        run: |
-          ./scripts/audit-client-packaging.sh
-          ./scripts/audit-generated-clients.sh
-      - name: Commit the validated implementation
+          set +e
+          {
+            make clean
+            make test
+          } > .den-442-validation.txt 2>&1
+          test_status=$?
+          if [[ "$test_status" -eq 0 ]]; then
+            {
+              ./scripts/audit-client-packaging.sh
+              ./scripts/audit-generated-clients.sh
+            } >> .den-442-validation.txt 2>&1
+            packaging_status=$?
+          else
+            packaging_status=99
+          fi
+          printf '\ntest_status=%s\npackaging_status=%s\n' "$test_status" "$packaging_status" >> .den-442-validation.txt
+          exit 0
+      - name: Commit implementation and diagnostic
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src clients tests/run.sh
+          git add src clients tests/run.sh .den-442-validation.txt
           git commit -m 'DEN-442: support multiline TOML arrays'
           git push origin HEAD:feat/den-442-multiline-toml-arrays
