@@ -38,7 +38,9 @@ jobs:
             python3 -m unittest -v \
               tests.test_shell_contract_verifier \
               tests.test_consumer_fleet
-            python3 scripts/render-consumer-matrix.py consumer-fleet.json >validation-matrix.json
+            python3 scripts/render-consumer-fleet.py \
+              --fleet consumer-fleet.json \
+              --print >validation-matrix.json
             python3 - <<'PY'
           import json
           from pathlib import Path
