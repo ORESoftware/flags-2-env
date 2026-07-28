@@ -125,7 +125,7 @@ shell_suite_failure_line() {
     return 0
   fi
 
-  failure_line="$(grep -E '^\+[0-9]+: exit 1$' "$log_path" | tail -n 1 | sed -E 's/^\+([0-9]+):.*/\1/' || true)"
+  failure_line="$(grep -E '^\++[0-9]+: exit 1$' "$log_path" | tail -n 1 | sed -E 's/^\++([0-9]+):.*/\1/' || true)"
   printf '%s\n' "${failure_line:-unknown}"
 }
 
