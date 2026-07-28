@@ -20,6 +20,8 @@ from pathlib import Path
 from typing import Any, Iterator
 
 SAFE_COMMAND = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]*$")
+ANSI_ESCAPE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+BOX_DRAWING = re.compile(r"[\u2500-\u257f]")
 
 
 def die(message: str) -> int:
@@ -143,7 +145,10 @@ def visible_flags(root: dict[str, Any], path: tuple[str, ...]) -> list[tuple[lis
 
 
 def normalized(value: str) -> str:
-    return re.sub(r"\s+", " ", value.replace("|", " ").replace("\r", " ")).strip()
+    value = ANSI_ESCAPE.sub(" ", value)
+    value = BOX_DRAWING.sub(" ", value)
+    value = value.replace("|", " ").replace("\r", " ")
+    return re.sub(r"\s+", " ", value).strip()
 
 
 def check_help(cli: Path, command: str, contract: Path, root: dict[str, Any], env: dict[str, str]) -> None:
