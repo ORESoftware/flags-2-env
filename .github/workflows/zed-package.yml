@@ -117,7 +117,7 @@ jobs:
             cd "$consumer"
             COLUMNS=132 \
             FLAGS2ENV_CONFIG="$target/.cli-flags.toml" \
-              "$GITHUB_WORKSPACE/zed-cli/target/debug/zed" run flags2env --help
+              "$GITHUB_WORKSPACE/zed-cli/target/debug/zed" run flags2env -- --help
           )"
           case "$help" in
             *'Option(s)'*'Path to the .cli-flags.toml file.'*) ;;
