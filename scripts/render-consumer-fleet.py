@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Validate consumer-fleet.json and render a GitHub Actions matrix.
 
-The fleet file is intentionally data-only.  This script fails closed on unsafe
+The fleet file is intentionally data-only. This script fails closed on unsafe
 repository names, paths, command basenames, duplicate contracts, unsorted
 entries, unsupported kinds, and mutable tooling references before any dynamic
 checkout occurs.
@@ -15,7 +15,7 @@ import os
 import re
 import sys
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, NoReturn
 
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
@@ -24,7 +24,7 @@ KINDS = {"cli", "server", "worker", "mcp"}
 REQUIRED_FIELDS = {"repository", "contract", "command", "kind"}
 
 
-def fail(message: str) -> "NoReturn":
+def fail(message: str) -> NoReturn:
     raise SystemExit(f"consumer fleet: {message}")
 
 
