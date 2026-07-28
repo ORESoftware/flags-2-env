@@ -3,13 +3,22 @@ name: Reusable flags2env consumer compliance
 on:
   workflow_call:
     inputs:
+      tooling_ref:
+        description: Full immutable flags-2-env commit SHA containing this reusable workflow and its verifier scripts
+        required: true
+        type: string
       parser_ref:
-        description: Full immutable flags-2-env commit SHA used by the consumer
+        description: Full immutable flags-2-env commit SHA actually shipped by the consumer
         required: true
         type: string
       kind:
         description: "Executable kind: server, mcp, cli, or worker"
         required: true
+        type: string
+      command_name:
+        description: Command name used to generate and exercise help/completion
+        required: false
+        default: flags2env-consumer
         type: string
       contract_path:
         description: Contract path relative to the consumer repository root
@@ -47,14 +56,23 @@ jobs:
     steps:
       - name: Validate reusable workflow inputs
         env:
+          COMMAND_NAME: ${{ inputs.command_name }}
           KIND: ${{ inputs.kind }}
           PARSER_REF: ${{ inputs.parser_ref }}
           RUNTIME_SMOKE: ${{ inputs.runtime_smoke_script }}
+          TOOLING_REF: ${{ inputs.tooling_ref }}
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$PARSER_REF" =~ ^[0-9a-f]{40}$ ]] || {
-            echo 'parser_ref must be a full lowercase commit SHA' >&2
+          for name in PARSER_REF TOOLING_REF; do
+            value="${!name}"
+            [[ "$value" =~ ^[0-9a-f]{40}$ ]] || {
+              echo "$name must be a full lowercase commit SHA" >&2
+              exit 1
+            }
+          done
+          [[ "$COMMAND_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*$ ]] || {
+            echo 'command_name must be a safe shell command basename' >&2
             exit 1
           }
           case "$KIND" in
@@ -65,27 +83,56 @@ jobs:
             echo 'MCP consumers must provide a stdio/runtime smoke script' >&2
             exit 1
           fi
+          if [[ "$KIND" == cli && -z "$RUNTIME_SMOKE" ]]; then
+            echo 'CLI consumers must provide a runtime smoke script that checks the real --help surface' >&2
+            exit 1
+          fi
+
       - name: Check out consumer
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           path: consumer
           persist-credentials: false
-      - name: Check out exact flags-2-env revision
+
+      - name: Check out immutable compliance tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ORESoftware/flags-2-env
+          ref: ${{ inputs.tooling_ref }}
+          path: flags2env-tooling
+          persist-credentials: false
+
+      - name: Check out exact shipped parser revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: ORESoftware/flags-2-env
           ref: ${{ inputs.parser_ref }}
-          path: flags2env
+          path: flags2env-parser
           persist-credentials: false
-      - name: Build exact canonical audit CLI
-        run: make -C flags2env cli
+
+      - name: Install real shell runtimes
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes zsh
+
+      - name: Build exact shipped parser CLI
+        run: make -C flags2env-parser cli
+
       - name: Audit parser contract
         env:
           CONTRACT_PATH: ${{ inputs.contract_path }}
         shell: bash
         run: |
           set -euo pipefail
-          flags2env/build/flags2env audit "consumer/$CONTRACT_PATH"
+          contract="$(realpath -e "consumer/$CONTRACT_PATH")"
+          case "$contract" in
+            "$GITHUB_WORKSPACE/consumer/"*) ;;
+            *) echo 'contract_path escapes the consumer checkout' >&2; exit 1 ;;
+          esac
+          flags2env-parser/build/flags2env audit "$contract"
+
       - name: Enforce cross-repository compliance policy
         env:
           CONTRACT_PATH: ${{ inputs.contract_path }}
@@ -105,7 +152,25 @@ jobs:
           if [[ -n "$RUST_MANIFEST_PATH" ]]; then
             args+=(--rust-manifest "$RUST_MANIFEST_PATH" --cargo-lock "$CARGO_LOCK_PATH")
           fi
-          python3 flags2env/scripts/verify-consumer-compliance.py "${args[@]}"
+          python3 flags2env-tooling/scripts/verify-consumer-compliance.py "${args[@]}"
+
+      - name: Exercise terminal help and Bash/Zsh completion
+        env:
+          COMMAND_NAME: ${{ inputs.command_name }}
+          CONTRACT_PATH: ${{ inputs.contract_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          contract="$(realpath -e "consumer/$CONTRACT_PATH")"
+          case "$contract" in
+            "$GITHUB_WORKSPACE/consumer/"*) ;;
+            *) echo 'contract_path escapes the consumer checkout' >&2; exit 1 ;;
+          esac
+          python3 flags2env-tooling/scripts/verify-shell-contract.py \
+            --cli flags2env-parser/build/flags2env \
+            --contract "$contract" \
+            --command "$COMMAND_NAME"
+
       - name: Run repository-controlled runtime smoke
         if: ${{ inputs.runtime_smoke_script != '' }}
         env:
@@ -119,6 +184,7 @@ jobs:
             *) echo 'runtime smoke script escapes the consumer checkout' >&2; exit 1 ;;
           esac
           bash "$candidate"
+
       - name: Run final artifact smoke
         if: ${{ inputs.artifact_smoke_script != '' }}
         env:

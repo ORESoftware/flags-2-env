@@ -13,6 +13,7 @@ url = "https://github.com/ORESoftware/flags-2-env"
 [publish]
 include_readme = true
 tag_format = "v{version}"
+smoke_test = "python3 \"$ZED_PKG_TEST_TARGET/scripts/verify-shell-contract.py\" --cli \"$ZED_PKG_TEST_TARGET/build/flags2env\" --contract \"$ZED_PKG_TEST_TARGET/.cli-flags.toml\" --command flags2env --install"
 exclude = [
   ".build/**",
   "clients/**/.dart_tool/**",
@@ -22,6 +23,17 @@ exclude = [
   "clients/**/build/**",
   "clients/**/target/**",
 ]
+
+[build]
+command = "make cli"
+outputs = [
+  "build/flags2env",
+  "scripts/verify-shell-contract.py",
+  ".cli-flags.toml",
+]
+
+[bin]
+flags2env = "build/flags2env"
 
 [scripts]
 test = "make test"

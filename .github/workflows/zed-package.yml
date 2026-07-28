@@ -1,0 +1,140 @@
+name: Zed package round trip
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/zed-package.yml"
+      - ".zpkg.toml"
+      - ".zpkg.lock"
+      - ".cli-flags.toml"
+      - "Makefile"
+      - "scripts/verify-shell-contract.py"
+      - "src/**"
+  push:
+    paths:
+      - ".github/workflows/zed-package.yml"
+      - ".zpkg.toml"
+      - ".zpkg.lock"
+      - ".cli-flags.toml"
+      - "Makefile"
+      - "scripts/verify-shell-contract.py"
+      - "src/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zed-package-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  round-trip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out flags-2-env
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: flags-2-env
+          persist-credentials: false
+
+      - name: Check out immutable Zed interfaces
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: zed-pkg/zed-interfaces
+          ref: 61f654d5e4ca718abc4a280a641472466689c278
+          path: zed-interfaces
+          persist-credentials: false
+
+      - name: Check out immutable Zed CLI
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: 638c083f307c1a0f4cacabf58a8c8ae4cfb268ee
+          path: zed-cli
+          persist-credentials: false
+
+      - name: Install build and shell runtimes
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes zsh
+          rustup toolchain install stable --profile minimal
+
+      - name: Build immutable Zed CLI
+        run: cargo +stable build --locked --manifest-path zed-cli/Cargo.toml
+
+      - name: Verify deterministic package contents
+        working-directory: flags-2-env
+        shell: bash
+        run: |
+          set -euo pipefail
+          exec > >(tee -a "$RUNNER_TEMP/zed-package.log") 2>&1
+          grep -Fxq 'version = 1' .zpkg.lock
+          first="$RUNNER_TEMP/zed-pack-first"
+          second="$RUNNER_TEMP/zed-pack-second"
+          rm -rf "$first" "$second"
+          ../zed-cli/target/debug/zed pack --out "$first"
+          ../zed-cli/target/debug/zed pack --out "$second"
+          first_archive="$(find "$first" -maxdepth 1 -name '*.tar.gz' -print -quit)"
+          second_archive="$(find "$second" -maxdepth 1 -name '*.tar.gz' -print -quit)"
+          test -n "$first_archive"
+          test -n "$second_archive"
+          test "$(sha256sum "$first_archive" | awk '{print $1}')" = "$(sha256sum "$second_archive" | awk '{print $1}')"
+          tar -tzf "$first_archive" > "$RUNNER_TEMP/zed-package-files.txt"
+          grep -Fxq 'pkg/.zpkg.toml' "$RUNNER_TEMP/zed-package-files.txt"
+          grep -Fxq 'pkg/.cli-flags.toml' "$RUNNER_TEMP/zed-package-files.txt"
+          grep -Fxq 'pkg/scripts/verify-shell-contract.py' "$RUNNER_TEMP/zed-package-files.txt"
+          grep -Fxq 'pkg/src/parser.c' "$RUNNER_TEMP/zed-package-files.txt"
+          if grep -Fxq 'pkg/.zpkg.lock' "$RUNNER_TEMP/zed-package-files.txt"; then
+            echo 'Published artifacts must not ship the author checkout lockfile' >&2
+            exit 1
+          fi
+          if grep -Eq '(^|/)(node_modules|build|target)/' "$RUNNER_TEMP/zed-package-files.txt"; then
+            echo 'Zed artifact contains a generated dependency/build directory' >&2
+            exit 1
+          fi
+
+      - name: Install, build, and smoke the published artifact
+        working-directory: flags-2-env
+        env:
+          ZED_PKG_HOME: ${{ runner.temp }}/zed-home
+        shell: bash
+        run: |
+          set -euo pipefail
+          exec > >(tee -a "$RUNNER_TEMP/zed-package.log") 2>&1
+          root="$RUNNER_TEMP/zed-r2g"
+          ../zed-cli/target/debug/zed r2g --r2g-root "$root"
+          consumer="$root/oresoftware-flags-2-env/consumer"
+          target="$consumer/zed_modules/oresoftware/flags-2-env"
+          test -x "$target/build/flags2env"
+          test -f "$target/.cli-flags.toml"
+          test -f "$target/scripts/verify-shell-contract.py"
+          test -e "$consumer/zed_modules/.bin/flags2env"
+          test ! -e "$consumer/.cli-flags.toml"
+          cp "$target/.cli-flags.toml" "$consumer/.cli-flags.toml"
+          cmp -s "$target/.cli-flags.toml" "$consumer/.cli-flags.toml"
+          help="$(
+            cd "$consumer"
+            COLUMNS=132 \
+              "$GITHUB_WORKSPACE/zed-cli/target/debug/zed" run flags2env -- --help
+          )"
+          case "$help" in
+            *'Option(s)'*'Path to the .cli-flags.toml file.'*) ;;
+            *) printf 'Unexpected help from zed run flags2env:\n%s\n' "$help" >&2; exit 1 ;;
+          esac
+          rm -f "$consumer/.cli-flags.toml"
+          rm -rf "$root"
+
+      - name: Upload Zed package diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: zed-package-diagnostics
+          path: |
+            ${{ runner.temp }}/zed-package.log
+            ${{ runner.temp }}/zed-package-files.txt
+          if-no-files-found: error
+          retention-days: 7
