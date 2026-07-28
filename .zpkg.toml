@@ -26,7 +26,11 @@ exclude = [
 
 [build]
 command = "make cli"
-outputs = ["build/flags2env"]
+outputs = [
+  "build/flags2env",
+  "scripts/verify-shell-contract.py",
+  ".cli-flags.toml",
+]
 
 [bin]
 flags2env = "build/flags2env"
