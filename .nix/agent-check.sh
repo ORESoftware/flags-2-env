@@ -95,14 +95,17 @@ run_shell_suite() {
 
   shell_suite_path="$(build_declared_readme_path python3 ruby)"
   set +e
-  # The nested Bash trace program intentionally receives literal shell variables.
+  # The nested Bash program intentionally receives literal Bash variables.
   # shellcheck disable=SC2016
-  env PATH="$shell_suite_path" bash -c 'PS4="+${LINENO}: "; set -x; source "$0"' ./tests/run.sh >"$log_path" 2>&1
+  env PATH="$shell_suite_path" bash -Eeuo pipefail -c '
+    trap '\''printf "__F2E_FAILURE_LINE__:%s\n" "$LINENO" >&2'\'' ERR
+    source "$1"
+  ' _ ./tests/run.sh >"$log_path" 2>&1
   status=$?
   set -e
 
   if ((status != 0)); then
-    printf '%s\n' 'shell suite failed; final traced context follows:' >&2
+    printf '%s\n' 'shell suite failed; final context follows:' >&2
     tail -n 120 "$log_path" >&2
     return "$status"
   fi
@@ -125,7 +128,7 @@ shell_suite_failure_line() {
     return 0
   fi
 
-  failure_line="$(grep -E '^\++[0-9]+: exit 1$' "$log_path" | tail -n 1 | sed -E 's/^\++([0-9]+):.*/\1/' || true)"
+  failure_line="$(grep -E '^__F2E_FAILURE_LINE__:[0-9]+$' "$log_path" | tail -n 1 | cut -d: -f2 || true)"
   printf '%s\n' "${failure_line:-unknown}"
 }
 
