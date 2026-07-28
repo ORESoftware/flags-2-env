@@ -35,6 +35,7 @@
 #define F2E_MAX_ENV 128
 #define F2E_MAX_VALUE 1024
 #define F2E_MAX_LINE 4096
+#define F2E_MAX_LOGICAL_LINE (F2E_MAX_LINE * 32)
 #define F2E_MAX_META_PAIRS 4
 #define F2E_MAX_COMMANDS 96
 #define F2E_MAX_COMMAND_DEPTH 16
@@ -317,6 +318,59 @@ static void f2e_strip_comment(char *line) {
       return;
     }
   }
+}
+
+static int f2e_array_value_is_complete(const char *value) {
+  const char *cursor = f2e_trim_left((char *)value);
+  if (*cursor != '[') {
+    return 1;
+  }
+
+  int depth = 0;
+  int in_quote = 0;
+  int escaped = 0;
+  for (; *cursor; cursor++) {
+    if (escaped) {
+      escaped = 0;
+      continue;
+    }
+    if (*cursor == '\\' && in_quote) {
+      escaped = 1;
+      continue;
+    }
+    if (*cursor == '"') {
+      in_quote = !in_quote;
+      continue;
+    }
+    if (in_quote) {
+      continue;
+    }
+    if (*cursor == '[') {
+      depth++;
+    } else if (*cursor == ']') {
+      depth--;
+      if (depth <= 0) {
+        return 1;
+      }
+    }
+  }
+  return 0;
+}
+
+static int f2e_append_logical_config_line(char *target,
+                                          size_t target_size,
+                                          const char *fragment) {
+  size_t used = strlen(target);
+  size_t fragment_len = strlen(fragment);
+  size_t separator = used > 0 ? 1 : 0;
+  if (used + separator + fragment_len + 1 > target_size) {
+    return 0;
+  }
+  if (separator) {
+    target[used++] = '\n';
+  }
+  memcpy(target + used, fragment, fragment_len + 1);
+  return 1;
 }
 
 static int f2e_parse_quoted_string(const char *input, char *out, size_t out_size) {
@@ -1170,12 +1224,38 @@ static int f2e_load_config(const char *config_path, F2EConfig *config) {
   int current_command = F2E_SCOPE_ROOT;
   F2EConfigSection section = F2E_SECTION_NONE;
   char line[F2E_MAX_LINE];
+  char logical_line[F2E_MAX_LOGICAL_LINE];
   while (fgets(line, sizeof(line), file)) {
     f2e_strip_comment(line);
     char *trimmed = f2e_trim(line);
     if (trimmed[0] == '\0') {
       continue;
     }
+
+    f2e_strlcpy(logical_line, trimmed, sizeof(logical_line));
+    char *logical_eq = strchr(logical_line, '=');
+    if (logical_eq) {
+      char *logical_value = f2e_trim(logical_eq + 1);
+      while (*logical_value == '[' && !f2e_array_value_is_complete(logical_value)) {
+        if (!fgets(line, sizeof(line), file)) {
+          break;
+        }
+        f2e_strip_comment(line);
+        char *continuation = f2e_trim(line);
+        if (continuation[0] == '\0') {
+          continue;
+        }
+        if (!f2e_append_logical_config_line(logical_line,
+                                            sizeof(logical_line),
+                                            continuation)) {
+          fclose(file);
+          return 0;
+        }
+        logical_eq = strchr(logical_line, '=');
+        logical_value = f2e_trim(logical_eq + 1);
+      }
+    }
+    trimmed = f2e_trim(logical_line);
 
     if (trimmed[0] == '[') {
       char *end = strchr(trimmed, ']');

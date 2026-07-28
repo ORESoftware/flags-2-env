@@ -725,4 +725,65 @@ if [ "$status" -eq 0 ] || [ "$actual" != "$expected" ]; then
   exit 1
 fi
 
+MULTILINE_ARRAY_DIR="$ROOT_DIR/tests/multiline-arrays"
+MULTILINE_ARRAY_CONFIG="$MULTILINE_ARRAY_DIR/.cli-flags.toml"
+actual="$("$CLI" audit "$MULTILINE_ARRAY_CONFIG")"
+expected='{"ok":true,"errorCount":0,"warningCount":0,"errors":[],"warnings":[]}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected clean multiline-array audit: %s\nActual:                                %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+
+actual="$(cd "$MULTILINE_ARRAY_DIR" && "$CLI" multiline --operation-mode fast --without-color)"
+expected='{"MULTILINE_COMMAND":"","MODE":"fast","COLOR":"false"}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected multiline global aliases: %s\nActual:                            %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+
+actual="$(cd "$MULTILINE_ARRAY_DIR" && "$CLI" multiline ship --destination production --yes-color)"
+expected='{"MULTILINE_COMMAND":"deploy","MODE":"safe","COLOR":"true","TARGET":"production"}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected multiline command aliases: %s\nActual:                             %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+
+multiline_help="$(cd "$MULTILINE_ARRAY_DIR" && COLUMNS=132 "$CLI" multiline --help)"
+case "$multiline_help" in
+  *'| Option(s)'*'| Env'*'| Description'*'More help: https://example.com/multiline'*)
+    ;;
+  *)
+    printf 'Unexpected multiline-array help table:\n%s\n' "$multiline_help" >&2
+    exit 1
+    ;;
+esac
+case "$multiline_help" in
+  *'| Type'*|*'| Default'*)
+    printf 'Multiline help.columns should omit type/default:\n%s\n' "$multiline_help" >&2
+    exit 1
+    ;;
+esac
+
+INVALID_MULTILINE_TYPE_CONFIG="$ROOT_DIR/tests/audit-invalid-multiline-type/.cli-flags.toml"
+set +e
+actual="$("$CLI" audit "$INVALID_MULTILINE_TYPE_CONFIG")"
+status=$?
+set -e
+expected='{"ok":false,"errorCount":1,"warningCount":0,"errors":["env.ignore must be a list of env var names"],"warnings":[]}'
+if [ "$status" -eq 0 ] || [ "$actual" != "$expected" ]; then
+  printf 'Expected invalid multiline element audit failure:\n%s\nActual status: %s\nActual: %s\n' "$expected" "$status" "$actual" >&2
+  exit 1
+fi
+
+INVALID_MULTILINE_UNCLOSED_CONFIG="$ROOT_DIR/tests/audit-invalid-multiline-unclosed/.cli-flags.toml"
+set +e
+actual="$("$CLI" audit "$INVALID_MULTILINE_UNCLOSED_CONFIG")"
+status=$?
+set -e
+expected='{"ok":false,"errorCount":1,"warningCount":0,"errors":["help.columns must be a list of supported table column names"],"warnings":[]}'
+if [ "$status" -eq 0 ] || [ "$actual" != "$expected" ]; then
+  printf 'Expected unclosed multiline array audit failure:\n%s\nActual status: %s\nActual: %s\n' "$expected" "$status" "$actual" >&2
+  exit 1
+fi
+
 printf 'flags2env tests passed\n'
