@@ -156,10 +156,13 @@ def description_column(output: str) -> str:
     clean = ANSI_ESCAPE.sub("", output).replace("│", "|")
     for line in clean.splitlines():
         cells = line.split("|")
-        if len(cells) != 7:
+        if len(cells) == 7:
+            value = cells[5].strip()
+        elif len(cells) == 4:
+            value = cells[2].strip()
+        else:
             continue
-        value = cells[5].strip()
-        if value and value != "Description":
+        if value and value not in {"Description", "Details"}:
             fragments.append(value)
     return normalized(" ".join(fragments))
 
