@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       kind:
-        description: Executable kind: server, mcp, cli, or worker
+        description: "Executable kind: server, mcp, cli, or worker"
         required: true
         type: string
       contract_path:
