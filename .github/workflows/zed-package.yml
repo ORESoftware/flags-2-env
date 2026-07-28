@@ -71,8 +71,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          grep -Fxq 'version = 1' .zpkg.lock
           first="$RUNNER_TEMP/zed-pack-first"
           second="$RUNNER_TEMP/zed-pack-second"
+          rm -rf "$first" "$second"
           ../zed-cli/target/debug/zed pack --out "$first"
           ../zed-cli/target/debug/zed pack --out "$second"
           first_archive="$(find "$first" -maxdepth 1 -name '*.tar.gz' -print -quit)"
@@ -82,10 +84,13 @@ jobs:
           test "$(sha256sum "$first_archive" | awk '{print $1}')" = "$(sha256sum "$second_archive" | awk '{print $1}')"
           tar -tzf "$first_archive" > "$RUNNER_TEMP/zed-package-files.txt"
           grep -Fxq 'pkg/.zpkg.toml' "$RUNNER_TEMP/zed-package-files.txt"
-          grep -Fxq 'pkg/.zpkg.lock' "$RUNNER_TEMP/zed-package-files.txt"
           grep -Fxq 'pkg/.cli-flags.toml' "$RUNNER_TEMP/zed-package-files.txt"
           grep -Fxq 'pkg/scripts/verify-shell-contract.py' "$RUNNER_TEMP/zed-package-files.txt"
           grep -Fxq 'pkg/src/parser.c' "$RUNNER_TEMP/zed-package-files.txt"
+          if grep -Fxq 'pkg/.zpkg.lock' "$RUNNER_TEMP/zed-package-files.txt"; then
+            echo 'Published artifacts must not ship the author checkout lockfile' >&2
+            exit 1
+          fi
           if grep -Eq '(^|/)(node_modules|build|target)/' "$RUNNER_TEMP/zed-package-files.txt"; then
             echo 'Zed artifact contains a generated dependency/build directory' >&2
             exit 1
@@ -99,10 +104,12 @@ jobs:
         run: |
           set -euo pipefail
           root="$RUNNER_TEMP/zed-r2g"
-          ../zed-cli/target/debug/zed r2g --root "$root"
+          ../zed-cli/target/debug/zed r2g --r2g-root "$root"
           consumer="$root/oresoftware-flags-2-env/consumer"
           target="$consumer/zed_modules/oresoftware/flags-2-env"
           test -x "$target/build/flags2env"
+          test -f "$target/.cli-flags.toml"
+          test -f "$target/scripts/verify-shell-contract.py"
           test -e "$consumer/zed_modules/.bin/flags2env"
           help="$(
             cd "$consumer"
