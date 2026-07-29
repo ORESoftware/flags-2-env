@@ -28,7 +28,7 @@ API_HARDENING := $(BUILD_DIR)/api-hardening
 ALLOCATION_FAILURE := $(BUILD_DIR)/allocation-failure
 PARSER_OBJ := $(BUILD_DIR)/parser.o
 
-.PHONY: all borrow-check clean codegen-docker-test core-docker-test parity-test readme-test test shared static cli FORCE
+.PHONY: all borrow-check clean codegen-docker-test core-docker-test formal-check parity-test readme-test test shared static cli FORCE
 
 FORCE:
 
@@ -78,6 +78,9 @@ process-test: $(PROCESS_SMOKE)
 
 borrow-check:
 	./scripts/borrow-check.sh
+
+formal-check:
+	./scripts/formal-check.sh
 
 $(PROCESS_SMOKE): $(SRC) tests/process_smoke.c $(HEADER) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -Isrc $(SRC) tests/process_smoke.c -o $@

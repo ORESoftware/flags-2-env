@@ -1,6 +1,9 @@
 pub mod bundled;
 pub use bundled::BundledFlags2Env;
 
+#[cfg(any(test, kani))]
+mod formal_model;
+
 use libloading::{Library, Symbol};
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
