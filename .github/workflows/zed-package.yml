@@ -61,7 +61,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: zed-pkg/zed-cli
-          ref: 8d04bc598a4b0b464466cbec3c44d18cf2922137
+          ref: d22035b2a922dac5b957653911c71266b2de6a5c
           path: zed-cli
           persist-credentials: false
 
