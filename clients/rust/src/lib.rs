@@ -1,9 +1,15 @@
 pub mod bundled;
 pub use bundled::BundledFlags2Env;
 
+#[cfg(any(test, kani))]
+mod formal_model;
+
 use libloading::{Library, Symbol};
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
+use std::fmt;
 use std::os::raw::c_char;
 
 type ParseFn = unsafe extern "C" fn(*const c_char, *const c_char) -> *mut c_char;
@@ -11,6 +17,106 @@ type ParseDefaultFn = unsafe extern "C" fn(*const c_char) -> *mut c_char;
 type ParseProcessFn = unsafe extern "C" fn(*const c_char) -> *mut c_char;
 type ParseProcessDefaultFn = unsafe extern "C" fn() -> *mut c_char;
 type FreeFn = unsafe extern "C" fn(*mut c_char);
+
+/// Failure returned by [`Flags2Env::coerce`] and
+/// [`BundledFlags2Env::coerce`].
+#[derive(Debug)]
+pub enum CoercionError {
+    /// The input value could not be encoded as JSON for the native parser.
+    Serialize(serde_json::Error),
+    /// A path passed across the native boundary contained an interior NUL.
+    InputContainsNul(std::ffi::NulError),
+    /// The dynamically loaded library does not provide the required coercion
+    /// symbols or otherwise failed symbol lookup.
+    DynamicLibrary(libloading::Error),
+    /// The native coercion function returned no report.
+    NativeUnavailable,
+    /// The native coercion report did not follow the flags2env report schema.
+    InvalidReport(String),
+    /// One or more declared values failed schema coercion.
+    Validation { errors: Vec<String> },
+    /// Coercion succeeded, but the resulting object did not match the caller's
+    /// requested Rust type.
+    Deserialize(serde_json::Error),
+}
+
+impl CoercionError {
+    /// Returns schema validation messages when this is a
+    /// [`CoercionError::Validation`] failure.
+    pub fn validation_errors(&self) -> Option<&[String]> {
+        match self {
+            Self::Validation { errors } => Some(errors),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for CoercionError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Serialize(error) => {
+                write!(formatter, "flags2env could not serialize values: {error}")
+            }
+            Self::InputContainsNul(error) => {
+                write!(
+                    formatter,
+                    "flags2env input contains an interior NUL byte: {error}"
+                )
+            }
+            Self::DynamicLibrary(error) => {
+                write!(
+                    formatter,
+                    "flags2env could not load the coercion function: {error}"
+                )
+            }
+            Self::NativeUnavailable => {
+                write!(formatter, "flags2env coercion returned no result")
+            }
+            Self::InvalidReport(message) => {
+                write!(
+                    formatter,
+                    "flags2env returned an invalid coercion report: {message}"
+                )
+            }
+            Self::Validation { errors } => {
+                write!(
+                    formatter,
+                    "flags2env could not coerce config: {}",
+                    errors.join("; ")
+                )
+            }
+            Self::Deserialize(error) => {
+                write!(
+                    formatter,
+                    "flags2env coerced values do not match the requested Rust type: {error}"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for CoercionError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Serialize(error) | Self::Deserialize(error) => Some(error),
+            Self::InputContainsNul(error) => Some(error),
+            Self::DynamicLibrary(error) => Some(error),
+            Self::NativeUnavailable | Self::InvalidReport(_) | Self::Validation { .. } => None,
+        }
+    }
+}
+
+impl From<std::ffi::NulError> for CoercionError {
+    fn from(error: std::ffi::NulError) -> Self {
+        Self::InputContainsNul(error)
+    }
+}
+
+impl From<libloading::Error> for CoercionError {
+    fn from(error: libloading::Error) -> Self {
+        Self::DynamicLibrary(error)
+    }
+}
 
 /// Structured parse result: each channel is returned separately instead of
 /// packed into env keys, so nothing can be shadowed by real environment
@@ -54,6 +160,59 @@ fn json_string_map(value: Option<&serde_json::Value>) -> HashMap<String, String>
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn coercion_input_json<V>(values: &V) -> Result<CString, CoercionError>
+where
+    V: Serialize + ?Sized,
+{
+    let values_json = serde_json::to_string(values).map_err(CoercionError::Serialize)?;
+    Ok(CString::new(values_json)?)
+}
+
+fn decode_coercion_report<T>(raw: &str) -> Result<T, CoercionError>
+where
+    T: DeserializeOwned,
+{
+    let report: serde_json::Value = serde_json::from_str(raw)
+        .map_err(|error| CoercionError::InvalidReport(error.to_string()))?;
+    let object = report
+        .as_object()
+        .ok_or_else(|| CoercionError::InvalidReport("expected a JSON object".to_string()))?;
+    match object.get("ok").and_then(serde_json::Value::as_bool) {
+        Some(true) => {
+            let value = object.get("value").cloned().ok_or_else(|| {
+                CoercionError::InvalidReport("successful report has no value".to_string())
+            })?;
+            serde_json::from_value(value).map_err(CoercionError::Deserialize)
+        }
+        Some(false) => {
+            let errors = object
+                .get("errors")
+                .and_then(serde_json::Value::as_array)
+                .ok_or_else(|| {
+                    CoercionError::InvalidReport("failed report has no errors array".to_string())
+                })?
+                .iter()
+                .map(|error| {
+                    error.as_str().map(String::from).ok_or_else(|| {
+                        CoercionError::InvalidReport(
+                            "failed report contains a non-string error".to_string(),
+                        )
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            if errors.is_empty() {
+                return Err(CoercionError::InvalidReport(
+                    "failed report has an empty errors array".to_string(),
+                ));
+            }
+            Err(CoercionError::Validation { errors })
+        }
+        None => Err(CoercionError::InvalidReport(
+            "report has no boolean ok field".to_string(),
+        )),
+    }
 }
 
 /// Dynamically loaded flags2env backend.
@@ -131,6 +290,39 @@ impl Flags2Env {
             let raw = CStr::from_ptr(result).to_string_lossy().to_string();
             free(result);
             Ok(serde_json::from_str(&raw)?)
+        }
+    }
+
+    /// Coerce declared environment values according to `.cli-flags.toml` and
+    /// deserialize the result into `T`.
+    ///
+    /// `values` may be a parsed flags map, a merged environment/flags map, or
+    /// any other serializable object. Undeclared keys are ignored by the native
+    /// coercion layer. Schema defaults are applied, declared scalar and
+    /// container types are converted, and all schema conversion failures are
+    /// returned together as [`CoercionError::Validation`].
+    pub fn coerce<T, V>(&self, values: &V, config_path: Option<&str>) -> Result<T, CoercionError>
+    where
+        T: DeserializeOwned,
+        V: Serialize + ?Sized,
+    {
+        let values_json = coercion_input_json(values)?;
+        unsafe {
+            let free: Symbol<FreeFn> = self.library.get(b"f2e_free")?;
+            let result = if let Some(config_path) = config_path {
+                let config_path = CString::new(config_path)?;
+                let coerce: Symbol<ParseFn> = self.library.get(b"f2e_coerce_json_from_file")?;
+                coerce(config_path.as_ptr(), values_json.as_ptr())
+            } else {
+                let coerce: Symbol<ParseDefaultFn> = self.library.get(b"f2e_coerce_json")?;
+                coerce(values_json.as_ptr())
+            };
+            if result.is_null() {
+                return Err(CoercionError::NativeUnavailable);
+            }
+            let raw = CStr::from_ptr(result).to_string_lossy().into_owned();
+            free(result);
+            decode_coercion_report(&raw)
         }
     }
 

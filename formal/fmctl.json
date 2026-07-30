@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "formal-methods.v1",
+  "repoUrl": "https://github.com/ORESoftware/flags-2-env.git",
+  "gitRef": "main",
+  "paths": [
+    "src/",
+    "clients/rust/src/",
+    "formal/"
+  ],
+  "languages": [
+    "c",
+    "h",
+    "rs"
+  ],
+  "heuristics": false
+}

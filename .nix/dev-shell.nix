@@ -5,6 +5,7 @@ let
       actionlint
       bashInteractive
       binutils
+      cbmc
       gawk
       gcc
       git
@@ -18,6 +19,7 @@ let
       ruby
       shellcheck
       shfmt
+      z3
     ])
     ++ [ agentCheck ];
 in

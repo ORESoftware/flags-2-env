@@ -180,6 +180,25 @@ int main(void) {
               f2e_coerce_json_from_file(CODEGEN_CONFIG, "[]"),
               "{\"ok\":false,\"errors\":[\"values must be a valid JSON object with supported value sizes\"]}");
 
+  expect_json("coerce omits inactive command-scoped defaults",
+              f2e_coerce_json_from_file(SUBCOMMANDS_CONFIG, "{}"),
+              "{\"ok\":true,\"value\":{\"GITISH_VERBOSE\":false}}");
+
+  expect_json("coerce applies defaults for parse.command_env path",
+              f2e_coerce_json_from_file(SUBCOMMANDS_CONFIG,
+                                        "{\"GITISH_COMMAND\":\"remote add\"}"),
+              "{\"ok\":true,\"value\":{\"GITISH_VERBOSE\":false,\"GITISH_REMOTE_ADD_FETCH\":false,\"GITISH_COMMAND\":\"remote add\"}}");
+
+  expect_json("coerce applies defaults for active command marker",
+              f2e_coerce_json_from_file(SUBCOMMANDS_CONFIG,
+                                        "{\"GITISH_CMD_REMOTE_ADD\":\"true\"}"),
+              "{\"ok\":true,\"value\":{\"GITISH_VERBOSE\":false,\"GITISH_REMOTE_ADD_FETCH\":false,\"GITISH_CMD_REMOTE_ADD\":true}}");
+
+  expect_json("coerce preserves explicit scoped values without a command",
+              f2e_coerce_json_from_file(SUBCOMMANDS_CONFIG,
+                                        "{\"GITISH_REMOTE_ADD_FETCH\":\"true\"}"),
+              "{\"ok\":true,\"value\":{\"GITISH_VERBOSE\":false,\"GITISH_REMOTE_ADD_FETCH\":true}}");
+
   char *typescript_types = f2e_generate_types_from_file(CODEGEN_CONFIG, "typescript", "CliStuff");
   expect_contains("typescript codegen interface", typescript_types, "export interface CliStuff");
   expect_contains("typescript codegen number", typescript_types, "RATIO: number;");
