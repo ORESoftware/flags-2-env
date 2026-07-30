@@ -31,6 +31,7 @@ outputs = [
   "clients/bash/flags2env.bash",
   "clients/zsh/flags2env.zsh",
   "scripts/verify-zed-package.sh",
+  "scripts/verify-shell-contract.py",
   ".cli-flags.toml",
 ]
 
