@@ -10,11 +10,11 @@ on:
       zed_cli_ref:
         description: "zed-pkg/zed-cli branch, tag, or SHA"
         required: false
-        default: "25d94719e07a8fa6e3a6c3e562764fbb6345b174"
+        default: "8d04bc598a4b0b464466cbec3c44d18cf2922137"
       zed_interfaces_ref:
         description: "zed-pkg/zed-interfaces branch, tag, or SHA"
         required: false
-        default: "c36e0e71bbdb6f3694e580d8df1d53a76920175e"
+        default: "07d01604461d00e237c7d86ad3855464167574ec"
   pull_request:
     paths:
       - ".github/workflows/e2e.yml"
@@ -264,14 +264,21 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: zed-pkg/zed-interfaces
-          ref: ${{ inputs.zed_interfaces_ref || 'c36e0e71bbdb6f3694e580d8df1d53a76920175e' }}
+          ref: ${{ inputs.zed_interfaces_ref || '07d01604461d00e237c7d86ad3855464167574ec' }}
           path: zed-interfaces
 
       - uses: actions/checkout@v7
         with:
           repository: zed-pkg/zed-cli
-          ref: ${{ inputs.zed_cli_ref || '25d94719e07a8fa6e3a6c3e562764fbb6345b174' }}
+          ref: ${{ inputs.zed_cli_ref || '8d04bc598a4b0b464466cbec3c44d18cf2922137' }}
           path: zed-cli
+
+      - name: Install Zsh for installed shell-contract tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes zsh
 
       - uses: dtolnay/rust-toolchain@stable
 
