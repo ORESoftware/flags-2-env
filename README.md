@@ -136,7 +136,7 @@ Commands that declare `env` also get that key set to `"true"` when they are on t
 
 Native callers can render the scoped help directly with `f2e_help_table_for_argv[_from_file]` / `f2e_print_table_for_argv[_from_file]`, or `f2e_help_table_for_json_argv[_from_file]` from FFI clients. The Node.js client exposes this as `helpTableForArgv(command, argv, opts)`, and its `parse(...).printTable()` automatically renders the help table for the subcommand selected by the parsed argv.
 
-For programmatic callers, the structured parse API returns each channel separately instead of packing everything into env keys (so nothing can be shadowed by real environment variables): `f2e_parse_structured[_from_file]` / `f2e_parse_structured_json_argv[_from_file]` return `{"flags":{...},"command":"remote add","subcommands":["remote","add"],"extras":["abc"],"unknownOptions":[],"errors":[]}` where `flags` is the same env map `f2e_parse` returns and `extras` holds the operand tokens (positionals after the last matched command, including tokens after a bare `--`; with no command matched, everything except argv[0]). `f2e_resolve_commands*` returns just `{"path":[...],"label":"..."}`. The Node.js client exposes these as `parseStructured(argv, opts)` — `const {flags, subcommands, extras} = parseStructured(...)` — and `resolveCommands(argv, opts)`; the Rust client as `parse_structured(...)` returning a `StructuredParse` struct and `resolve_commands(...)`.
+For programmatic callers, the structured parse API returns each channel separately instead of packing everything into env keys (so nothing can be shadowed by real environment variables): `f2e_parse_structured[_from_file]` / `f2e_parse_structured_json_argv[_from_file]` return `{"flags":{...},"providedFlags":{...},"command":"remote add","subcommands":["remote","add"],"extras":["abc"],"unknownOptions":[],"errors":[]}`. `flags` is the same default-bearing env map `f2e_parse` returns. `providedFlags` contains only normalized argv-derived values and command markers, so it can be merged over the real process environment before `coerce()` without a TOML default incorrectly shadowing an environment value. `extras` holds the operand tokens (positionals after the last matched command, including tokens after a bare `--`; with no command matched, everything except argv[0]). `f2e_resolve_commands*` returns just `{"path":[...],"label":"..."}`. The Node.js client exposes these as `parseStructured(argv, opts)` and the strict `parseOverridesFromArgs(argv, opts)` convenience map; the Rust client exposes `parse_structured(...)` returning a `StructuredParse` with `flags` and `provided_flags`.
 
 Generated shell completions are subcommand-aware for configs with `[commands.*]`: the static script resolves the active command scope from the words typed so far, then offers that scope's options (own flags plus unshadowed inherited ones), its child commands, and per-scope bool values — still with zero flags2env or TOML reads at completion time.
 
@@ -218,6 +218,50 @@ build/libflags2env.a
 build/flags2env
 ```
 
+## Zed package
+
+The Zed package is a universal executable package, not a replacement for a
+project's npm, pnpm, Maven, RubyGems, Python, or Go dependencies. It installs
+under the project-local `zed_modules/` tree and exposes `flags2env` through
+`zed_modules/.bin` and `zed run`.
+
+In an existing project without a `.zpkg.toml`, install it without changing the
+native package manifest:
+
+```sh
+zed install oresoftware/flags-2-env@^0.1 \
+  --skip-manifest \
+  --allow-build \
+  --adapter none
+zed run flags2env -- audit .cli-flags.toml
+```
+
+`--allow-build` explicitly permits the package's small C build. `--adapter
+none` keeps this universal CLI out of `node_modules`, Java classpaths, Python
+paths, Go workspaces, and other language-specific dependency wiring.
+
+For a manifest-backed Zed project, declare the dependency and universal
+adapter once:
+
+```toml
+[dependencies]
+"oresoftware/flags-2-env" = "^0.1"
+
+[install]
+adapter = "none"
+```
+
+Then run `zed install --allow-build`. Both install forms retain the native
+project structure, write an integrity-pinned `.zpkg.lock`, and support frozen
+reinstallation with `zed install --frozen --skip-manifest --allow-build
+--adapter none` for manifestless consumers.
+
+`tests/flags-2-env-e2e.sh` round-trips the exact publishable artifact through a
+temporary file registry and installs it into npm, nested pnpm, Maven, Ruby,
+Python virtualenv, Go module, standalone JAR, and plain Bash layouts. It checks
+symlink and copy installs, `zed run`, the Bash helper, native-manifest
+non-interference, and frozen lockfile restoration.
+
 Export parsed flags directly into a shell function or script:
 
 ```bash
@@ -294,12 +338,12 @@ For Node.js/TypeScript, merge the raw env and CLI maps first, then cross the exp
 import * as f2e from "@oresoftware/f2e";
 import type { CliStuff } from "../generated/cli-interfaces.js";
 
-const cli = f2e.parseFromArgs(process.argv);
-const config = { ...process.env, ...cli };
+const overrides = f2e.parseOverridesFromArgs(process.argv);
+const config = { ...process.env, ...overrides };
 const typedConfig: CliStuff = f2e.coerce(config);
 ```
 
-`parseFromArgs()` remains string-valued. `coerce()` reads the same `.cli-flags.toml` used by generation, keeps only declared env keys, applies schema defaults, converts integers, doubles, booleans, JSON, arrays, and maps, and throws `CoercionError` with all invalid keys when conversion fails. Each conversion error identifies the env key, its `[flags.*]` table, the declared type, the received JSON kind, and how to repair either the value or declaration.
+`parseOverridesFromArgs()` remains string-valued, omits schema defaults, and throws a value-redacted `TypeError` when argv contains unknown options or invalid values. Use `parseStructured()` when the caller needs the detailed diagnostic channels. The older `parseFromArgs()` retains its default-bearing behavior for compatibility and should not be spread over `process.env` when defaults are declared. `coerce()` reads the same `.cli-flags.toml` used by generation, keeps only declared env keys, applies schema defaults, converts integers, doubles, booleans, JSON, arrays, and maps, and throws `CoercionError` with all invalid keys when conversion fails. Each conversion error identifies the env key, its `[flags.*]` table, the declared type, the received JSON kind, and how to repair either the value or declaration.
 
 The generated TypeScript interface is erased at runtime; it does not tell `coerce()` what to do. The TOML `type` field is the runtime source of truth. When `type` is omitted, flags2env deterministically treats the value as a string, even if a default such as `123` looks numeric. It never guesses independently from each process value, because that could make generated types disagree with runtime values. Errors already collected in the configured `[parse] errors_env` are carried into the same exception. Pass `{ configPath: "path/to/.cli-flags.toml" }` as the second argument when config discovery is not appropriate.
 
@@ -494,8 +538,8 @@ const combined = getEnvMap();
 import * as f2e from "@oresoftware/f2e";
 import type { CliStuff } from "../generated/cli-interfaces.js";
 
-const cli = f2e.parseFromArgs(process.argv);
-const combined = { ...process.env, ...cli };
+const overrides = f2e.parseOverridesFromArgs(process.argv);
+const combined = { ...process.env, ...overrides };
 const appEnv: CliStuff = f2e.coerce(combined);
 
 export default appEnv;
@@ -1185,7 +1229,8 @@ pub fn load_app_env() -> Result<AppEnv, Box<dyn std::error::Error>> {
     let sdk = BundledFlags2Env::new();
     let mut combined: HashMap<String, String> = env::vars().collect();
     let argv: Vec<String> = env::args().collect();
-    combined.extend(sdk.parse(&argv, None)?);
+    let parsed = sdk.parse_structured(&argv, None)?;
+    combined.extend(parsed.provided_flags);
 
     Ok(sdk.coerce(&combined, None)?)
 }
