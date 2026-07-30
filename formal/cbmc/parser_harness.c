@@ -60,3 +60,18 @@ void harness_option_shape(void) {
   int looks_like_option = f2e_token_looks_like_option(token);
   assert(looks_like_option == (token[0] == '-' && token[1] != '\0'));
 }
+
+void harness_coercion_slot_bounds(void) {
+  F2EConfig config;
+  config.flag_count = nondet_size_t();
+  config.command_count = nondet_size_t();
+
+  __CPROVER_assume(config.flag_count <= F2E_MAX_FLAGS);
+  __CPROVER_assume(config.command_count <= F2E_MAX_COMMANDS);
+
+  size_t slots = f2e_coerce_slot_count(&config);
+  assert(slots >= config.flag_count);
+  assert(slots >= config.command_count);
+  assert(slots == config.flag_count + config.command_count + 1);
+  assert(slots <= F2E_MAX_FLAGS + F2E_MAX_COMMANDS + 1);
+}
