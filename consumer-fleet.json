@@ -1,0 +1,153 @@
+{
+  "schema_version": 1,
+  "tooling_ref": "9483b92c1fb259f598858fdd2bef66417d87fb2c",
+  "consumers": [
+    {
+      "repository": "ORESoftware/ai-agent-bridge.rs",
+      "contract": ".cli-flags.toml",
+      "command": "ai-agent-bridge",
+      "kind": "server"
+    },
+    {
+      "repository": "ORESoftware/ai-agent-coordinator.rs",
+      "contract": ".cli-flags.toml",
+      "command": "ai-agent-coordinator",
+      "kind": "worker"
+    },
+    {
+      "repository": "ORESoftware/audio-recording-rolling-window",
+      "contract": ".cli-flags.toml",
+      "command": "audio-recording-rolling-window",
+      "kind": "cli"
+    },
+    {
+      "repository": "ORESoftware/flags-2-env",
+      "contract": ".cli-flags.toml",
+      "command": "flags2env",
+      "kind": "cli"
+    },
+    {
+      "repository": "ORESoftware/happy-wakey.rs",
+      "contract": ".cli-flags.toml",
+      "command": "happy-wakey",
+      "kind": "cli"
+    },
+    {
+      "repository": "ORESoftware/json-logging-cli",
+      "contract": ".cli-flags.toml",
+      "command": "json-logging-cli",
+      "kind": "cli"
+    },
+    {
+      "repository": "ORESoftware/k8s-cluster",
+      "contract": "remote/deployments/browser-mcp-rs/.cli-flags.toml",
+      "command": "dd-browser-mcp",
+      "kind": "mcp"
+    },
+    {
+      "repository": "ORESoftware/k8s-cluster",
+      "contract": "remote/deployments/gleam-mcp-server/.cli-flags.toml",
+      "command": "gleam-mcp-server",
+      "kind": "mcp"
+    },
+    {
+      "repository": "ORESoftware/k8s-cluster",
+      "contract": "remote/deployments/gleamlang-presence-server/.cli-flags.toml",
+      "command": "gleamlang-presence-server",
+      "kind": "server"
+    },
+    {
+      "repository": "ORESoftware/k8s-cluster",
+      "contract": "remote/deployments/gleamlang-server/.cli-flags.toml",
+      "command": "gleamlang-server",
+      "kind": "server"
+    },
+    {
+      "repository": "ORESoftware/k8s-cluster",
+      "contract": "remote/deployments/gleamlang-ws-loadtest/.cli-flags.toml",
+      "command": "gleamlang-ws-loadtest",
+      "kind": "worker"
+    },
+    {
+      "repository": "ORESoftware/k8s-cluster",
+      "contract": "remote/deployments/gleamlang-ws-server/.cli-flags.toml",
+      "command": "gleamlang-ws-server",
+      "kind": "server"
+    },
+    {
+      "repository": "ORESoftware/k8s-cluster",
+      "contract": "remote/deployments/lock-loadtest-gleam/.cli-flags.toml",
+      "command": "lock-loadtest-gleam",
+      "kind": "worker"
+    },
+    {
+      "repository": "ORESoftware/live-mutex-mills.rs",
+      "contract": ".cli-flags.toml",
+      "command": "live-mutex-mills",
+      "kind": "server"
+    },
+    {
+      "repository": "ORESoftware/live-mutex-rs",
+      "contract": ".cli-flags.toml",
+      "command": "live-mutex",
+      "kind": "server"
+    },
+    {
+      "repository": "ORESoftware/live-mutex.distributed",
+      "contract": ".cli-flags.toml",
+      "command": "live-mutex-broker",
+      "kind": "server"
+    },
+    {
+      "repository": "ORESoftware/mip-solver-node.rs",
+      "contract": ".cli-flags.toml",
+      "command": "mip-solver-node",
+      "kind": "server"
+    },
+    {
+      "repository": "ORESoftware/r2g",
+      "contract": ".cli-flags.toml",
+      "command": "r2g",
+      "kind": "cli"
+    },
+    {
+      "repository": "ORESoftware/shared-auth-server.rs",
+      "contract": ".cli-flags.toml",
+      "command": "shared-auth-server",
+      "kind": "server",
+      "verification": "in-repo",
+      "workflow": ".github/workflows/flags2env-compliance.yml",
+      "evidence_pr": "https://github.com/ORESoftware/shared-auth-server.rs/pull/2"
+    },
+    {
+      "repository": "ORESoftware/sonusauris-app-proxy",
+      "contract": ".cli-flags.toml",
+      "command": "sonusauris-app-proxy",
+      "kind": "server",
+      "verification": "in-repo",
+      "workflow": ".github/workflows/flags2env-compliance.yml",
+      "evidence_pr": "https://github.com/ORESoftware/sonusauris-app-proxy/pull/4"
+    },
+    {
+      "repository": "declarative-migrations/declarative-postgres-migrate.rs",
+      "contract": ".cli-flags.toml",
+      "command": "dpm",
+      "kind": "cli"
+    },
+    {
+      "repository": "fiducia-cloud/fiducia-cli.rs",
+      "contract": ".cli-flags.toml",
+      "command": "fiducia",
+      "kind": "cli"
+    },
+    {
+      "repository": "sagitta-stack/sagitta-mcp-server.rs",
+      "contract": ".cli-flags.toml",
+      "command": "sagitta-mcp-server",
+      "kind": "mcp",
+      "verification": "in-repo",
+      "workflow": ".github/workflows/flags2env-compliance.yml",
+      "evidence_pr": "https://github.com/sagitta-stack/sagitta-mcp-server.rs/pull/2"
+    }
+  ]
+}

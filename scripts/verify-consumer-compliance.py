@@ -19,11 +19,33 @@ from typing import Any, Iterable
 
 PIN_RE = re.compile(r"^[0-9a-f]{40}$")
 ENV_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-SECRET_RE = re.compile(
-    r"(?:^|_)(?:TOKEN|SECRET|PASSWORD|PASSWD|PRIVATE_KEY|SIGNING_KEY|"
-    r"ENCRYPTION_KEY|API_KEY|ACCESS_KEY|CLIENT_SECRET|DATABASE_URL|DB_URL|"
-    r"DSN|CREDENTIALS?|AUTH_HEADER|COOKIE|SESSION)(?:_|$)"
-)
+SECRET_SEGMENTS = {
+    "TOKEN",
+    "SECRET",
+    "PASSWORD",
+    "PASSWD",
+    "KEY",
+    "CREDENTIAL",
+    "CREDENTIALS",
+    "COOKIE",
+    "SESSION",
+}
+SECRET_COMPOUNDS = {
+    ("DATABASE", "URL"),
+    ("DATABASE", "DSN"),
+    ("DB", "URL"),
+    ("DB", "DSN"),
+    ("REDIS", "URL"),
+    ("AUTH", "HEADER"),
+}
+NON_SECRET_TOKEN_METADATA = {
+    "TTL",
+    "LIFETIME",
+    "EXPIRY",
+    "EXPIRATION",
+    "ISSUER",
+    "AUDIENCE",
+}
 EXACT_SECRET_ENVS = {
     "OTEL_EXPORTER_OTLP_HEADERS",
     "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
@@ -40,6 +62,33 @@ class Flag:
 
 def fail(message: str) -> None:
     print(f"flags2env compliance: {message}", file=sys.stderr)
+
+
+def is_secret_bearing_env(env: str) -> bool:
+    """Return whether an environment name represents secret material.
+
+    `*_TOKEN_TTL_*` and similar names describe token metadata, not the token
+    value itself. Keep that exception deliberately narrow and continue
+    rejecting any additional secret marker in the same name.
+    """
+
+    if env in EXACT_SECRET_ENVS:
+        return True
+    segments = env.upper().split("_")
+    for left, right in zip(segments, segments[1:]):
+        if (left, right) in SECRET_COMPOUNDS:
+            return True
+    for index, segment in enumerate(segments):
+        if segment not in SECRET_SEGMENTS:
+            continue
+        if (
+            segment == "TOKEN"
+            and index + 1 < len(segments)
+            and segments[index + 1] in NON_SECRET_TOKEN_METADATA
+        ):
+            continue
+        return True
+    return False
 
 
 def safe_child(root: Path, relative: str, label: str) -> Path:
@@ -157,9 +206,10 @@ def main() -> int:
         previous = seen_envs.setdefault(flag.env, flag.path)
         if previous != flag.path:
             errors.append(f"{flag.path} and {previous} both map to {flag.env}")
-        if flag.env in EXACT_SECRET_ENVS or SECRET_RE.search(flag.env):
+        secret_bearing = is_secret_bearing_env(flag.env)
+        if secret_bearing:
             errors.append(f"{flag.path} exposes secret-bearing env {flag.env}; keep it environment-only")
-        if flag.default_present and (flag.env in EXACT_SECRET_ENVS or SECRET_RE.search(flag.env)):
+        if flag.default_present and secret_bearing:
             errors.append(f"{flag.path} gives secret-bearing env {flag.env} a default")
 
     env_policy = contract.get("env", {})
