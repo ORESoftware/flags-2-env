@@ -6444,8 +6444,12 @@ static size_t f2e_find_flag_index_by_env(const F2EConfig *config, const char *en
  * command_count) are per-command marker envs, and the final slot is
  * parse.command_env.
  */
+static size_t f2e_coerce_slot_count_values(size_t flag_count, size_t command_count) {
+  return flag_count + command_count + 1;
+}
+
 static size_t f2e_coerce_slot_count(const F2EConfig *config) {
-  return config->flag_count + config->command_count + 1;
+  return f2e_coerce_slot_count_values(config->flag_count, config->command_count);
 }
 
 static size_t f2e_coerce_slot_for_key(const F2EConfig *config, const char *key) {

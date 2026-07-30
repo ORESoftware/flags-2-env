@@ -62,16 +62,15 @@ void harness_option_shape(void) {
 }
 
 void harness_coercion_slot_bounds(void) {
-  F2EConfig config;
-  config.flag_count = nondet_size_t();
-  config.command_count = nondet_size_t();
+  size_t flag_count = nondet_size_t();
+  size_t command_count = nondet_size_t();
 
-  __CPROVER_assume(config.flag_count <= F2E_MAX_FLAGS);
-  __CPROVER_assume(config.command_count <= F2E_MAX_COMMANDS);
+  __CPROVER_assume(flag_count <= F2E_MAX_FLAGS);
+  __CPROVER_assume(command_count <= F2E_MAX_COMMANDS);
 
-  size_t slots = f2e_coerce_slot_count(&config);
-  assert(slots >= config.flag_count);
-  assert(slots >= config.command_count);
-  assert(slots == config.flag_count + config.command_count + 1);
+  size_t slots = f2e_coerce_slot_count_values(flag_count, command_count);
+  assert(slots >= flag_count);
+  assert(slots >= command_count);
+  assert(slots == flag_count + command_count + 1);
   assert(slots <= F2E_MAX_FLAGS + F2E_MAX_COMMANDS + 1);
 }
