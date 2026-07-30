@@ -182,6 +182,7 @@ install_layout() {
   [[ -f "$contract" ]]
   [[ -f "$target/clients/bash/flags2env.bash" ]]
   [[ -f "$target/clients/zsh/flags2env.zsh" ]]
+  [[ -f "$target/scripts/verify-shell-contract.py" ]]
   [[ ! -e "$expected/node_modules" ]]
   [[ ! -e "$expected/.zed/classpath" ]]
   [[ ! -e "$expected/.zed/go.work" ]]
@@ -223,6 +224,26 @@ install_layout() {
     flags2env_apply --audit
     [[ "$FLAGS2ENV_AUDIT" == true ]]
   )
+
+  (
+    unset FLAGS2ENV_AUDIT
+    export FLAGS2ENV_BIN="$target/build/flags2env"
+    export FLAGS2ENV_CONFIG="$contract"
+    zsh -f -c '
+      set -eu
+      source "$1"
+      flags2env_apply --audit
+      [[ "$FLAGS2ENV_AUDIT" == true ]]
+    ' zsh "$target/clients/zsh/flags2env.zsh"
+  )
+
+  if [[ "$layout" == npm ]]; then
+    python3 "$target/scripts/verify-shell-contract.py" \
+      --cli "$target/build/flags2env" \
+      --contract "$contract" \
+      --command flags2env \
+      --install
+  fi
 
   rm -rf -- "$modules"
   (
