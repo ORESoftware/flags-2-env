@@ -2,7 +2,7 @@
 
 const assert = require("node:assert/strict");
 const { chdir } = require("node:process");
-const { apply, auditConfig, auditConfigStatus, auditEnv, auditEnvStatus, coerce, CoercionError, completionScript, generateTypes, helpTable, helpTableForArgv, parse, parseStructured, resolveCommands, parseFromArgs } = require("./lib.cjs");
+const { apply, auditConfig, auditConfigStatus, auditEnv, auditEnvStatus, coerce, CoercionError, completionScript, generateTypes, helpTable, helpTableForArgv, parse, parseOverridesFromArgs, parseStructured, resolveCommands, parseFromArgs } = require("./lib.cjs");
 
 chdir("../../tests/fixtures/nested/deeper");
 
@@ -18,9 +18,21 @@ assert.equal(explicit.PORT, "3000");
 const fromArgs = parseFromArgs(["app", "--port", "8182"], { configPath: "../../.cli-flags.toml" });
 assert.equal(fromArgs.PORT, "8182");
 
-const typedConfig = coerce({ ...process.env, ...explicit }, { configPath: "../../.cli-flags.toml" });
-assert.equal(typedConfig.PORT, 3000);
+const defaultFreeOverrides = parseOverridesFromArgs(["app", "--debug=f"], { configPath: "../../.cli-flags.toml" });
+const typedConfig = coerce({ PORT: "9191", ...defaultFreeOverrides }, { configPath: "../../.cli-flags.toml" });
+assert.equal(typedConfig.PORT, 9191);
 assert.equal(typedConfig.DEBUG, false);
+const cliWins = parseOverridesFromArgs(["app", "--port=8182"], { configPath: "../../.cli-flags.toml" });
+assert.equal(coerce({ PORT: "9191", ...cliWins }, { configPath: "../../.cli-flags.toml" }).PORT, 8182);
+let strictParseMessage = "";
+try {
+  parseOverridesFromArgs(["app", "--api-token=must-not-leak"], { configPath: "../../.cli-flags.toml" });
+} catch (error) {
+  assert.ok(error instanceof TypeError);
+  strictParseMessage = error.message;
+}
+assert.match(strictParseMessage, /rejected 1 unknown option/);
+assert.doesNotMatch(strictParseMessage, /must-not-leak/);
 
 const codegenConfig = "../../../codegen/.cli-flags.toml";
 const richTypes = coerce({ RATIO: "1.25", ITEMS: "[3,4]", LABELS: '{"tier":2}' }, { configPath: codegenConfig });
@@ -97,6 +109,8 @@ assert.equal(structured.command, "remote add");
 assert.deepEqual(structured.subcommands, ["remote", "add"]);
 assert.deepEqual(structured.extras, ["abc", "efg"]);
 assert.equal(structured.flags.GITISH_REMOTE_ADD_FETCH, "true");
+assert.equal(structured.providedFlags.GITISH_REMOTE_ADD_FETCH, "true");
+assert.equal(structured.providedFlags.GITISH_VERBOSE, undefined);
 assert.deepEqual(structured.unknownOptions, []);
 assert.deepEqual(structured.errors, []);
 assert.equal(structured.isHelpMenu, false);

@@ -98,6 +98,11 @@ fn parse_structured_returns_separate_channels() {
         structured.flags.get("GITISH_REMOTE_ADD_FETCH"),
         Some(&"true".to_string())
     );
+    assert_eq!(
+        structured.provided_flags.get("GITISH_REMOTE_ADD_FETCH"),
+        Some(&"true".to_string())
+    );
+    assert!(!structured.provided_flags.contains_key("GITISH_VERBOSE"));
     assert!(structured.unknown_options.is_empty());
     assert!(structured.errors.is_empty());
 
@@ -124,8 +129,14 @@ fn dynamic_coerce_returns_typed_config_and_structured_errors() {
     let config = config_path.to_str().unwrap();
     let sdk = unsafe { Flags2Env::load(Some(library.to_str().unwrap())).unwrap() };
 
+    let defaults_only = sdk.parse_structured(&["app".into()], Some(config)).unwrap();
+    let mut environment = HashMap::from([("PORT".to_string(), "9191".to_string())]);
+    environment.extend(defaults_only.provided_flags);
+    let env_typed: GeneratedConfig = sdk.coerce(&environment, Some(config)).unwrap();
+    assert_eq!(env_typed.PORT, 9191);
+
     let parsed = sdk
-        .parse(
+        .parse_structured(
             &[
                 "app".into(),
                 "--debug=t".into(),
@@ -135,7 +146,9 @@ fn dynamic_coerce_returns_typed_config_and_structured_errors() {
             Some(config),
         )
         .unwrap();
-    let typed: GeneratedConfig = sdk.coerce(&parsed, Some(config)).unwrap();
+    let mut combined = HashMap::from([("PORT".to_string(), "9191".to_string())]);
+    combined.extend(parsed.provided_flags);
+    let typed: GeneratedConfig = sdk.coerce(&combined, Some(config)).unwrap();
 
     assert_eq!(typed.PORT, 8181);
     assert!(typed.DEBUG);

@@ -65,7 +65,15 @@ python3 -m unittest tests/test_consumer_fleet.py
 python3 scripts/render-consumer-fleet.py --print
 ```
 
-The renderer rejects mutable tooling refs, unsafe repositories or paths, duplicate contracts, unsupported kinds, unsafe command basenames, and unsorted entries before GitHub Actions evaluates the matrix.
+Private or otherwise centrally unreachable consumers use
+`verification: in-repo` and must record both the canonical workflow/PR and the
+full immutable commit that contains the reviewed integration. The commit anchor
+prevents a later branch movement or unrelated PR URL from silently changing
+the claimed evidence.
+
+The renderer rejects mutable tooling refs and evidence commits, unsafe
+repositories or paths, duplicate contracts, unsupported kinds, unsafe command
+basenames, and unsorted entries before GitHub Actions evaluates the matrix.
 
 ## Consumer smoke scripts
 

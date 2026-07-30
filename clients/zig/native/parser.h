@@ -75,11 +75,15 @@ int f2e_is_help_requested_json_argv(const char *argv_json) F2E_WARN_UNUSED_RESUL
 /*
  * Structured parse: every channel is returned separately instead of packed
  * into env keys, so nothing can be shadowed by real environment variables:
- *   {"flags":{...},"command":"remote add","subcommands":["remote","add"],
- *    "extras":["abc"],"unknownOptions":[],"errors":[]}
- * "flags" is the same env map f2e_parse returns. "extras" holds operand
- * tokens: positionals after the last matched command (including tokens after
- * a bare --); with no command matched, every positional except argv[0].
+ *   {"flags":{...},"providedFlags":{...},"command":"remote add",
+ *    "subcommands":["remote","add"],"extras":["abc"],
+ *    "unknownOptions":[],"errors":[]}
+ * "flags" is the same default-bearing env map f2e_parse returns.
+ * "providedFlags" contains only argv-derived values and command markers, so
+ * callers can merge it over the process environment before schema coercion.
+ * "extras" holds operand tokens: positionals after the last matched command
+ * (including tokens after a bare --); with no command matched, every
+ * positional except argv[0].
  * "unknownOptions" and "errors" are collected regardless of the [parse]
  * *_env settings. Returns a heap-allocated string; call f2e_free().
  */

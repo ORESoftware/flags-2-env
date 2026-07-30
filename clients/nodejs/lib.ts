@@ -71,6 +71,7 @@ type NativeModule = {
 
 export type StructuredParseResult = {
   flags: EnvMap;
+  providedFlags: EnvMap;
   command: string;
   subcommands: string[];
   extras: string[];
@@ -180,9 +181,11 @@ export function parseFromArgs(argv: readonly unknown[] = process.argv, options: 
 }
 
 /**
- * Structured parse: {flags, command, subcommands, extras, unknownOptions,
- * errors} as separate channels (dashdash-style), so nothing is packed into —
- * or shadowed by — env keys. `flags` is the same map parse() returns.
+ * Structured parse: {flags, providedFlags, command, subcommands, extras,
+ * unknownOptions, errors} as separate channels (dashdash-style), so nothing
+ * is packed into — or shadowed by — env keys. `flags` is the same
+ * default-bearing map parse() returns; `providedFlags` contains only
+ * argv-derived values and command markers.
  */
 export function parseStructured(
   argv: readonly unknown[] = process.argv,
@@ -201,6 +204,37 @@ export function parseStructured(
     ? parseStructuredJson.call(native(), argvJson, options.configPath)
     : parseStructuredJson.call(native(), argvJson);
   return withHelpMetadata(JSON.parse(raw), argvItems, argvJson, options) as unknown as StructuredParseResult;
+}
+
+/**
+ * Returns strict argv-derived overrides suitable for
+ * `{...process.env, ...overrides}`. Schema defaults are deliberately omitted
+ * so they cannot shadow real environment values.
+ */
+export function parseOverridesFromArgs(
+  argv: readonly unknown[] = process.argv,
+  options: Flags2EnvOptions = {},
+): ParseResult {
+  const parsed = parseStructured(argv, options);
+  if (!parsed.providedFlags || typeof parsed.providedFlags !== "object") {
+    throw new TypeError("the loaded flags2env addon does not support argv-only overrides");
+  }
+  if (parsed.unknownOptions.length > 0 || parsed.errors.length > 0) {
+    throw new TypeError(
+      `flags2env rejected ${parsed.unknownOptions.length} unknown option(s) and ${parsed.errors.length} invalid value(s); call parseStructured() for details`,
+    );
+  }
+  Object.defineProperties(parsed.providedFlags, {
+    isHelpMenu: {
+      enumerable: false,
+      value: parsed.isHelpMenu,
+    },
+    printTable: {
+      enumerable: false,
+      value: parsed.printTable,
+    },
+  });
+  return parsed.providedFlags as ParseResult;
 }
 
 /** Resolves just the [commands.*] path for argv: {path: string[], label}. */
@@ -295,6 +329,7 @@ export function coerce<T extends object = Record<string, unknown>>(
 export default {
   parse,
   parseFromArgs,
+  parseOverridesFromArgs,
   parseStructured,
   resolveCommands,
   parseProcess,

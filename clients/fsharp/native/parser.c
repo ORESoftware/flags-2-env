@@ -6098,6 +6098,7 @@ static int f2e_json_list_close(F2EJsonList *list) {
  * Structured parse: returns every channel separately instead of packing them
  * into env keys, so nothing can be shadowed by real environment variables:
  *   {"flags":{...},               the same env map f2e_parse returns
+ *    "providedFlags":{...},       argv-derived values without schema defaults
  *    "command":"remote add",      space-joined resolved command path
  *    "subcommands":["remote","add"],
  *    "extras":["abc","efg"],      operands: positionals after the last matched
@@ -6125,6 +6126,12 @@ char *f2e_parse_structured_from_file(const char *config_path, int argc, const ch
     free(config);
     return NULL;
   }
+  F2EPair *provided_pairs = (F2EPair *)calloc(F2E_MAX_PAIRS, sizeof(F2EPair));
+  if (!provided_pairs) {
+    free(pairs);
+    free(config);
+    return NULL;
+  }
 
   F2EJsonList positionals = {0};
   F2EJsonList unknown_options = {0};
@@ -6149,12 +6156,14 @@ char *f2e_parse_structured_from_file(const char *config_path, int argc, const ch
     int tail = path.depth > 0 ? path.commands[path.depth - 1] : F2E_SCOPE_ROOT;
     if (f2e_command_path_label(config, tail, joined, sizeof(joined))) {
       f2e_set_pair(pairs, F2E_MAX_PAIRS, config->command_env, joined);
+      f2e_set_pair(provided_pairs, F2E_MAX_PAIRS, config->command_env, joined);
     }
     for (size_t i = 0; i < path.depth; i++) {
       const F2ECommand *command = &config->commands[path.commands[i]];
       f2e_json_list_append(&subcommands, command->name);
       if (command->env[0] != '\0') {
         f2e_set_pair(pairs, F2E_MAX_PAIRS, command->env, "true");
+        f2e_set_pair(provided_pairs, F2E_MAX_PAIRS, command->env, "true");
       }
     }
     f2e_apply_defaults_for_path(config, pairs, F2E_MAX_PAIRS, &path);
@@ -6177,10 +6186,32 @@ char *f2e_parse_structured_from_file(const char *config_path, int argc, const ch
                 lenient,
                 NULL);
 
+  /*
+   * Scan the same argv without seeded defaults. Diagnostics and operands were
+   * already collected above; this pass only captures normalized CLI
+   * overrides for callers that merge them over a real environment before
+   * coercion.
+   */
+  f2e_scan_argv(config,
+                provided_pairs,
+                F2E_MAX_PAIRS,
+                argc,
+                argv,
+                NULL,
+                NULL,
+                NULL,
+                NULL,
+                0,
+                allow_unknown,
+                allow_unknown_forced,
+                lenient,
+                NULL);
+
   if (track_positionals && positionals.count > 0) {
     char value[F2E_MAX_VALUE];
     if (f2e_json_list_finish(&positionals, value, sizeof(value))) {
       f2e_set_pair(pairs, F2E_MAX_PAIRS, config->positionals_env, value);
+      f2e_set_pair(provided_pairs, F2E_MAX_PAIRS, config->positionals_env, value);
     }
   }
   if (config->unknown_options_env[0] != '\0' && unknown_options.count > 0) {
@@ -6191,6 +6222,7 @@ char *f2e_parse_structured_from_file(const char *config_path, int argc, const ch
       value[copy.len] = ']';
       value[copy.len + 1] = '\0';
       f2e_set_pair(pairs, F2E_MAX_PAIRS, config->unknown_options_env, value);
+      f2e_set_pair(provided_pairs, F2E_MAX_PAIRS, config->unknown_options_env, value);
     }
   }
   if (config->errors_env[0] != '\0' && errors.count > 0) {
@@ -6201,10 +6233,12 @@ char *f2e_parse_structured_from_file(const char *config_path, int argc, const ch
       value[copy.len] = ']';
       value[copy.len + 1] = '\0';
       f2e_set_pair(pairs, F2E_MAX_PAIRS, config->errors_env, value);
+      f2e_set_pair(provided_pairs, F2E_MAX_PAIRS, config->errors_env, value);
     }
   }
 
   char *flags_json = f2e_pairs_to_json(pairs, F2E_MAX_PAIRS);
+  char *provided_flags_json = f2e_pairs_to_json(provided_pairs, F2E_MAX_PAIRS);
   char label[F2E_MAX_VALUE];
   label[0] = '\0';
   if (path.depth > 0 &&
@@ -6213,7 +6247,7 @@ char *f2e_parse_structured_from_file(const char *config_path, int argc, const ch
   }
 
   char *result = NULL;
-  if (flags_json && lists_ok &&
+  if (flags_json && provided_flags_json && lists_ok &&
       f2e_json_list_close(&subcommands) &&
       f2e_json_list_close(&extras) &&
       f2e_json_list_close(&unknown_options) &&
@@ -6222,6 +6256,8 @@ char *f2e_parse_structured_from_file(const char *config_path, int argc, const ch
     if (f2e_buffer_init(&out)) {
       int ok = f2e_buffer_append(&out, "{\"flags\":") &&
                f2e_buffer_append(&out, flags_json) &&
+               f2e_buffer_append(&out, ",\"providedFlags\":") &&
+               f2e_buffer_append(&out, provided_flags_json) &&
                f2e_buffer_append(&out, ",\"command\":") &&
                f2e_buffer_append_json_string(&out, label) &&
                f2e_buffer_append(&out, ",\"subcommands\":") &&
@@ -6242,12 +6278,14 @@ char *f2e_parse_structured_from_file(const char *config_path, int argc, const ch
   }
 
   f2e_free(flags_json);
+  f2e_free(provided_flags_json);
   f2e_json_list_discard(&positionals);
   f2e_json_list_discard(&unknown_options);
   f2e_json_list_discard(&errors);
   f2e_json_list_discard(&extras);
   f2e_json_list_discard(&subcommands);
   free(pairs);
+  free(provided_pairs);
   free(config);
   return result;
 }

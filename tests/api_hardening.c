@@ -422,7 +422,17 @@ int main(void) {
   expect_contains("structured parse has subcommands channel", structured, "\"subcommands\":[\"remote\",\"add\"]");
   expect_contains("structured parse has extras channel", structured, "\"extras\":[\"abc\"]");
   expect_contains("structured parse keeps flags map", structured, "\"GITISH_REMOTE_ADD_FETCH\":\"true\"");
+  expect_contains("structured parse exposes argv-only flags", structured,
+                  "\"providedFlags\":{\"GITISH_COMMAND\":\"remote add\",\"GITISH_CMD_REMOTE_ADD\":\"true\",\"GITISH_REMOTE_ADD_FETCH\":\"true\",\"GITISH_POSITIONALS\":\"[\\\"gitish\\\",\\\"abc\\\"]\"}");
   f2e_free(structured);
+
+  char *structured_defaults = f2e_parse_structured_json_argv_from_file(
+      CODEGEN_CONFIG, "[\"app\",\"--ratio=1.25\"]");
+  expect_contains("structured flags retain schema defaults", structured_defaults,
+                  "\"flags\":{\"PORT\":\"3000\",\"RATIO\":\"1.25\",\"DEBUG\":\"false\"");
+  expect_contains("structured provided flags omit schema defaults", structured_defaults,
+                  "\"providedFlags\":{\"RATIO\":\"1.25\"}");
+  f2e_free(structured_defaults);
 
   char *structured_missing = f2e_parse_structured_from_file(NULL, 0, NULL);
   if (structured_missing) {

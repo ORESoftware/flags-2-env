@@ -120,10 +120,13 @@ impl From<libloading::Error> for CoercionError {
 
 /// Structured parse result: each channel is returned separately instead of
 /// packed into env keys, so nothing can be shadowed by real environment
-/// variables. `flags` is the same map `parse` returns.
+/// variables. `flags` is the same default-bearing map `parse` returns;
+/// `provided_flags` contains only argv-derived values and command markers, so
+/// it can safely be merged over the process environment before coercion.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct StructuredParse {
     pub flags: HashMap<String, String>,
+    pub provided_flags: HashMap<String, String>,
     pub command: String,
     pub subcommands: Vec<String>,
     pub extras: Vec<String>,
@@ -160,6 +163,22 @@ fn json_string_map(value: Option<&serde_json::Value>) -> HashMap<String, String>
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn required_json_string_map(
+    value: Option<&serde_json::Value>,
+    error: &'static str,
+) -> Result<HashMap<String, String>, &'static str> {
+    value
+        .and_then(serde_json::Value::as_object)
+        .ok_or(error)?
+        .iter()
+        .map(|(key, item)| {
+            item.as_str()
+                .map(|text| (key.clone(), text.to_string()))
+                .ok_or(error)
+        })
+        .collect()
 }
 
 fn coercion_input_json<V>(values: &V) -> Result<CString, CoercionError>
@@ -353,8 +372,9 @@ impl Flags2Env {
         }
     }
 
-    /// Structured parse: `{flags, command, subcommands, extras,
-    /// unknown_options, errors}` as separate channels (dashdash-style).
+    /// Structured parse: `{flags, provided_flags, command, subcommands,
+    /// extras, unknown_options, errors}` as separate channels
+    /// (dashdash-style).
     /// Extras are the operand tokens: positionals after the last matched
     /// command (including tokens after a bare `--`); with no command matched,
     /// every positional except argv\[0\].
@@ -374,6 +394,10 @@ impl Flags2Env {
         let report: serde_json::Value = serde_json::from_str(&raw)?;
         Ok(StructuredParse {
             flags: json_string_map(report.get("flags")),
+            provided_flags: required_json_string_map(
+                report.get("providedFlags"),
+                "loaded flags2env library does not support argv-only overrides",
+            )?,
             command: report
                 .get("command")
                 .and_then(|value| value.as_str())

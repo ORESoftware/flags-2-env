@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -106,6 +107,30 @@ class ConsumerFleetTests(unittest.TestCase):
             self.assertEqual("in-repo", entry["verification"])
             self.assertTrue(entry["workflow"].startswith(".github/workflows/"))
             self.assertIn(f"/{entry['repository']}/pull/".casefold(), entry["evidence_pr"].casefold())
+            self.assertRegex(entry["evidence_commit"], re.compile(r"^[0-9a-f]{40}$"))
+        self.assertEqual(
+            {
+                "ORESoftware/shared-auth-server.rs": (
+                    "https://github.com/ORESoftware/shared-auth-server.rs/pull/2",
+                    "dd595eae1dcd089a01f6487444d9403dcaee608c",
+                ),
+                "ORESoftware/sonusauris-app-proxy": (
+                    "https://github.com/ORESoftware/sonusauris-app-proxy/pull/1",
+                    "6e5b1ffadfe77433e079a945fc3916a0b8631394",
+                ),
+                "sagitta-stack/sagitta-mcp-server.rs": (
+                    "https://github.com/sagitta-stack/sagitta-mcp-server.rs/pull/11",
+                    "1246562bafe47625c04b18c2e9ccdb14c6fb37bf",
+                ),
+            },
+            {
+                entry["repository"]: (
+                    entry["evidence_pr"],
+                    entry["evidence_commit"],
+                )
+                for entry in evidence
+            },
+        )
 
     def test_mutable_tooling_reference_is_rejected(self) -> None:
         document = self.load()
@@ -161,6 +186,14 @@ class ConsumerFleetTests(unittest.TestCase):
         result = self.run_document(document)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("does not match consumer", result.stderr)
+
+    def test_in_repo_evidence_requires_an_immutable_commit(self) -> None:
+        document = self.load()
+        entry = self.in_repo_entry(document)
+        entry["evidence_commit"] = "main"
+        result = self.run_document(document)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("evidence_commit must be one full lowercase commit SHA", result.stderr)
 
     def test_in_repo_workflow_must_stay_under_github_workflows(self) -> None:
         document = self.load()

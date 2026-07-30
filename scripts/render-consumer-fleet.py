@@ -31,7 +31,12 @@ PULL_REQUEST = re.compile(
 KINDS = {"cli", "server", "worker", "mcp"}
 VERIFICATION_MODES = {"central", "in-repo"}
 CORE_FIELDS = {"repository", "contract", "command", "kind"}
-IN_REPO_FIELDS = CORE_FIELDS | {"verification", "workflow", "evidence_pr"}
+IN_REPO_FIELDS = CORE_FIELDS | {
+    "verification",
+    "workflow",
+    "evidence_pr",
+    "evidence_commit",
+}
 
 
 def fail(message: str) -> NoReturn:
@@ -92,8 +97,8 @@ def validate(
     path: Path,
 ) -> tuple[str, list[dict[str, str]], list[dict[str, str]]]:
     document = read_document(path)
-    if document.get("schema_version") != 1:
-        fail("schema_version must be 1")
+    if document.get("schema_version") != 2:
+        fail("schema_version must be 2")
 
     tooling_ref = document.get("tooling_ref")
     if not isinstance(tooling_ref, str) or not FULL_SHA.fullmatch(tooling_ref):
@@ -153,14 +158,20 @@ def validate(
         if verification == "in-repo":
             workflow = raw["workflow"]
             evidence_pr = raw["evidence_pr"]
+            evidence_commit = raw["evidence_commit"]
             validate_workflow_path(workflow, index)
             validate_evidence_pr(evidence_pr, repository, index)
+            if not FULL_SHA.fullmatch(evidence_commit):
+                fail(
+                    f"entry {index}: evidence_commit must be one full lowercase commit SHA"
+                )
             in_repo_consumers.append(
                 {
                     **consumer,
                     "verification": verification,
                     "workflow": workflow,
                     "evidence_pr": evidence_pr,
+                    "evidence_commit": evidence_commit,
                 }
             )
         else:

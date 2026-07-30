@@ -124,7 +124,7 @@ jobs:
                   label = f"{item['repository']}:{item['contract']}"
                   print(
                       f"  - [{label}]({item['evidence_pr']}) via "
-                      f"`{item['workflow']}`"
+                      f"`{item['workflow']}` at `{item['evidence_commit']}`"
                   )
           PY
 

@@ -124,6 +124,10 @@ impl BundledFlags2Env {
         let report: serde_json::Value = serde_json::from_str(&raw)?;
         Ok(StructuredParse {
             flags: json_string_map(report.get("flags")),
+            provided_flags: required_json_string_map(
+                report.get("providedFlags"),
+                "bundled flags2env parser did not return argv-only overrides",
+            )?,
             command: report
                 .get("command")
                 .and_then(serde_json::Value::as_str)
@@ -249,6 +253,22 @@ fn json_string_map(value: Option<&serde_json::Value>) -> HashMap<String, String>
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn required_json_string_map(
+    value: Option<&serde_json::Value>,
+    error: &'static str,
+) -> Result<HashMap<String, String>, &'static str> {
+    value
+        .and_then(serde_json::Value::as_object)
+        .ok_or(error)?
+        .iter()
+        .map(|(key, item)| {
+            item.as_str()
+                .map(|text| (key.clone(), text.to_string()))
+                .ok_or(error)
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -404,6 +424,36 @@ default = "127.0.0.1:8080"
         );
         assert_eq!(coerced.BIND_ADDR, None);
         assert_eq!(coerced.COMMAND_SERVE, None);
+    }
+
+    #[test]
+    fn bundled_provided_flags_preserve_environment_precedence() {
+        let dir = config();
+        let path = dir.path().join(".cli-flags.toml");
+        let parser = BundledFlags2Env::new();
+
+        let defaults_only = parser
+            .parse_structured(&["app".to_string()], path.to_str())
+            .expect("parse defaults");
+        assert!(!defaults_only.provided_flags.contains_key("PORT"));
+        let mut environment = HashMap::from([("PORT".to_string(), "9191".to_string())]);
+        environment.extend(defaults_only.provided_flags);
+        let from_environment: GeneratedConfig = parser
+            .coerce(&environment, path.to_str())
+            .expect("coerce environment");
+        assert_eq!(from_environment.PORT, 9191);
+
+        let explicit = parser
+            .parse_structured(
+                &["app".to_string(), "--port=4100".to_string()],
+                path.to_str(),
+            )
+            .expect("parse override");
+        environment.extend(explicit.provided_flags);
+        let from_cli: GeneratedConfig = parser
+            .coerce(&environment, path.to_str())
+            .expect("coerce CLI override");
+        assert_eq!(from_cli.PORT, 4100);
     }
 
     #[test]

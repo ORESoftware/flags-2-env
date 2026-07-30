@@ -25,7 +25,7 @@ fn apply_flags() -> Result<(), Box<dyn std::error::Error>> {
         )
         .into());
     }
-    for (key, value) in parsed.flags {
+    for (key, value) in parsed.provided_flags {
         // Apply once at process startup, before threads and typed config reads.
         unsafe { std::env::set_var(key, value) };
     }
@@ -61,7 +61,7 @@ fn load_config() -> Result<CliConfig, Box<dyn std::error::Error>> {
     }
 
     let mut values: HashMap<String, String> = std::env::vars().collect();
-    values.extend(parsed.flags);
+    values.extend(parsed.provided_flags);
     Ok(parser.coerce(&values, Some(".cli-flags.toml"))?)
 }
 ```
@@ -73,7 +73,9 @@ maps. Invalid values return `CoercionError::Validation`; use
 `validation_errors()` to inspect all conversion failures at once. A
 `CoercionError::Deserialize` means the requested Rust type does not agree with
 the generated schema. The same method is available on the dynamically loaded
-`Flags2Env` client.
+`Flags2Env` client. Use `provided_flags`, not the default-bearing `flags`, when
+merging over `std::env::vars()`; this preserves the precedence
+`CLI > environment > schema default`.
 
 Secrets should remain environment-only and be listed under `[env].ignore` in
 `.cli-flags.toml`; do not declare secret-bearing flags or defaults.
