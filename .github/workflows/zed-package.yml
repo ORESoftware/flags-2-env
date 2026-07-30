@@ -8,8 +8,13 @@ on:
       - ".zpkg.lock"
       - ".cli-flags.toml"
       - "Makefile"
+      - "README.md"
+      - "clients/bash/flags2env.bash"
+      - "clients/zsh/flags2env.zsh"
       - "scripts/verify-shell-contract.py"
+      - "scripts/verify-zed-package.sh"
       - "src/**"
+      - "tests/flags-2-env-e2e.sh"
   push:
     paths:
       - ".github/workflows/zed-package.yml"
@@ -17,8 +22,13 @@ on:
       - ".zpkg.lock"
       - ".cli-flags.toml"
       - "Makefile"
+      - "README.md"
+      - "clients/bash/flags2env.bash"
+      - "clients/zsh/flags2env.zsh"
       - "scripts/verify-shell-contract.py"
+      - "scripts/verify-zed-package.sh"
       - "src/**"
+      - "tests/flags-2-env-e2e.sh"
   workflow_dispatch:
 
 permissions:
@@ -43,7 +53,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: zed-pkg/zed-interfaces
-          ref: 61f654d5e4ca718abc4a280a641472466689c278
+          ref: c36e0e71bbdb6f3694e580d8df1d53a76920175e
           path: zed-interfaces
           persist-credentials: false
 
@@ -51,7 +61,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: zed-pkg/zed-cli
-          ref: 638c083f307c1a0f4cacabf58a8c8ae4cfb268ee
+          ref: 25d94719e07a8fa6e3a6c3e562764fbb6345b174
           path: zed-cli
           persist-credentials: false
 
@@ -86,7 +96,10 @@ jobs:
           tar -tzf "$first_archive" > "$RUNNER_TEMP/zed-package-files.txt"
           grep -Fxq 'pkg/.zpkg.toml' "$RUNNER_TEMP/zed-package-files.txt"
           grep -Fxq 'pkg/.cli-flags.toml' "$RUNNER_TEMP/zed-package-files.txt"
+          grep -Fxq 'pkg/clients/bash/flags2env.bash' "$RUNNER_TEMP/zed-package-files.txt"
+          grep -Fxq 'pkg/clients/zsh/flags2env.zsh' "$RUNNER_TEMP/zed-package-files.txt"
           grep -Fxq 'pkg/scripts/verify-shell-contract.py' "$RUNNER_TEMP/zed-package-files.txt"
+          grep -Fxq 'pkg/scripts/verify-zed-package.sh' "$RUNNER_TEMP/zed-package-files.txt"
           grep -Fxq 'pkg/src/parser.c' "$RUNNER_TEMP/zed-package-files.txt"
           if grep -Fxq 'pkg/.zpkg.lock' "$RUNNER_TEMP/zed-package-files.txt"; then
             echo 'Published artifacts must not ship the author checkout lockfile' >&2
@@ -97,36 +110,16 @@ jobs:
             exit 1
           fi
 
-      - name: Install, build, and smoke the published artifact
+      - name: Install the published artifact across native project layouts
         working-directory: flags-2-env
         env:
-          ZED_PKG_HOME: ${{ runner.temp }}/zed-home
+          F2E_E2E_ROOT: ${{ runner.temp }}/flags-2-env-e2e
+          F2E_E2E_KEEP: "1"
         shell: bash
         run: |
           set -euo pipefail
           exec > >(tee -a "$RUNNER_TEMP/zed-package.log") 2>&1
-          root="$RUNNER_TEMP/zed-r2g"
-          ../zed-cli/target/debug/zed r2g --r2g-root "$root"
-          consumer="$root/oresoftware-flags-2-env/consumer"
-          target="$consumer/zed_modules/oresoftware/flags-2-env"
-          test -x "$target/build/flags2env"
-          test -f "$target/.cli-flags.toml"
-          test -f "$target/scripts/verify-shell-contract.py"
-          test -e "$consumer/zed_modules/.bin/flags2env"
-          test ! -e "$consumer/.cli-flags.toml"
-          cp "$target/.cli-flags.toml" "$consumer/.cli-flags.toml"
-          cmp -s "$target/.cli-flags.toml" "$consumer/.cli-flags.toml"
-          help="$(
-            cd "$consumer"
-            COLUMNS=132 \
-              "$GITHUB_WORKSPACE/zed-cli/target/debug/zed" run flags2env -- --help
-          )"
-          case "$help" in
-            *'Option(s)'*'Path to the .cli-flags.toml file.'*) ;;
-            *) printf 'Unexpected help from zed run flags2env:\n%s\n' "$help" >&2; exit 1 ;;
-          esac
-          rm -f "$consumer/.cli-flags.toml"
-          rm -rf "$root"
+          tests/flags-2-env-e2e.sh "$GITHUB_WORKSPACE/zed-cli/target/debug/zed"
 
       - name: Upload Zed package diagnostics
         if: ${{ failure() }}
@@ -136,5 +129,6 @@ jobs:
           path: |
             ${{ runner.temp }}/zed-package.log
             ${{ runner.temp }}/zed-package-files.txt
+            ${{ runner.temp }}/flags-2-env-e2e
           if-no-files-found: error
           retention-days: 7

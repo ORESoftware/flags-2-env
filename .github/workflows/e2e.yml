@@ -10,24 +10,28 @@ on:
       zed_cli_ref:
         description: "zed-pkg/zed-cli branch, tag, or SHA"
         required: false
-        default: "638c083f307c1a0f4cacabf58a8c8ae4cfb268ee"
+        default: "25d94719e07a8fa6e3a6c3e562764fbb6345b174"
       zed_interfaces_ref:
         description: "zed-pkg/zed-interfaces branch, tag, or SHA"
         required: false
-        default: "61f654d5e4ca718abc4a280a641472466689c278"
+        default: "c36e0e71bbdb6f3694e580d8df1d53a76920175e"
   pull_request:
     paths:
       - ".github/workflows/e2e.yml"
       - ".zpkg.toml"
       - "Makefile"
       - "clients/nodejs/**"
+      - "clients/bash/flags2env.bash"
       - "clients/fsharp/**"
+      - "clients/zsh/flags2env.zsh"
       - "package-lock.json"
       - "package.json"
       - "packaging/homebrew/**"
       - "scripts/fuzz-smoke.sh"
+      - "scripts/verify-zed-package.sh"
       - "src/**"
       - "tests/allocation_failure.c"
+      - "tests/flags-2-env-e2e.sh"
       - "tests/fuzz_parser.c"
       - "tests/npm-package-e2e.mjs"
   push:
@@ -36,13 +40,17 @@ on:
       - ".zpkg.toml"
       - "Makefile"
       - "clients/nodejs/**"
+      - "clients/bash/flags2env.bash"
       - "clients/fsharp/**"
+      - "clients/zsh/flags2env.zsh"
       - "package-lock.json"
       - "package.json"
       - "packaging/homebrew/**"
       - "scripts/fuzz-smoke.sh"
+      - "scripts/verify-zed-package.sh"
       - "src/**"
       - "tests/allocation_failure.c"
+      - "tests/flags-2-env-e2e.sh"
       - "tests/fuzz_parser.c"
       - "tests/npm-package-e2e.mjs"
 
@@ -256,13 +264,13 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: zed-pkg/zed-interfaces
-          ref: ${{ inputs.zed_interfaces_ref || '61f654d5e4ca718abc4a280a641472466689c278' }}
+          ref: ${{ inputs.zed_interfaces_ref || 'c36e0e71bbdb6f3694e580d8df1d53a76920175e' }}
           path: zed-interfaces
 
       - uses: actions/checkout@v7
         with:
           repository: zed-pkg/zed-cli
-          ref: ${{ inputs.zed_cli_ref || '638c083f307c1a0f4cacabf58a8c8ae4cfb268ee' }}
+          ref: ${{ inputs.zed_cli_ref || '25d94719e07a8fa6e3a6c3e562764fbb6345b174' }}
           path: zed-cli
 
       - uses: dtolnay/rust-toolchain@stable
@@ -296,3 +304,10 @@ jobs:
             echo "zed artifact contains a generated dependency/build directory" >&2
             exit 1
           fi
+
+      - name: Install the Zed artifact across native project layouts
+        working-directory: flags-2-env
+        env:
+          F2E_E2E_ROOT: ${{ runner.temp }}/flags-2-env-e2e
+        shell: bash
+        run: tests/flags-2-env-e2e.sh "$GITHUB_WORKSPACE/zed-cli/target/debug/zed"
