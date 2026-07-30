@@ -1169,37 +1169,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+Generate the typed shape with
+`f2e generate rust .cli-flags.toml --name AppEnv > src/app_env.rs`, then let
+the schema perform coercion:
+
 ```rust
-use flags2env::Flags2Env;
+mod app_env;
+
+use app_env::AppEnv;
+use flags2env::BundledFlags2Env;
 use std::collections::HashMap;
 use std::env;
 
-pub struct AppEnv {
-    pub node_env: String,
-    pub port: u16,
-    pub is_debug: bool,
-}
-
 pub fn load_app_env() -> Result<AppEnv, Box<dyn std::error::Error>> {
-    let sdk = unsafe { Flags2Env::load(Some("./build/libflags2env.dylib"))? };
+    let sdk = BundledFlags2Env::new();
     let mut combined: HashMap<String, String> = env::vars().collect();
     let argv: Vec<String> = env::args().collect();
     combined.extend(sdk.parse(&argv, None)?);
 
-    Ok(AppEnv {
-        node_env: combined
-            .get("NODE_ENV")
-            .cloned()
-            .unwrap_or_else(|| "development".to_owned()),
-        port: combined
-            .get("PORT")
-            .map(String::as_str)
-            .unwrap_or("3000")
-            .parse()?,
-        is_debug: combined.get("DEBUG").map(String::as_str) == Some("true"),
-    })
+    Ok(sdk.coerce(&combined, None)?)
 }
 ```
+
+`coerce<T, V>()` is also available on the dynamically loaded `Flags2Env`
+client. It accepts any serializable map, returns the requested deserializable
+type, and reports all schema conversion failures through `CoercionError`.
 
 </details>
 

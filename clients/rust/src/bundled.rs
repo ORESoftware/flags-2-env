@@ -2,9 +2,19 @@ use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 
-use crate::{ResolvedCommands, StructuredParse};
+use serde::de::DeserializeOwned;
+use serde::Serialize;
+
+use crate::{
+    coercion_input_json, decode_coercion_report, CoercionError, ResolvedCommands, StructuredParse,
+};
 
 unsafe extern "C" {
+    fn f2e_coerce_json(values_json: *const c_char) -> *mut c_char;
+    fn f2e_coerce_json_from_file(
+        config_path: *const c_char,
+        values_json: *const c_char,
+    ) -> *mut c_char;
     fn f2e_parse_json_argv(argv_json: *const c_char) -> *mut c_char;
     fn f2e_parse_json_argv_from_file(
         config_path: *const c_char,
@@ -71,6 +81,32 @@ impl BundledFlags2Env {
         };
         let raw = take_owned_string(result).unwrap_or_else(|| "{}".to_string());
         Ok(serde_json::from_str(&raw)?)
+    }
+
+    /// Coerce declared environment values according to `.cli-flags.toml` and
+    /// deserialize the result into `T`.
+    ///
+    /// This is the self-contained equivalent of
+    /// [`crate::Flags2Env::coerce`]. It accepts parsed flags, a merged
+    /// environment/flags map, or any serializable object and reports all schema
+    /// conversion failures through [`CoercionError::Validation`].
+    pub fn coerce<T, V>(&self, values: &V, config_path: Option<&str>) -> Result<T, CoercionError>
+    where
+        T: DeserializeOwned,
+        V: Serialize + ?Sized,
+    {
+        let values_json = coercion_input_json(values)?;
+        let result = if let Some(config_path) = config_path {
+            let config_path = CString::new(config_path)?;
+            // SAFETY: both CStrings remain alive through the call and the C API
+            // returns either NULL or a heap string released by f2e_free.
+            unsafe { f2e_coerce_json_from_file(config_path.as_ptr(), values_json.as_ptr()) }
+        } else {
+            // SAFETY: values_json is a valid NUL-terminated JSON object.
+            unsafe { f2e_coerce_json(values_json.as_ptr()) }
+        };
+        let raw = take_owned_string(result).ok_or(CoercionError::NativeUnavailable)?;
+        decode_coercion_report(&raw)
     }
 
     pub fn parse_structured(
@@ -237,6 +273,28 @@ aliases = ["port"]
 type = "integer"
 default = 3000
 
+[flags.debug]
+env = "DEBUG"
+aliases = ["debug"]
+type = "bool"
+default = false
+
+[flags.ratio]
+env = "RATIO"
+aliases = ["ratio"]
+type = "double"
+default = 1.5
+
+[flags.items]
+env = "ITEMS"
+aliases = ["items"]
+type = "array"
+
+[flags.labels]
+env = "LABELS"
+aliases = ["labels"]
+type = "map"
+
 [commands.serve]
 env = "COMMAND_SERVE"
 
@@ -249,6 +307,18 @@ default = "127.0.0.1:8080"
         )
         .expect("write config");
         dir
+    }
+
+    #[allow(non_snake_case)]
+    #[derive(Debug, serde::Deserialize, PartialEq)]
+    struct GeneratedConfig {
+        PORT: i64,
+        DEBUG: bool,
+        RATIO: f64,
+        ITEMS: Option<Vec<serde_json::Value>>,
+        LABELS: Option<HashMap<String, serde_json::Value>>,
+        BIND_ADDR: Option<String>,
+        COMMAND_SERVE: Option<bool>,
     }
 
     #[test]
@@ -272,6 +342,111 @@ default = "127.0.0.1:8080"
             parsed.get("COMMAND_SERVE").map(String::as_str),
             Some("true")
         );
+    }
+
+    #[test]
+    fn bundled_coerce_deserializes_generated_shape() {
+        let dir = config();
+        let path = dir.path().join(".cli-flags.toml");
+        let argv = vec![
+            "app".to_string(),
+            "serve".to_string(),
+            "--port=4100".to_string(),
+            "--debug".to_string(),
+            "--items=[1,\"two\"]".to_string(),
+            "--labels={\"tier\":2}".to_string(),
+        ];
+        let parsed = BundledFlags2Env::new()
+            .parse(&argv, path.to_str())
+            .expect("parse flags");
+        let coerced: GeneratedConfig = BundledFlags2Env::new()
+            .coerce(&parsed, path.to_str())
+            .expect("coerce parsed flags");
+
+        assert_eq!(coerced.PORT, 4100);
+        assert!(coerced.DEBUG);
+        assert_eq!(coerced.RATIO, 1.5);
+        assert_eq!(
+            coerced.ITEMS,
+            Some(vec![serde_json::json!(1), serde_json::json!("two")])
+        );
+        assert_eq!(
+            coerced
+                .LABELS
+                .as_ref()
+                .and_then(|labels| labels.get("tier")),
+            Some(&serde_json::json!(2))
+        );
+        assert_eq!(coerced.BIND_ADDR.as_deref(), Some("127.0.0.1:8080"));
+        assert_eq!(coerced.COMMAND_SERVE, Some(true));
+    }
+
+    #[test]
+    fn bundled_coerce_accepts_typed_values_and_applies_defaults() {
+        let dir = config();
+        let path = dir.path().join(".cli-flags.toml");
+        let values = serde_json::json!({
+            "DEBUG": true,
+            "ITEMS": [3, 4],
+            "LABELS": {"tier": 2},
+            "UNDECLARED": "ignored"
+        });
+        let coerced: GeneratedConfig = BundledFlags2Env::new()
+            .coerce(&values, path.to_str())
+            .expect("coerce typed values");
+
+        assert_eq!(coerced.PORT, 3000);
+        assert!(coerced.DEBUG);
+        assert_eq!(coerced.RATIO, 1.5);
+        assert_eq!(
+            coerced.ITEMS,
+            Some(vec![serde_json::json!(3), serde_json::json!(4)])
+        );
+        assert_eq!(coerced.BIND_ADDR, None);
+        assert_eq!(coerced.COMMAND_SERVE, None);
+    }
+
+    #[test]
+    fn bundled_coerce_returns_all_schema_validation_errors() {
+        let dir = config();
+        let path = dir.path().join(".cli-flags.toml");
+        let values = serde_json::json!({
+            "PORT": "not-an-integer",
+            "DEBUG": "maybe",
+            "ITEMS": "{}",
+            "COMMAND_SERVE": "yes"
+        });
+        let error = BundledFlags2Env::new()
+            .coerce::<GeneratedConfig, _>(&values, path.to_str())
+            .expect_err("invalid values must fail");
+        let messages = error
+            .validation_errors()
+            .expect("schema validation error messages");
+
+        assert_eq!(messages.len(), 4);
+        for key in ["PORT", "DEBUG", "ITEMS", "COMMAND_SERVE"] {
+            assert!(
+                messages.iter().any(|message| message.contains(key)),
+                "missing validation message for {key}: {messages:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn bundled_coerce_reports_requested_type_mismatch() {
+        #[allow(dead_code, non_snake_case)]
+        #[derive(Debug, serde::Deserialize)]
+        struct WrongConfig {
+            PORT: bool,
+        }
+
+        let dir = config();
+        let path = dir.path().join(".cli-flags.toml");
+        let error = BundledFlags2Env::new()
+            .coerce::<WrongConfig, _>(&serde_json::json!({}), path.to_str())
+            .expect_err("wrong Rust type must fail");
+
+        assert!(matches!(error, CoercionError::Deserialize(_)));
     }
 
     #[test]

@@ -1,4 +1,5 @@
-use flags2env::Flags2Env;
+use flags2env::{CoercionError, Flags2Env};
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
@@ -11,6 +12,14 @@ impl Drop for CwdGuard {
     fn drop(&mut self) {
         let _ = env::set_current_dir(&self.0);
     }
+}
+
+#[allow(non_snake_case)]
+#[derive(Debug, Deserialize)]
+struct GeneratedConfig {
+    PORT: i64,
+    DEBUG: bool,
+    COLOR: bool,
 }
 
 #[test]
@@ -105,6 +114,50 @@ fn parse_structured_returns_separate_channels() {
     let resolved = sdk.resolve_commands(&argv, Some(config)).unwrap();
     assert_eq!(resolved.path, vec!["remote".to_string(), "add".to_string()]);
     assert_eq!(resolved.label, "remote add");
+}
+
+#[test]
+fn dynamic_coerce_returns_typed_config_and_structured_errors() {
+    let library = compile_test_library();
+    let config_root = create_config_tree();
+    let config_path = config_root.join(".cli-flags.toml");
+    let config = config_path.to_str().unwrap();
+    let sdk = unsafe { Flags2Env::load(Some(library.to_str().unwrap())).unwrap() };
+
+    let parsed = sdk
+        .parse(
+            &[
+                "app".into(),
+                "--debug=t".into(),
+                "--port".into(),
+                "8181".into(),
+            ],
+            Some(config),
+        )
+        .unwrap();
+    let typed: GeneratedConfig = sdk.coerce(&parsed, Some(config)).unwrap();
+
+    assert_eq!(typed.PORT, 8181);
+    assert!(typed.DEBUG);
+    assert!(typed.COLOR);
+
+    let invalid = HashMap::from([
+        ("PORT".to_string(), "not-an-integer".to_string()),
+        ("DEBUG".to_string(), "maybe".to_string()),
+    ]);
+    let error = sdk
+        .coerce::<GeneratedConfig, _>(&invalid, Some(config))
+        .expect_err("invalid values must fail");
+    let messages = error.validation_errors().expect("schema validation errors");
+
+    assert!(matches!(&error, CoercionError::Validation { .. }));
+    assert_eq!(messages.len(), 2);
+    for key in ["PORT", "DEBUG"] {
+        assert!(
+            messages.iter().any(|message| message.contains(key)),
+            "missing validation message for {key}: {messages:?}"
+        );
+    }
 }
 
 fn create_subcommand_config() -> PathBuf {
