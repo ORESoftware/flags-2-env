@@ -63,7 +63,12 @@ jobs:
         run: |
           set -euo pipefail
           make clean
-          make test
+          make borrow-check
+          make parity-test build/process-smoke build/api-hardening build/allocation-failure
+          ./tests/run.sh
+          ./build/api-hardening
+          ./build/allocation-failure tests/subcommands-deep/.cli-flags.toml
+          ./build/process-smoke --port 7777 -d
 
       - name: Exercise adversarial public API boundaries
         env:
