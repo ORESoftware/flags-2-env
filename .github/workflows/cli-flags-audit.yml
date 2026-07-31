@@ -8,6 +8,7 @@ on:
       - ".github/workflows/e2e.yml"
       - "scripts/audit-changed-cli-flags.sh"
       - "scripts/audit-core-workflow-actions.py"
+      - "tests/workflow_action_policy_test.py"
       - ".cli-flags.toml"
       - "**/.cli-flags.toml"
       - ".env"
@@ -19,6 +20,7 @@ on:
       - ".github/workflows/e2e.yml"
       - "scripts/audit-changed-cli-flags.sh"
       - "scripts/audit-core-workflow-actions.py"
+      - "tests/workflow_action_policy_test.py"
       - ".cli-flags.toml"
       - "**/.cli-flags.toml"
       - ".env"
@@ -40,6 +42,9 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Test workflow policy fail-closed behavior
+        run: python3 -m unittest -v tests/workflow_action_policy_test.py
 
       - name: Audit immutable core workflow dependencies
         run: python3 scripts/audit-core-workflow-actions.py
