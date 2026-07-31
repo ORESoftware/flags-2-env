@@ -46,24 +46,34 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: client-packaging-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   audit:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: "24"
           cache: npm
+          cache-dependency-path: package-lock.json
 
       - name: Install practical smoke-test toolchains
         run: |
+          set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends build-essential zsh ruby
 
       - name: Install and audit Node.js development dependencies
         run: |
+          set -euo pipefail
           npm ci
           npm audit
 
@@ -86,12 +96,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
 
       - name: Run Docker client checks
         env:
           FULL_DOCKER_CHECKS: ${{ github.event_name == 'workflow_dispatch' && inputs.full_docker_checks || false }}
         run: |
+          set -euo pipefail
           if [ "$FULL_DOCKER_CHECKS" = "true" ]; then
             scripts/docker-check-new-clients.sh --full
           else
@@ -117,7 +130,9 @@ jobs:
           - csharp
           - json-schema
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
 
       - name: Compile and run generated interface
         run: tests/codegen-docker/run.sh "${{ matrix.runtime }}"
