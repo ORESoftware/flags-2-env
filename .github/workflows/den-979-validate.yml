@@ -14,7 +14,6 @@ permissions:
 
 jobs:
   finalize-tested-source:
-    if: ${{ !startsWith(github.event.head_commit.message, 'fix(DEN-979):') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -23,13 +22,25 @@ jobs:
           ref: agent/den-979-subcommand-alias-hardening
           fetch-depth: 0
 
+      - name: Detect whether the temporary source transformer remains
+        id: state
+        shell: bash
+        run: |
+          if [ -f scripts/den-979-apply.py ]; then
+            echo 'run=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'run=false' >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Apply reviewed alias hardening
+        if: steps.state.outputs.run == 'true'
         run: |
           python3 scripts/den-979-apply.py
           python3 scripts/den-979-shell-portability.py
           python3 scripts/den-979-test-expectations.py
 
       - name: Re-run focused parser, API, audit, and completion gates
+        if: steps.state.outputs.run == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -38,17 +49,17 @@ jobs:
           ./tests/run.sh
           ./build/api-hardening
 
-      - name: Publish only the tested source changes
+      - name: Publish tested non-workflow source changes
+        if: steps.state.outputs.run == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          git checkout -- build
+          git checkout -- build .github/workflows/shell-contract.yml
           rm -f \
             scripts/den-979-apply.py \
             scripts/den-979-trigger.txt \
             scripts/den-979-shell-portability.py \
-            scripts/den-979-test-expectations.py \
-            .github/workflows/den-979-validate.yml
+            scripts/den-979-test-expectations.py
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
