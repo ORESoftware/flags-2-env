@@ -1293,3 +1293,29 @@ The C parser owns config discovery. By default, it walks upward from the current
 Unknown flags and positional tokens are ignored unless `[parse]` declares `unknown_options_env` or `positionals_env`; `allow_unknown` suppresses unknown-option collection when downstream flags are expected. Defaults from `.cli-flags.toml` are included in the parsed map, so they also override environment values when merged.
 
 When `[commands.*]` tables are declared, the parser resolves the subcommand path in a dry-run pass before applying defaults, so defaults are only emitted for global flags and the selected commands, and flag lookups always prefer the innermost command scope. The resolved path is reported under `parse.command_env` (default `FLAGS2ENV_COMMAND`, emitted as an empty string when no command is selected), and matched command tokens are consumed rather than recorded as positionals. While no command has matched yet, leading positionals such as the program name are skipped and do not trigger `stop_at_first_positional`.
+
+### Command aliases are canonicalized
+
+A command can declare one or more aliases at any nesting depth. The parser
+accepts the alias but reports the canonical command path through
+`parse.command_env`, structured parsing, and `f2e_resolve_commands`:
+
+```toml
+[parse]
+command_env = "ZED_COMMAND"
+
+[commands.develop]
+aliases = ["dev"]
+
+[commands.develop.commands.shell]
+aliases = ["sh"]
+```
+
+`zed dev sh` therefore selects the canonical path `develop shell`. Help keeps
+the canonical command visible while listing accepted aliases, and generated
+Bash/Zsh completion maps every alias to the same canonical option scope.
+Separated option values are consumed before command matching, so a value such
+as `--profile dev` never activates the `develop` command accidentally.
+
+`flags2env audit` rejects sibling name/alias collisions, unsafe alias tokens,
+and aliases that redundantly repeat their own canonical command name.
