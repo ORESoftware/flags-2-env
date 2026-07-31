@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Audit the core GitHub Actions workflows without third-party dependencies."""
+"""Audit core GitHub Actions trust boundaries without third-party dependencies.
+
+The audit deliberately accepts only canonical, unquoted YAML block mappings for
+permissions. Text-level policy checks must fail closed on alternate YAML forms
+such as ``write-all``, inline maps, aliases, or quoted access values.
+"""
 
 from __future__ import annotations
 
@@ -17,6 +22,12 @@ FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 DOCKER_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 USES = re.compile(r"\buses:\s*([^\s#]+)")
 JOB = re.compile(r"^  ([A-Za-z0-9_-]+):(?:\s*#.*)?$")
+TOP_PERMISSION = re.compile(
+    r"^  ([A-Za-z0-9_-]+):\s*(read|write|none)\s*(?:#.*)?$"
+)
+JOB_PERMISSION = re.compile(
+    r"^      ([A-Za-z0-9_-]+):\s*(read|write|none)\s*(?:#.*)?$"
+)
 
 
 def section(lines: list[str], name: str) -> list[str] | None:
@@ -58,6 +69,85 @@ def jobs(lines: list[str]) -> list[tuple[str, list[str]]]:
     return result
 
 
+def audit_top_level_permissions(path: Path, lines: list[str]) -> list[str]:
+    findings: list[str] = []
+    permissions = section(lines, "permissions")
+    if permissions is None:
+        if any(line.startswith("permissions:") for line in lines):
+            findings.append(
+                f"{path}: top-level permissions must use a canonical block mapping; "
+                "inline maps, aliases, quoted values, read-all, and write-all are prohibited"
+            )
+        else:
+            findings.append(f"{path}: top-level permissions block is required")
+        return findings
+
+    observed: dict[str, str] = {}
+    for line in permissions:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        match = TOP_PERMISSION.fullmatch(line)
+        if not match:
+            findings.append(
+                f"{path}: top-level permissions must use unquoted 'scope: read|none' entries"
+            )
+            continue
+        permission, access = match.groups()
+        if permission in observed:
+            findings.append(f"{path}: duplicate top-level permission entry: {permission}")
+        observed[permission] = access
+        if access == "write":
+            findings.append(f"{path}: top-level {permission}: write is prohibited")
+
+    if observed.get("contents") != "read":
+        findings.append(f"{path}: top-level contents: read is required")
+    return findings
+
+
+def audit_job_permissions(path: Path, job_name: str, body: list[str]) -> list[str]:
+    findings: list[str] = []
+    blocks = 0
+    for index, line in enumerate(body):
+        if not line.startswith("    permissions:"):
+            continue
+        blocks += 1
+        if line.rstrip() != "    permissions:":
+            findings.append(
+                f"{path}: job {job_name!r} permissions must use a canonical block mapping; "
+                "inline maps, aliases, quoted values, read-all, and write-all are prohibited"
+            )
+            continue
+
+        observed: set[str] = set()
+        for candidate in body[index + 1 :]:
+            indentation = len(candidate) - len(candidate.lstrip(" "))
+            if candidate.strip() and indentation <= 4:
+                break
+            if not candidate.strip() or candidate.lstrip().startswith("#"):
+                continue
+            match = JOB_PERMISSION.fullmatch(candidate)
+            if not match:
+                findings.append(
+                    f"{path}: job {job_name!r} permissions must use unquoted "
+                    "'scope: read|none' entries"
+                )
+                continue
+            permission, access = match.groups()
+            if permission in observed:
+                findings.append(
+                    f"{path}: job {job_name!r} has duplicate permission entry: {permission}"
+                )
+            observed.add(permission)
+            if access == "write":
+                findings.append(
+                    f"{path}: job {job_name!r} has prohibited {permission}: write permission"
+                )
+
+    if blocks > 1:
+        findings.append(f"{path}: job {job_name!r} declares multiple permissions blocks")
+    return findings
+
+
 def audit_checkout(path: Path, lines: list[str]) -> list[str]:
     findings: list[str] = []
     for index, line in enumerate(lines):
@@ -91,14 +181,11 @@ def audit_action(path: Path, line_number: int, reference: str) -> str | None:
     return None
 
 
-def audit_workflow(path: Path) -> list[str]:
-    text = path.read_text(encoding="utf-8")
+def audit_workflow_text(path: Path, text: str) -> list[str]:
     lines = text.splitlines()
     findings: list[str] = []
 
-    permissions = section(lines, "permissions")
-    if permissions is None or not any(re.match(r"^  contents:\s*read\s*$", line) for line in permissions):
-        findings.append(f"{path}: top-level contents: read is required")
+    findings.extend(audit_top_level_permissions(path, lines))
 
     concurrency = section(lines, "concurrency")
     if concurrency is None or not any(re.match(r"^  cancel-in-progress:\s*true\s*$", line) for line in concurrency):
@@ -108,8 +195,13 @@ def audit_workflow(path: Path) -> list[str]:
     if not workflow_jobs:
         findings.append(f"{path}: no jobs found")
     for job_name, body in workflow_jobs:
-        if not any(re.match(r"^    timeout-minutes:\s*[1-9][0-9]*\s*$", line) for line in body):
+        reusable_job = any(re.match(r"^    uses:\s*\S+", line) for line in body)
+        if not reusable_job and not any(
+            re.match(r"^    timeout-minutes:\s*[1-9][0-9]*\s*$", line)
+            for line in body
+        ):
             findings.append(f"{path}: job {job_name!r} requires timeout-minutes")
+        findings.extend(audit_job_permissions(path, job_name, body))
 
     for line_number, line in enumerate(lines, 1):
         if line.lstrip().startswith("#"):
@@ -133,6 +225,10 @@ def audit_workflow(path: Path) -> list[str]:
                 findings.append(f"{path}: checkout input fallback is not an immutable SHA: {fallback}")
 
     return findings
+
+
+def audit_workflow(path: Path) -> list[str]:
+    return audit_workflow_text(path, path.read_text(encoding="utf-8"))
 
 
 def main() -> int:
