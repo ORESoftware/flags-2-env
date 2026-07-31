@@ -1,0 +1,79 @@
+name: Native sanitizers
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/sanitizers.yml"
+      - "Makefile"
+      - "src/**"
+      - "tests/**"
+      - "scripts/borrow-check.sh"
+      - "scripts/formal-check.sh"
+      - "scripts/test-readme-snippets.mjs"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/sanitizers.yml"
+      - "Makefile"
+      - "src/**"
+      - "tests/**"
+      - "scripts/borrow-check.sh"
+      - "scripts/formal-check.sh"
+      - "scripts/test-readme-snippets.mjs"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sanitizers-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:strict_string_checks=1:check_initialization_order=1
+  UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+
+jobs:
+  native-sanitizers:
+    name: ${{ matrix.compiler }} ASan + UBSan
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: gcc
+            cc: gcc
+          - compiler: clang
+            cc: clang
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Show compiler version
+        run: ${{ matrix.cc }} --version
+
+      - name: Run the complete native suite under sanitizers
+        env:
+          CC: ${{ matrix.cc }}
+          CFLAGS: >-
+            -std=c99 -Wall -Wextra -Wpedantic -Werror -O1 -g
+            -fno-omit-frame-pointer -fsanitize=address,undefined
+          LDFLAGS: -fsanitize=address,undefined
+        run: |
+          set -euo pipefail
+          make clean
+          make test
+
+      - name: Exercise adversarial public API boundaries
+        env:
+          CC: ${{ matrix.cc }}
+          CFLAGS: >-
+            -std=c99 -Wall -Wextra -Wpedantic -Werror -O1 -g
+            -fno-omit-frame-pointer -fsanitize=address,undefined
+          LDFLAGS: -fsanitize=address,undefined
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          "$CC" $CFLAGS -Isrc src/parser.c tests/sanitizer_smoke.c $LDFLAGS -o build/sanitizer-smoke
+          ./build/sanitizer-smoke
