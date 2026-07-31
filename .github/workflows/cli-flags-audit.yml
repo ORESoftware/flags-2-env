@@ -4,7 +4,10 @@ on:
   pull_request:
     paths:
       - ".github/workflows/cli-flags-audit.yml"
+      - ".github/workflows/client-packaging.yml"
+      - ".github/workflows/e2e.yml"
       - "scripts/audit-changed-cli-flags.sh"
+      - "scripts/audit-core-workflow-actions.py"
       - ".cli-flags.toml"
       - "**/.cli-flags.toml"
       - ".env"
@@ -12,7 +15,10 @@ on:
   push:
     paths:
       - ".github/workflows/cli-flags-audit.yml"
+      - ".github/workflows/client-packaging.yml"
+      - ".github/workflows/e2e.yml"
       - "scripts/audit-changed-cli-flags.sh"
+      - "scripts/audit-core-workflow-actions.py"
       - ".cli-flags.toml"
       - "**/.cli-flags.toml"
       - ".env"
@@ -34,6 +40,9 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Audit immutable core workflow dependencies
+        run: python3 scripts/audit-core-workflow-actions.py
 
       - name: Build audit CLI
         run: make clean && make all
