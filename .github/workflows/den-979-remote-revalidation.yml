@@ -1,0 +1,68 @@
+name: DEN-979 remote revalidation
+
+on:
+  push:
+    branches:
+      - ci/revalidate-den-979-20260731
+
+permissions:
+  contents: write
+
+jobs:
+  validate-current-main-tree:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install shell test dependency
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends zsh
+
+      - name: Run full repository validation and persist evidence
+        shell: bash
+        run: |
+          set +e
+          {
+            echo "base_main=4e6385f2b2778c72691a80a39fbf687fa15b0a7e"
+            echo "tested_head=$(git rev-parse HEAD)"
+            make clean
+            make test
+          } 2>&1 | tee "$RUNNER_TEMP/den-979-revalidation.log"
+          status=${PIPESTATUS[0]}
+          set -e
+
+          mkdir -p .ci-results
+          cp "$RUNNER_TEMP/den-979-revalidation.log" .ci-results/den-979-flags2env.log
+          python3 - "$status" <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          status = int(sys.argv[1])
+          payload = {
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "workflow": os.environ["GITHUB_WORKFLOW"],
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "tested_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+              "base_main": "4e6385f2b2778c72691a80a39fbf687fa15b0a7e",
+              "status": "passed" if status == 0 else "failed",
+              "exit_code": status,
+              "completed_at": datetime.now(timezone.utc).isoformat(),
+              "command": "make clean && make test",
+          }
+          Path(".ci-results/den-979-flags2env.json").write_text(json.dumps(payload, indent=2) + "\n")
+          PY
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .ci-results/den-979-flags2env.json .ci-results/den-979-flags2env.log
+          git commit -m 'ci(DEN-979): record remote flags2env validation'
+          git push origin HEAD:ci/revalidate-den-979-20260731
+          exit "$status"
