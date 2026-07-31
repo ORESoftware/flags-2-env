@@ -1,0 +1,47 @@
+name: DEN-979 validate alias hardening
+
+on:
+  push:
+    branches:
+      - agent/den-979-subcommand-alias-hardening
+
+permissions:
+  contents: read
+
+jobs:
+  patch-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Apply alias hardening patch
+        run: python3 scripts/den-979-apply.py
+
+      - name: Run canonical tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          make test
+
+      - name: Package tested changes
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p den-979-artifact/files
+          git diff --binary > den-979-artifact/changes.patch
+          git diff --name-only -z | while IFS= read -r -d '' path; do
+            mkdir -p "den-979-artifact/files/$(dirname "$path")"
+            cp "$path" "den-979-artifact/files/$path"
+          done
+
+      - name: Upload tested changes
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: den-979-tested-changes
+          path: den-979-artifact
+          if-no-files-found: error
+          retention-days: 7
