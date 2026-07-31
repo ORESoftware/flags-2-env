@@ -1,5 +1,6 @@
 #include "parser.h"
 
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -7,10 +8,18 @@
 #define DEEP_CONFIG "tests/subcommands-deep/.cli-flags.toml"
 #define CODEGEN_CONFIG "tests/codegen/.cli-flags.toml"
 #define FIXTURE_CONFIG "tests/fixtures/.cli-flags.toml"
+#define ARRAY_LEN(values) (sizeof(values) / sizeof((values)[0]))
 
 static void fail(const char *label, const char *message) {
   fprintf(stderr, "%s: %s\n", label, message);
   exit(1);
+}
+
+static int argv_count(const char *label, size_t count) {
+  if (count > (size_t)INT_MAX) {
+    fail(label, "argv count exceeds INT_MAX");
+  }
+  return (int)count;
 }
 
 static void consume_owned(const char *label, char *value) {
@@ -40,7 +49,7 @@ static void exercise_json_argv_boundaries(void) {
   };
 
   size_t i;
-  for (i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+  for (i = 0; i < ARRAY_LEN(cases); ++i) {
     consume_owned("parse_json_argv",
                   f2e_parse_json_argv_from_file(DEEP_CONFIG, cases[i]));
     consume_owned("parse_structured_json_argv",
@@ -61,19 +70,22 @@ static void exercise_deep_aliases(void) {
   const char *alias_as_value[] = {
       "tool", "--label", "workspace", "workspace", "remotes", "create", "annotate", "--name", "create",
   };
+  const int canonical_argc = argv_count("canonical argv", ARRAY_LEN(canonical));
+  const int aliases_argc = argv_count("aliases argv", ARRAY_LEN(aliases));
+  const int alias_as_value_argc = argv_count("alias-as-value argv", ARRAY_LEN(alias_as_value));
 
   consume_owned("parse canonical deep command",
-                f2e_parse_structured_from_file(DEEP_CONFIG, 8, canonical));
+                f2e_parse_structured_from_file(DEEP_CONFIG, canonical_argc, canonical));
   consume_owned("parse aliased deep command",
-                f2e_parse_structured_from_file(DEEP_CONFIG, 8, aliases));
+                f2e_parse_structured_from_file(DEEP_CONFIG, aliases_argc, aliases));
   consume_owned("resolve canonical deep command",
-                f2e_resolve_commands_from_file(DEEP_CONFIG, 8, canonical));
+                f2e_resolve_commands_from_file(DEEP_CONFIG, canonical_argc, canonical));
   consume_owned("resolve aliased deep command",
-                f2e_resolve_commands_from_file(DEEP_CONFIG, 8, aliases));
+                f2e_resolve_commands_from_file(DEEP_CONFIG, aliases_argc, aliases));
   consume_owned("alias token remains an option value",
-                f2e_parse_structured_from_file(DEEP_CONFIG, 10, alias_as_value));
+                f2e_parse_structured_from_file(DEEP_CONFIG, alias_as_value_argc, alias_as_value));
   consume_owned("deep help through aliases",
-                f2e_help_table_for_argv_from_file(DEEP_CONFIG, "tool", 8, aliases, 100));
+                f2e_help_table_for_argv_from_file(DEEP_CONFIG, "tool", aliases_argc, aliases, 100));
   consume_owned("bash completion", f2e_completion_script_from_file(DEEP_CONFIG, "bash", "tool"));
   consume_owned("zsh completion", f2e_completion_script_from_file(DEEP_CONFIG, "zsh", "tool"));
   consume_owned("deep config audit", f2e_audit_config_from_file(DEEP_CONFIG));
@@ -94,11 +106,11 @@ static void exercise_codegen_and_coercion(void) {
   };
 
   size_t i;
-  for (i = 0; i < sizeof(payloads) / sizeof(payloads[0]); ++i) {
+  for (i = 0; i < ARRAY_LEN(payloads); ++i) {
     consume_owned("coerce boundary payload",
                   f2e_coerce_json_from_file(CODEGEN_CONFIG, payloads[i]));
   }
-  for (i = 0; i < sizeof(languages) / sizeof(languages[0]); ++i) {
+  for (i = 0; i < ARRAY_LEN(languages); ++i) {
     consume_owned("generate types",
                   f2e_generate_types_from_file(CODEGEN_CONFIG, languages[i], "SanitizerConfig"));
   }
@@ -119,7 +131,7 @@ static void exercise_long_argv_value(void) {
   argv[1] = "--host";
   argv[2] = value;
   consume_owned("long argv string",
-                f2e_parse_structured_from_file(FIXTURE_CONFIG, 3, argv));
+                f2e_parse_structured_from_file(FIXTURE_CONFIG, argv_count("long argv", ARRAY_LEN(argv)), argv));
   free(value);
 }
 
