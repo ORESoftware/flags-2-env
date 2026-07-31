@@ -6,7 +6,7 @@ on:
       r2g_ref:
         description: "ORESoftware/r2g branch, tag, or SHA"
         required: false
-        default: "main"
+        default: "61b62f4b9eae255cccf72b7152dced829589190c"
       zed_cli_ref:
         description: "zed-pkg/zed-cli branch, tag, or SHA"
         required: false
@@ -67,7 +67,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
 
       - name: Run API tests with AddressSanitizer and UBSan
         shell: bash
@@ -119,9 +121,11 @@ jobs:
           - os: windows-latest
             node: "22"
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: ${{ matrix.node }}
 
@@ -163,9 +167,10 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Build formula from this exact commit
         shell: bash
@@ -196,29 +201,33 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           path: flags-2-env
+          persist-credentials: false
 
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: ORESoftware/r2g
-          ref: ${{ inputs.r2g_ref || 'main' }}
+          ref: ${{ inputs.r2g_ref || '61b62f4b9eae255cccf72b7152dced829589190c' }}
           path: r2g
+          persist-credentials: false
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: "24"
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.13"
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
           go-version: "stable"
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: stable
 
       - name: Install Python package build tooling
         run: python -m pip install --disable-pip-version-check build
@@ -228,6 +237,7 @@ jobs:
         working-directory: flags-2-env
         shell: bash
         run: |
+          set -euo pipefail
           tarball="$(npm pack --silent --pack-destination "$RUNNER_TEMP")"
           echo "tarball=$RUNNER_TEMP/$tarball" >> "$GITHUB_OUTPUT"
 
@@ -242,6 +252,7 @@ jobs:
         env:
           R2G_FLAGS2ENV_PATH: ${{ runner.temp }}/no-local-flags2env
         run: |
+          set -euo pipefail
           npm test
           npm run audit:cli
 
@@ -257,21 +268,24 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           path: flags-2-env
+          persist-credentials: false
 
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: zed-pkg/zed-interfaces
           ref: ${{ inputs.zed_interfaces_ref || '07d01604461d00e237c7d86ad3855464167574ec' }}
           path: zed-interfaces
+          persist-credentials: false
 
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: zed-pkg/zed-cli
           ref: ${{ inputs.zed_cli_ref || '8d04bc598a4b0b464466cbec3c44d18cf2922137' }}
           path: zed-cli
+          persist-credentials: false
 
       - name: Install Zsh for installed shell-contract tests
         shell: bash
@@ -280,9 +294,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install --no-install-recommends --yes zsh
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: stable
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
         with:
           workspaces: zed-cli
 
