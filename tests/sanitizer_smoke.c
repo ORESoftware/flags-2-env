@@ -22,6 +22,12 @@ static int argv_count(const char *label, size_t count) {
   return (int)count;
 }
 
+static void expect_boolean_result(const char *label, int value) {
+  if (value != 0 && value != 1) {
+    fail(label, "returned a non-boolean result");
+  }
+}
+
 static void consume_owned(const char *label, char *value) {
   if (value == NULL) {
     fail(label, "returned NULL");
@@ -56,7 +62,8 @@ static void exercise_json_argv_boundaries(void) {
                   f2e_parse_structured_json_argv_from_file(DEEP_CONFIG, cases[i]));
     consume_owned("resolve_commands_json_argv",
                   f2e_resolve_commands_json_argv_from_file(DEEP_CONFIG, cases[i]));
-    (void)f2e_is_help_requested_json_argv(cases[i]);
+    expect_boolean_result("help detection",
+                          f2e_is_help_requested_json_argv(cases[i]));
   }
 }
 
