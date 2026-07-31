@@ -22,6 +22,7 @@ jobs:
         run: |
           python3 scripts/den-979-apply.py
           python3 scripts/den-979-shell-portability.py
+          python3 scripts/den-979-test-expectations.py
 
       - name: Run focused parser, API, audit, and completion gates
         shell: bash
