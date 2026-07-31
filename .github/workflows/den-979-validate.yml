@@ -19,7 +19,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: Apply alias hardening patch
-        run: python3 scripts/den-979-apply.py
+        run: |
+          python3 scripts/den-979-apply.py
+          python3 scripts/den-979-shell-portability.py
 
       - name: Run focused parser, API, audit, and completion gates
         shell: bash
