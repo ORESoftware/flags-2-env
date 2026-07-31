@@ -11,6 +11,8 @@ on:
       - "scripts/verify-shell-contract.py"
       - "src/**"
       - "tests/subcommands/.cli-flags.toml"
+      - "tests/subcommands-deep/.cli-flags.toml"
+      - "tests/completion/**"
   push:
     paths:
       - ".github/workflows/shell-contract.yml"
@@ -21,6 +23,8 @@ on:
       - "scripts/verify-shell-contract.py"
       - "src/**"
       - "tests/subcommands/.cli-flags.toml"
+      - "tests/subcommands-deep/.cli-flags.toml"
+      - "tests/completion/**"
   workflow_dispatch:
 
 permissions:
@@ -84,6 +88,12 @@ jobs:
             exit 1
           fi
           cat "$log"
+
+      - name: Exercise command-alias scope and value-consumption regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tests/completion/run.bash
 
       - name: Upload shell contract diagnostics
         if: ${{ failure() }}

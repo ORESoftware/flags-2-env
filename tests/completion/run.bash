@@ -111,6 +111,36 @@ expect_contains 'deep scope options' "$reply" '--name'
 expect_contains 'deep scope options' "$reply" '--dry-run'
 reply="$(run_complete _flags2env_complete_tool tool ws remote add '' | tr '\n' ' ')"
 expect_contains 'deep scope subcommands' "$reply" 'tag'
+expect_contains 'deep scope subcommand aliases' "$reply" 'annotate'
+
+# Every alias maps to the canonical nested scope.
+reply="$(run_complete _flags2env_complete_tool tool workspace remotes create annotate '--' | tr '\n' ' ')"
+expect_contains 'deep alias scope options' "$reply" '--name'
+expect_contains 'deep alias scope options' "$reply" '--dry-run'
+
+# A separated option value may equal either a command name or command alias;
+# completion must consume it as a value rather than entering that command.
+reply="$(run_complete _flags2env_complete_tool tool --label ws '' | tr '\n' ' ')"
+expect_contains 'canonical command-looking value keeps root scope' "$reply" 'ws'
+expect_contains 'canonical command-looking value keeps root aliases' "$reply" 'workspace'
+expect_not_contains 'canonical command-looking value keeps root scope' "$reply" 'remote'
+reply="$(run_complete _flags2env_complete_tool tool -l workspace '' | tr '\n' ' ')"
+expect_contains 'alias-looking short-option value keeps root scope' "$reply" 'ws'
+expect_not_contains 'alias-looking short-option value keeps root scope' "$reply" 'remotes'
+
+# The same rule applies inside nested scopes.
+reply="$(run_complete _flags2env_complete_tool tool ws remote add --url tag '--' | tr '\n' ' ')"
+expect_contains 'nested canonical command-looking value stays in add' "$reply" '--url'
+expect_not_contains 'nested canonical command-looking value stays in add' "$reply" '--name'
+reply="$(run_complete _flags2env_complete_tool tool workspace remotes create -u annotate '--' | tr '\n' ' ')"
+expect_contains 'nested alias-looking value stays in add' "$reply" '--url'
+expect_not_contains 'nested alias-looking value stays in add' "$reply" '--name'
+
+# Invalid separated bool values remain eligible as commands; only recognized
+# bool values are consumed by completion.
+reply="$(run_complete _flags2env_complete_tool tool --dry-run workspace '' | tr '\n' ' ')"
+expect_contains 'invalid bool value remains a command alias' "$reply" 'remote'
+expect_contains 'invalid bool value remains a command alias' "$reply" 'remotes'
 
 # flat configs (no commands) keep working through the same entry point
 load_completion app "$ROOT_DIR/tests/fixtures/.cli-flags.toml"

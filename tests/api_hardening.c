@@ -15,6 +15,7 @@
 #define NATIVE_SCALARS_CONFIG "tests/native-scalars/.cli-flags.toml"
 #define CODEGEN_CONFIG "tests/codegen/.cli-flags.toml"
 #define SUBCOMMANDS_CONFIG "tests/subcommands/.cli-flags.toml"
+#define SUBCOMMANDS_DEEP_CONFIG "tests/subcommands-deep/.cli-flags.toml"
 #define INVALID_CODEGEN_CONFIG "tests/audit-invalid-codegen/.cli-flags.toml"
 #define INVALID_TYPED_CONFIG "tests/audit-invalid-typed/.cli-flags.toml"
 #define INVALID_TYPE_CONFIG "tests/audit-invalid-type/.cli-flags.toml"
@@ -448,6 +449,32 @@ int main(void) {
   char *resolved_none = f2e_resolve_commands_json_argv_from_file(SUBCOMMANDS_CONFIG, "[\"gitish\",\"--verbose\"]");
   expect_contains("resolve commands empty path", resolved_none, "{\"path\":[],\"label\":\"\"}");
   f2e_free(resolved_none);
+
+  char *resolved_aliases = f2e_resolve_commands_json_argv_from_file(
+      SUBCOMMANDS_DEEP_CONFIG,
+      "[\"tool\",\"workspace\",\"remotes\",\"create\",\"annotate\"]");
+  expect_json("resolve nested aliases returns canonical path", resolved_aliases,
+              "{\"path\":[\"ws\",\"remote\",\"add\",\"tag\"],\"label\":\"ws remote add tag\"}");
+
+  char *structured_aliases = f2e_parse_structured_json_argv_from_file(
+      SUBCOMMANDS_DEEP_CONFIG,
+      "[\"tool\",\"workspace\",\"remotes\",\"create\",\"annotate\",\"--name\",\"v2\"]");
+  expect_contains("structured aliases report canonical command", structured_aliases,
+                  "\"command\":\"ws remote add tag\"");
+  expect_contains("structured aliases report canonical subcommands", structured_aliases,
+                  "\"subcommands\":[\"ws\",\"remote\",\"add\",\"tag\"]");
+  expect_contains("structured aliases retain scoped flags", structured_aliases,
+                  "\"TOOL_TAG_NAME\":\"v2\"");
+  f2e_free(structured_aliases);
+
+  char *alias_help = f2e_help_table_for_json_argv_from_file(
+      SUBCOMMANDS_DEEP_CONFIG,
+      "tool",
+      "[\"tool\",\"workspace\",\"remotes\",\"create\",\"annotate\",\"--help\"]",
+      110);
+  expect_contains("alias help renders canonical command path", alias_help,
+                  "Command: tool ws remote add tag [OPTIONS]");
+  f2e_free(alias_help);
 
   char *json_argv_help = f2e_help_table_for_json_argv_from_file(SUBCOMMANDS_CONFIG,
                                                                 "gitish",

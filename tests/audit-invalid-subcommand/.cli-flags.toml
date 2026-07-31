@@ -23,3 +23,8 @@ type = "bool"
 
 [commands.stage]
 aliases = ["add"]
+
+# Invalid on purpose: an alias must not redundantly repeat its command's
+# canonical name because it creates duplicate help/completion candidates.
+[commands.commit]
+aliases = ["commit"]

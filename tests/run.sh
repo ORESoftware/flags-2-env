@@ -629,6 +629,8 @@ run_deep_case() {
 DEEP_BASE_POSITIONALS="\"TOOL_POSITIONALS\":\"[\\\"$CLI\\\",\\\"tool\\\"]\""
 # four-level command path with a flag scoped four levels deep
 run_deep_case "{\"TOOL_COMMAND\":\"ws remote add tag\",\"TOOL_CMD_TAG\":\"true\",\"TOOL_DRY_RUN\":\"false\",\"TOOL_TAG_NAME\":\"v1\",\"TOOL_TAG_DRY_RUN\":\"true\",$DEEP_BASE_POSITIONALS}" tool ws remote add tag --name v1 -n
+# aliases at every level resolve to the same canonical command path and marker
+run_deep_case "{\"TOOL_COMMAND\":\"ws remote add tag\",\"TOOL_CMD_TAG\":\"true\",\"TOOL_DRY_RUN\":\"false\",\"TOOL_TAG_NAME\":\"v2\",\"TOOL_TAG_DRY_RUN\":\"true\",$DEEP_BASE_POSITIONALS}" tool workspace remotes create annotate --name v2 -n
 # -n resolves to the ws-scoped flag one level down
 run_deep_case "{\"TOOL_COMMAND\":\"ws\",\"TOOL_DRY_RUN\":\"false\",\"TOOL_WS_DRY_RUN\":\"true\",$DEEP_BASE_POSITIONALS}" tool ws -n
 # a separated flag value that looks like a command must not select the command
@@ -661,7 +663,7 @@ fi
 
 deep_help="$(cd "$SUBCOMMANDS_DEEP_DIR" && COLUMNS=110 "$CLI" tool --help)"
 case "$deep_help" in
-  *'Command: tool [COMMAND] [OPTIONS]'*'| ws '*'| ws remote '*'| ws remote add '*'| ws remote add tag '*)
+  *'Command: tool [COMMAND] [OPTIONS]'*'| ws, workspace '*'| ws remote, remotes '*'| ws remote add, create '*'| ws remote add tag, annotate '*)
     ;;
   *)
     printf 'Deep help should list the full nested command tree:\n%s\n' "$deep_help" >&2
@@ -719,7 +721,7 @@ set +e
 actual="$("$CLI" audit "$INVALID_SUBCOMMAND_CONFIG")"
 status=$?
 set -e
-expected='{"ok":false,"errorCount":3,"warningCount":0,"errors":["commands.add env \"GIT_CMD_ADD\" collides with flags.marker env","commands.add and commands.stage share a name or alias","flags.all and flags.everything both use short flag \"A\""],"warnings":[]}'
+expected='{"ok":false,"errorCount":4,"warningCount":0,"errors":["commands.add env \"GIT_CMD_ADD\" collides with flags.marker env","commands.add and commands.stage share a name or alias","commands.commit alias \"commit\" duplicates its canonical name","flags.all and flags.everything both use short flag \"A\""],"warnings":[]}'
 if [ "$status" -eq 0 ] || [ "$actual" != "$expected" ]; then
   printf 'Expected failing subcommand audit status and report:\n%s\nActual status: %s\nActual: %s\n' "$expected" "$status" "$actual" >&2
   exit 1

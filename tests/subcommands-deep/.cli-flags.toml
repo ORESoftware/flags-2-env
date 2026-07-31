@@ -22,6 +22,7 @@ default = "false"
 help = "Top-level dry-run."
 
 [commands.ws]
+aliases = ["workspace"]
 help = "Workspace operations."
 
 [commands.ws.flags.dry_run]
@@ -32,12 +33,14 @@ type = "bool"
 help = "Dry-run scoped to ws."
 
 [commands.ws.commands.remote]
+aliases = ["remotes"]
 help = "Manage workspace remotes."
 # unknown options are tolerated inside `ws remote` (and its subcommands), but
 # nowhere else
 allow_unknown = true
 
 [commands.ws.commands.remote.commands.add]
+aliases = ["create"]
 help = "Add a workspace remote."
 
 [commands.ws.commands.remote.commands.add.flags.url]
@@ -48,6 +51,7 @@ type = "string"
 help = "Remote URL."
 
 [commands.ws.commands.remote.commands.add.commands.tag]
+aliases = ["annotate"]
 help = "Tag a newly added workspace remote."
 env = "TOOL_CMD_TAG"
 
