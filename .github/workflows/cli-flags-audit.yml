@@ -4,7 +4,11 @@ on:
   pull_request:
     paths:
       - ".github/workflows/cli-flags-audit.yml"
+      - ".github/workflows/client-packaging.yml"
+      - ".github/workflows/e2e.yml"
       - "scripts/audit-changed-cli-flags.sh"
+      - "scripts/audit-core-workflow-actions.py"
+      - "tests/workflow_action_policy_test.py"
       - ".cli-flags.toml"
       - "**/.cli-flags.toml"
       - ".env"
@@ -12,7 +16,11 @@ on:
   push:
     paths:
       - ".github/workflows/cli-flags-audit.yml"
+      - ".github/workflows/client-packaging.yml"
+      - ".github/workflows/e2e.yml"
       - "scripts/audit-changed-cli-flags.sh"
+      - "scripts/audit-core-workflow-actions.py"
+      - "tests/workflow_action_policy_test.py"
       - ".cli-flags.toml"
       - "**/.cli-flags.toml"
       - ".env"
@@ -21,13 +29,25 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: cli-flags-audit-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   audit:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
+          persist-credentials: false
+
+      - name: Test workflow policy fail-closed behavior
+        run: python3 -m unittest -v tests/workflow_action_policy_test.py
+
+      - name: Audit immutable core workflow dependencies
+        run: python3 scripts/audit-core-workflow-actions.py
 
       - name: Build audit CLI
         run: make clean && make all
