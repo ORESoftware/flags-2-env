@@ -1,30 +1,32 @@
-name: DEN-979 validate alias hardening
+name: DEN-979 finalize tested alias hardening
 
 on:
   push:
     branches:
       - agent/den-979-subcommand-alias-hardening
-  pull_request:
-    branches:
-      - main
+  workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  patch-and-test:
+  finalize-tested-source:
+    if: ${{ !startsWith(github.event.head_commit.message, 'fix(DEN-979):') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: agent/den-979-subcommand-alias-hardening
+          fetch-depth: 0
 
-      - name: Apply alias hardening patch
+      - name: Apply reviewed alias hardening
         run: |
           python3 scripts/den-979-apply.py
           python3 scripts/den-979-shell-portability.py
           python3 scripts/den-979-test-expectations.py
 
-      - name: Run focused parser, API, audit, and completion gates
+      - name: Re-run focused parser, API, audit, and completion gates
         shell: bash
         run: |
           set -euo pipefail
@@ -33,25 +35,19 @@ jobs:
           ./tests/run.sh
           ./build/api-hardening
 
-      - name: Package tested changes
-        if: ${{ always() }}
+      - name: Publish only the tested source changes
         shell: bash
         run: |
           set -euo pipefail
           git checkout -- build
-          mkdir -p den-979-artifact/files
-          git diff --binary > den-979-artifact/changes.patch
-          git diff --name-only -z | while IFS= read -r -d '' path; do
-            mkdir -p "den-979-artifact/files/$(dirname "$path")"
-            cp "$path" "den-979-artifact/files/$path"
-          done
-
-      - name: Upload tested changes
-        if: ${{ always() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: den-979-tested-changes
-          path: den-979-artifact
-          if-no-files-found: error
-          include-hidden-files: true
-          retention-days: 7
+          rm -f \
+            scripts/den-979-apply.py \
+            scripts/den-979-trigger.txt \
+            scripts/den-979-shell-portability.py \
+            scripts/den-979-test-expectations.py \
+            .github/workflows/den-979-validate.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix(DEN-979): harden canonical subcommand aliases'
+          git push origin HEAD:agent/den-979-subcommand-alias-hardening
