@@ -21,18 +21,21 @@ jobs:
       - name: Apply alias hardening patch
         run: python3 scripts/den-979-apply.py
 
-      - name: Run canonical tests
+      - name: Run focused parser, API, audit, and completion gates
         shell: bash
         run: |
           set -euo pipefail
           git diff --check
-          make test
+          make cli build/api-hardening
+          ./tests/run.sh
+          ./build/api-hardening
 
       - name: Package tested changes
         if: ${{ always() }}
         shell: bash
         run: |
           set -euo pipefail
+          git checkout -- build
           mkdir -p den-979-artifact/files
           git diff --binary > den-979-artifact/changes.patch
           git diff --name-only -z | while IFS= read -r -d '' path; do
@@ -47,4 +50,5 @@ jobs:
           name: den-979-tested-changes
           path: den-979-artifact
           if-no-files-found: error
+          include-hidden-files: true
           retention-days: 7
