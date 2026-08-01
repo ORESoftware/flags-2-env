@@ -17,6 +17,11 @@
       "require": "./clients/nodejs/lib.cjs",
       "default": "./clients/nodejs/lib.mjs"
     },
+    "./browser": {
+      "types": "./clients/browser/index.d.ts",
+      "import": "./clients/browser/index.mjs",
+      "default": "./clients/browser/index.mjs"
+    },
     "./bun": {
       "types": "./clients/bun/lib.ts",
       "bun": "./clients/bun/lib.mjs",
@@ -30,6 +35,8 @@
   },
   "scripts": {
     "install": "cd clients/nodejs && node-gyp rebuild",
+    "build:browser": "bash scripts/build-browser-client.sh",
+    "test:browser": "playwright test --config playwright.config.mjs",
     "pack:audit": "node scripts/audit-npm-package.mjs",
     "pack:dry-run": "npm pack --dry-run",
     "release:audit": "node scripts/audit-release-matrix.mjs",
@@ -44,6 +51,9 @@
     "clients/nodejs/lib.cjs",
     "clients/nodejs/lib.mjs",
     "clients/nodejs/lib.ts",
+    "clients/browser/dist/flags2env.mjs",
+    "clients/browser/index.d.ts",
+    "clients/browser/index.mjs",
     "clients/bun/lib.cjs",
     "clients/bun/lib.mjs",
     "clients/bun/lib.ts",
@@ -63,7 +73,9 @@
     "cli",
     "env",
     "flags",
-    "configuration"
+    "configuration",
+    "webassembly",
+    "browser"
   ],
   "engines": {
     "node": ">=20.17"
@@ -72,6 +84,7 @@
     "node-gyp": "^12.4.0"
   },
   "devDependencies": {
+    "@playwright/test": "1.62.0",
     "@types/node": "^22.0.0"
   }
 }
