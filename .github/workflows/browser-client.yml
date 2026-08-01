@@ -36,6 +36,8 @@ jobs:
   browser-contract:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/playwright-browsers
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -45,12 +47,27 @@ jobs:
         with:
           node-version: "24"
 
+      - name: Reclaim hosted-runner space
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo rm -rf \
+            /usr/local/lib/android \
+            /usr/share/dotnet \
+            /opt/ghc \
+            /opt/hostedtoolcache/CodeQL
+          sudo apt-get clean
+          df -h /
+
       - name: Install Emscripten and build prerequisites
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends emscripten build-essential python3
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
+          df -h /
 
       - name: Install locked browser-test dependencies
         shell: bash
