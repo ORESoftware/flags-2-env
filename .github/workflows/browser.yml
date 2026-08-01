@@ -42,7 +42,7 @@ jobs:
           sudo apt-get install --yes --no-install-recommends emscripten python3-venv
 
       - name: Build the WebAssembly client
-        run: clients/browser/build.sh
+        run: bash clients/browser/build.sh
 
       - name: Install pinned Playwright
         run: |
