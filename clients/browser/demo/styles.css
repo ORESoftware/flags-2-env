@@ -1,0 +1,101 @@
+:root {
+  color-scheme: light dark;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.5;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: Canvas;
+  color: CanvasText;
+}
+
+main {
+  width: min(72rem, 100%);
+  margin: 0 auto;
+  padding: clamp(1rem, 4vw, 3rem);
+}
+
+header,
+section {
+  border: 1px solid color-mix(in srgb, CanvasText 22%, transparent);
+  border-radius: 0.85rem;
+  padding: clamp(1rem, 3vw, 1.5rem);
+  margin-block: 1rem;
+}
+
+.eyebrow {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+h1,
+h2 {
+  line-height: 1.2;
+}
+
+label {
+  display: block;
+  font-weight: 650;
+  margin-bottom: 0.4rem;
+}
+
+textarea,
+pre {
+  width: 100%;
+  max-width: 100%;
+  overflow: auto;
+  border: 1px solid color-mix(in srgb, CanvasText 28%, transparent);
+  border-radius: 0.55rem;
+  padding: 0.8rem;
+  font: 0.9rem/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+  background: color-mix(in srgb, Canvas 94%, CanvasText 6%);
+  color: CanvasText;
+}
+
+textarea {
+  resize: vertical;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-top: 0.8rem;
+}
+
+button {
+  min-height: 2.75rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 0.55rem 1rem;
+  background: CanvasText;
+  color: Canvas;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+
+button:focus-visible,
+textarea:focus-visible,
+pre:focus-visible {
+  outline: 0.2rem solid Highlight;
+  outline-offset: 0.15rem;
+}
+
+#status[data-ready="true"] {
+  font-weight: 700;
+}
+
+@media (max-width: 32rem) {
+  button {
+    width: 100%;
+  }
+}
