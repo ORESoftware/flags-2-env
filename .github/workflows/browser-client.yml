@@ -1,0 +1,107 @@
+name: Browser WebAssembly client
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/browser-client.yml"
+      - "clients/browser/**"
+      - "docs/browser-client.md"
+      - "package-lock.json"
+      - "package.json"
+      - "playwright.config.mjs"
+      - "scripts/build-browser-client.sh"
+      - "src/**"
+      - "tests/browser/**"
+  push:
+    paths:
+      - ".github/workflows/browser-client.yml"
+      - "clients/browser/**"
+      - "docs/browser-client.md"
+      - "package-lock.json"
+      - "package.json"
+      - "playwright.config.mjs"
+      - "scripts/build-browser-client.sh"
+      - "src/**"
+      - "tests/browser/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-client-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "24"
+
+      - name: Install Emscripten and build prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends emscripten build-essential python3
+
+      - name: Install locked browser-test dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund
+
+      - name: Build the self-contained WebAssembly client
+        run: npm run build:browser
+
+      - name: Install pinned Playwright browsers
+        run: npx playwright install --with-deps chromium firefox webkit
+
+      - name: Run browser/native parity and security contracts
+        run: npm run test:browser
+
+      - name: Prove the browser export is publishable
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm pack --dry-run --json > "$RUNNER_TEMP/npm-pack.json"
+          node --input-type=module <<'NODE'
+          import { readFile } from "node:fs/promises";
+          const report = JSON.parse(await readFile(process.env.RUNNER_TEMP + "/npm-pack.json", "utf8"));
+          const paths = new Set(report[0].files.map((entry) => entry.path));
+          for (const required of [
+            "clients/browser/dist/flags2env.mjs",
+            "clients/browser/index.d.ts",
+            "clients/browser/index.mjs",
+          ]) {
+            if (!paths.has(required)) throw new Error(`npm package is missing ${required}`);
+          }
+          NODE
+
+      - name: Upload generated lock and WebAssembly module for review
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: den-1300-generated
+          path: |
+            package-lock.json
+            clients/browser/dist/flags2env.mjs
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Upload browser failure evidence
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: browser-client-failure
+          path: |
+            playwright-report
+            test-results/browser
+          if-no-files-found: warn
+          retention-days: 7
