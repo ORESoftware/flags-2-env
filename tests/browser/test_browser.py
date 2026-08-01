@@ -84,6 +84,11 @@ def run_suite(browser: Browser, base_url: str) -> None:
         assert nested["providedFlags"]["WORKER_NAME"] == "alpha"
         assert nested["providedFlags"]["TOOL_VERBOSE"] == "true"
 
+        resolved = page.evaluate(
+            "() => window.__flags2env.resolveCommands([\"tool\",\"serve\",\"worker\"])"
+        )
+        assert resolved == {"path": ["serve", "worker"], "label": "serve worker"}
+
         page.locator("#argv-json").fill(
             '["tool","serve","--port","not-a-number"]'
         )
@@ -110,6 +115,54 @@ def run_suite(browser: Browser, base_url: str) -> None:
         assert coercion["value"]["PORT"] == 8080
         assert coercion["value"]["DEBUG"] is True
         assert coercion["value"]["TOOL_VERBOSE"] is False
+
+        nul_error = page.evaluate(
+            """() => {
+              try {
+                window.__flags2env.parse(["tool", "bad" + String.fromCharCode(0)]);
+                return "";
+              } catch (error) {
+                return error.message;
+              }
+            }"""
+        )
+        assert "NUL bytes" in nul_error
+
+        count_error = page.evaluate(
+            """() => {
+              try {
+                window.__flags2env.parse(Array.from({length: 4097}, () => "x"));
+                return "";
+              } catch (error) {
+                return error.message;
+              }
+            }"""
+        )
+        assert "4096-item" in count_error
+
+        config_error = page.evaluate(
+            """() => {
+              try {
+                window.__flags2env.setConfig("x".repeat(1024 * 1024 + 1));
+                return "";
+              } catch (error) {
+                return error.message;
+              }
+            }"""
+        )
+        assert "1048576-byte" in config_error
+
+        columns_error = page.evaluate(
+            """() => {
+              try {
+                window.__flags2env.helpTableForArgv("tool", ["tool"], 1001);
+                return "";
+              } catch (error) {
+                return error.message;
+              }
+            }"""
+        )
+        assert "between 1 and 1000" in columns_error
 
         page.set_viewport_size({"width": 390, "height": 844})
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
