@@ -13,6 +13,7 @@ mkdir -p "$OUT"
 
 emcc "$ROOT/src/parser.c" \
   -I"$ROOT/src" \
+  -include "$ROOT/clients/browser/compat.h" \
   -std=c99 \
   -O2 \
   -DNDEBUG \
