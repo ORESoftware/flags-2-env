@@ -31,4 +31,7 @@ emcc "$ROOT/src/parser.c" \
 
 cp "$ROOT/clients/browser/lib.mjs" "$OUT/lib.mjs"
 cp "$ROOT/clients/browser/lib.d.ts" "$OUT/lib.d.ts"
+cp "$ROOT/clients/browser/worker.mjs" "$OUT/worker.mjs"
+cp "$ROOT/clients/browser/worker-client.mjs" "$OUT/worker-client.mjs"
+cp "$ROOT/clients/browser/worker-client.d.ts" "$OUT/worker-client.d.ts"
 printf 'browser WebAssembly client built at %s\n' "$OUT"
