@@ -26,10 +26,15 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  chromium:
-    name: Chromium against the real C parser
+  browser:
+    name: ${{ matrix.browser }} main thread and worker
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        browser: [chromium, firefox, webkit]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -41,24 +46,26 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends emscripten python3-venv
 
-      - name: Build the WebAssembly client
+      - name: Build the WebAssembly clients
         run: bash clients/browser/build.sh
 
-      - name: Install pinned Playwright
+      - name: Install pinned Playwright ${{ matrix.browser }}
         run: |
           set -euo pipefail
           python3 -m venv .venv-browser
           .venv-browser/bin/python -m pip install --disable-pip-version-check --no-cache-dir playwright==1.55.0
-          .venv-browser/bin/python -m playwright install --with-deps chromium
+          .venv-browser/bin/python -m playwright install --with-deps "${{ matrix.browser }}"
 
-      - name: Run browser contract
-        run: .venv-browser/bin/python tests/browser/test_browser.py
+      - name: Run main-thread and worker contracts
+        env:
+          PLAYWRIGHT_BROWSER: ${{ matrix.browser }}
+        run: .venv-browser/bin/python tests/browser/test_cross_browser.py
 
-      - name: Upload browser diagnostics
+      - name: Upload ${{ matrix.browser }} browser diagnostics
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: flags2env-browser-diagnostics
+          name: flags2env-${{ matrix.browser }}-browser-diagnostics
           path: build/browser-results
           if-no-files-found: ignore
           retention-days: 7
