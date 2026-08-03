@@ -105,6 +105,12 @@
       "kind": "server"
     },
     {
+      "repository": "ORESoftware/next-loggers.ts",
+      "contract": ".cli-flags.toml",
+      "command": "next-loggers",
+      "kind": "cli"
+    },
+    {
       "repository": "ORESoftware/r2g",
       "contract": ".cli-flags.toml",
       "command": "r2g",
