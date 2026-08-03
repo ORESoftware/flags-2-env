@@ -38,18 +38,27 @@ Main-thread calls are synchronous once the module has initialized. Use this form
 ```js
 import { createFlags2EnvWorker } from "./dist/worker-client.mjs";
 
+const controller = new AbortController();
 const flags2env = await createFlags2EnvWorker({
   configText,
   timeoutMs: 15_000,
+  closeTimeoutMs: 15_000,
+  maxPendingRequests: 128,
+  signal: controller.signal,
 });
 
 await flags2env.parse(["tool", "serve", "--port", "8080"]);
 await flags2env.parseStructured(["tool", "serve", "worker", "--name", "alpha"]);
 await flags2env.setConfig(nextConfigText);
-flags2env.terminate();
+await flags2env.drain();
+await flags2env.close();
 ```
 
-Each worker owns a separate WebAssembly instance and MEMFS configuration. Use separate workers for independent configurations or parallel parsing. Requests carry numeric IDs, are bounded before transfer, and reject deterministically on timeout, worker failure, or termination. Call `terminate()` when the client is no longer needed; later requests fail with a closed-state error.
+Each worker owns a separate WebAssembly instance and MEMFS configuration. Use separate workers for independent configurations or parallel parsing.
+
+`maxPendingRequests` bounds accepted work before another message is posted. Requests beyond that bound reject with `BusyError`; callers can inspect `pendingRequests` to apply their own queue or shed load. `drain()` waits only for already accepted requests. `close()` rejects new work, drains accepted work, then terminates the worker. A bounded close timeout terminates the worker and rejects with `TimeoutError` if accepted work cannot finish. Existing `terminate()` behavior remains immediate and idempotent.
+
+A creation-level `AbortSignal` closes the entire worker lifecycle. Aborting rejects pending work with `AbortError`, terminates the worker, and causes subsequent requests to fail as closed. The signal is checked before creating a worker, so an already-aborted signal does not allocate a worker or WebAssembly instance.
 
 A custom `workerUrl` may be supplied when bundlers or Content Security Policy require a different deployment path. The default is `new URL("./worker.mjs", import.meta.url)`.
 
@@ -61,12 +70,14 @@ A custom `workerUrl` may be supplied when bundlers or Content Security Policy re
 - NUL bytes are rejected before C-string conversion.
 - Configuration is limited to 1 MiB; argv is limited to 4,096 items, 64 KiB per item, and 4 MiB total.
 - Worker request and response envelopes are limited to 4 MiB.
+- Pending worker requests are bounded to a configurable maximum of 4,096 and default to 128.
 - Worker errors expose only a bounded name/message pair; stacks and internal filesystem paths are not returned.
 - Main-thread calls are fail-closed and non-reentrant. Worker clients serialize work through one isolated WebAssembly instance.
+- Graceful close, immediate termination, AbortSignal shutdown, and timeout paths clear accepted-request timers and reject every pending promise.
 - Returned pointers are never exposed to application code and are always freed.
 - No SharedArrayBuffer, cross-origin isolation headers, or remote service is required.
 - Browser callers should still treat configuration and argv as untrusted data and render returned help/output as text, not HTML.
 
 ## Test
 
-The GitHub Actions browser workflow builds the module and runs the same main-thread and worker contract in Chromium, Firefox, and WebKit through Playwright. The suite rejects external requests, console errors, page errors, invalid responsive layout, oversized/NUL-containing inputs, worker state leakage, timeout/termination regressions, and regressions in parsing, canonical command resolution, subcommands, help, audit, coercion, and validation errors.
+The GitHub Actions browser workflow first runs deterministic fake-worker unit tests for overload, drain, close, timeout, abort, and idempotent termination. It then builds the module and runs the main-thread, worker, and lifecycle contracts in Chromium, Firefox, and WebKit through Playwright. The suite rejects external requests, console errors, page errors, invalid responsive layout, oversized/NUL-containing inputs, worker state leakage, unbounded pending work, timeout/termination regressions, and regressions in parsing, canonical command resolution, subcommands, help, audit, coercion, and validation errors.

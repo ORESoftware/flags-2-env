@@ -1,5 +1,9 @@
 import type { CommandResolution, StructuredParse } from "./lib.mjs";
 
+export interface Flags2EnvWorkerCloseOptions {
+  timeoutMs?: number;
+}
+
 export interface Flags2EnvWorkerClient {
   setConfig(configText: string): Promise<void>;
   parse(argv: string[]): Promise<Record<string, string>>;
@@ -8,13 +12,20 @@ export interface Flags2EnvWorkerClient {
   auditConfig(): Promise<Record<string, unknown>>;
   coerce(values: Record<string, unknown>): Promise<Record<string, unknown>>;
   helpTableForArgv(command: string, argv: string[], terminalColumns?: number): Promise<string>;
-  terminate(reason?: string): void;
+  drain(): Promise<void>;
+  close(options?: Flags2EnvWorkerCloseOptions): Promise<void>;
+  terminate(reason?: string | Error): void;
+  readonly pendingRequests: number;
+  readonly closing: boolean;
   readonly closed: boolean;
 }
 
 export interface CreateFlags2EnvWorkerOptions {
   configText?: string;
   timeoutMs?: number;
+  closeTimeoutMs?: number;
+  maxPendingRequests?: number;
+  signal?: AbortSignal;
   workerUrl?: URL | string;
   workerFactory?: (url: URL | string, init: WorkerOptions) => Worker;
 }

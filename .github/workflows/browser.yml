@@ -29,7 +29,7 @@ jobs:
   browser:
     name: ${{ matrix.browser }} main thread and worker
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       max-parallel: 2
@@ -39,6 +39,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "24"
+
+      - name: Test worker lifecycle without browser timing
+        run: node --test tests/browser/worker_client_test.mjs
 
       - name: Install Emscripten and Python tooling
         run: |
@@ -60,6 +67,11 @@ jobs:
         env:
           PLAYWRIGHT_BROWSER: ${{ matrix.browser }}
         run: .venv-browser/bin/python tests/browser/test_cross_browser.py
+
+      - name: Run worker backpressure and lifecycle contract
+        env:
+          PLAYWRIGHT_BROWSER: ${{ matrix.browser }}
+        run: .venv-browser/bin/python tests/browser/test_worker_lifecycle.py
 
       - name: Upload ${{ matrix.browser }} browser diagnostics
         if: failure()
