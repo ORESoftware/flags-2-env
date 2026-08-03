@@ -1,0 +1,125 @@
+name: Browser npm package
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/browser-package.yml"
+      - "clients/browser/**"
+      - "scripts/build-browser-npm-package.mjs"
+      - "src/parser.c"
+      - "src/parser.h"
+      - "tests/browser/browser_package_builder_test.mjs"
+      - "tests/browser/package-host.html"
+      - "tests/browser/test_packed_browser_package.py"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/browser-package.yml"
+      - "clients/browser/**"
+      - "scripts/build-browser-npm-package.mjs"
+      - "src/parser.c"
+      - "src/parser.h"
+      - "tests/browser/browser_package_builder_test.mjs"
+      - "tests/browser/package-host.html"
+      - "tests/browser/test_packed_browser_package.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-package-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  builder:
+    name: Package builder on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "24"
+
+      - name: Test the allowlist and npm pack contract
+        run: node --test tests/browser/browser_package_builder_test.mjs
+
+  package:
+    name: Packed consumer in ${{ matrix.browser }}
+    needs: builder
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        browser: [chromium, firefox, webkit]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "24"
+
+      - name: Install Emscripten and Python tooling
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends emscripten python3-venv
+
+      - name: Build the WebAssembly runtime
+        run: bash clients/browser/build.sh
+
+      - name: Build and extract the allowlisted npm package
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf build/browser-npm build/browser-tarballs build/browser-package-consumer
+          mkdir -p build/browser-npm build/browser-package-consumer
+          cp clients/browser/dist/* build/browser-npm/
+          node scripts/build-browser-npm-package.mjs \
+            --dist build/browser-npm \
+            --tar-dir build/browser-tarballs
+          tarball="$(find build/browser-tarballs -maxdepth 1 -type f -name '*.tgz' -print -quit)"
+          test -n "$tarball"
+          tar -xzf "$tarball" -C build/browser-package-consumer
+          test -f build/browser-package-consumer/package/flags2env.wasm
+
+      - name: Install pinned Playwright ${{ matrix.browser }}
+        run: |
+          set -euo pipefail
+          python3 -m venv .venv-browser-package
+          .venv-browser-package/bin/python -m pip install --disable-pip-version-check --no-cache-dir playwright==1.55.0
+          .venv-browser-package/bin/python -m playwright install --with-deps "${{ matrix.browser }}"
+
+      - name: Exercise the packed npm consumer
+        env:
+          PLAYWRIGHT_BROWSER: ${{ matrix.browser }}
+        run: .venv-browser-package/bin/python tests/browser/test_packed_browser_package.py
+
+      - name: Upload the reviewed browser tarball
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: flags2env-browser-npm-${{ matrix.browser }}
+          path: build/browser-tarballs/*.tgz
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload ${{ matrix.browser }} package diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: flags2env-${{ matrix.browser }}-package-diagnostics
+          path: build/browser-results
+          if-no-files-found: ignore
+          retention-days: 7

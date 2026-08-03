@@ -17,6 +17,30 @@ Open `http://127.0.0.1:8000/clients/browser/demo/`.
 
 The generated `clients/browser/dist/` directory is intentionally ignored. Release automation can build it from the reviewed C source instead of committing compiler output. The build copies the main-thread and worker wrappers plus their TypeScript declarations beside the generated module.
 
+## Installable browser package
+
+Release automation can turn the reviewed generated output into a dependency-free npm tarball:
+
+```sh
+bash clients/browser/build.sh
+mkdir -p build/browser-npm
+cp clients/browser/dist/* build/browser-npm/
+node scripts/build-browser-npm-package.mjs \
+  --dist build/browser-npm \
+  --tar-dir build/browser-tarballs
+```
+
+The generated package is named `@oresoftware/f2e-browser`. It is intentionally separate from the root `@oresoftware/f2e` package so browser consumers do not inherit `node-gyp`, native install hooks, or Node-only exports.
+
+After installing a reviewed tarball, import the public package paths:
+
+```js
+import { createFlags2Env } from "@oresoftware/f2e-browser";
+import { createFlags2EnvWorker } from "@oresoftware/f2e-browser/worker";
+```
+
+The tarball contains only `flags2env.mjs`, `flags2env.wasm`, the main-thread and worker wrappers, TypeScript declarations, package metadata, the license, and this README. The package builder rejects any extra file before `npm pack` and audits the final npm file list, package name/version, exports, integrity digest, and absence of lifecycle scripts or dependencies.
+
 ## Main-thread API
 
 ```js
@@ -80,4 +104,6 @@ A custom `workerUrl` may be supplied when bundlers or Content Security Policy re
 
 ## Test
 
-The GitHub Actions browser workflow first runs deterministic fake-worker unit tests for overload, drain, close, timeout, abort, and idempotent termination. It then builds the module and runs the main-thread, worker, and lifecycle contracts in Chromium, Firefox, and WebKit through Playwright. The suite rejects external requests, console errors, page errors, invalid responsive layout, oversized/NUL-containing inputs, worker state leakage, unbounded pending work, timeout/termination regressions, and regressions in parsing, canonical command resolution, subcommands, help, audit, coercion, and validation errors.
+The core browser workflow first runs deterministic fake-worker unit tests for overload, drain, close, timeout, abort, and idempotent termination. It then builds the module and runs the main-thread, worker, and lifecycle contracts in Chromium, Firefox, and WebKit through Playwright.
+
+The browser-package workflow runs the package builder and `npm pack` contract on Linux, macOS, and Windows. It then extracts the actual tarball and imports only its packaged main-thread and worker paths in Chromium, Firefox, and WebKit. The packed test rejects source-tree fallback, extra package files, native install hooks, dependencies, external requests, console/page errors, broken `.wasm` relative loading, incomplete exports, and worker-relative URL regressions.
