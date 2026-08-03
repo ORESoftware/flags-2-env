@@ -58,6 +58,20 @@ The canonical C audit remains the source of truth for syntax, aliases, subcomman
 
 The fleet workflow runs when its data or tooling changes, on a daily schedule, and on manual dispatch. It is a cross-repository compatibility signal, not a replacement for the reusable workflow above: consumers still need repository-owned runtime and final-artifact smokes to prove their actual executable, container, protocol, parser pin, and secret boundary.
 
+### Dependency-free mirrored consumers
+
+A consumer may intentionally avoid loading the native flags-2-env parser at runtime. `ORESoftware/next-loggers.ts` is the reference TypeScript case: its executable uses a dependency-free compiled specification while `.cli-flags.toml` remains the portable contract for canonical audit, generated help/completion, environment-variable documentation, and cross-language tooling.
+
+That design is compliant only when all of these boundaries are enforced:
+
+1. the runtime specification and `.cli-flags.toml` are compared bidirectionally, so both missing declarations and stale declarations fail CI;
+2. command names, command descriptions, flag descriptions, aliases, types, short options, defaults, and environment destinations are included in the comparison;
+3. repository-owned tests exercise the actual executable and its installed package, not only canonical generated output;
+4. the central fleet independently audits the portable contract and exercises Bash/Zsh help and completion against current canonical tooling;
+5. release-planning flags may document public package names, registries, and immutable tags, but credentials and secret-bearing environment variables remain outside the flag contract.
+
+This pattern is useful for zero-runtime-dependency JavaScript packages and other applications with a native-tooling build boundary. It must not be used to justify an untested hand-maintained copy of the contract.
+
 To add a consumer, append one sorted entry to `consumer-fleet.json` and run:
 
 ```sh
