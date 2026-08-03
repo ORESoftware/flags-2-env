@@ -78,14 +78,25 @@ class ConsumerFleetTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         matrix = json.loads(result.stdout)
         entries = matrix["include"]
-        self.assertGreaterEqual(len(entries), 20)
+        self.assertGreaterEqual(len(entries), 21)
         self.assertEqual(len(entries), len({entry["label"] for entry in entries}))
         self.assertIn(
             "ORESoftware/k8s-cluster:remote/deployments/browser-mcp-rs/.cli-flags.toml",
             {entry["label"] for entry in entries},
         )
+        self.assertIn(
+            "ORESoftware/next-loggers.ts:.cli-flags.toml",
+            {entry["label"] for entry in entries},
+        )
+        next_loggers = next(
+            entry
+            for entry in entries
+            if entry["repository"] == "ORESoftware/next-loggers.ts"
+        )
+        self.assertEqual("next-loggers", next_loggers["command"])
+        self.assertEqual("cli", next_loggers["kind"])
         self.assertEqual(len(entries), int(outputs["central_count"]))
-        self.assertEqual(23, int(outputs["consumer_count"]))
+        self.assertEqual(24, int(outputs["consumer_count"]))
         self.assertEqual(3, int(outputs["in_repo_count"]))
 
         central_repositories = {entry["repository"] for entry in entries}
