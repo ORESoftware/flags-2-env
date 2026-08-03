@@ -8,6 +8,7 @@ on:
       - "scripts/build-browser-npm-package.mjs"
       - "src/parser.c"
       - "src/parser.h"
+      - "tests/browser/browser_package_builder_test.mjs"
       - "tests/browser/package-host.html"
       - "tests/browser/test_packed_browser_package.py"
   push:
@@ -18,6 +19,7 @@ on:
       - "scripts/build-browser-npm-package.mjs"
       - "src/parser.c"
       - "src/parser.h"
+      - "tests/browser/browser_package_builder_test.mjs"
       - "tests/browser/package-host.html"
       - "tests/browser/test_packed_browser_package.py"
   workflow_dispatch:
@@ -30,8 +32,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  builder:
+    name: Package builder on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "24"
+
+      - name: Test the allowlist and npm pack contract
+        run: node --test tests/browser/browser_package_builder_test.mjs
+
   package:
     name: Packed consumer in ${{ matrix.browser }}
+    needs: builder
     runs-on: ubuntu-latest
     timeout-minutes: 40
     strategy:
