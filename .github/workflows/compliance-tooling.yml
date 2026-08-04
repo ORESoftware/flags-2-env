@@ -6,8 +6,10 @@ on:
       - ".github/workflows/reusable-consumer-compliance.yml"
       - ".github/workflows/compliance-tooling.yml"
       - "scripts/verify-consumer-compliance.py"
+      - "scripts/verify-vendored-parser.py"
       - "tests/compliance/**"
       - "tests/test_consumer_compliance_policy.py"
+      - "tests/test_vendored_parser_identity.py"
       - "docs/consumer-compliance.md"
   push:
     branches: [main]
@@ -15,8 +17,10 @@ on:
       - ".github/workflows/reusable-consumer-compliance.yml"
       - ".github/workflows/compliance-tooling.yml"
       - "scripts/verify-consumer-compliance.py"
+      - "scripts/verify-vendored-parser.py"
       - "tests/compliance/**"
       - "tests/test_consumer_compliance_policy.py"
+      - "tests/test_vendored_parser_identity.py"
       - "docs/consumer-compliance.md"
 
 permissions:
@@ -34,9 +38,15 @@ jobs:
         uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
         with:
           args: .github/workflows/reusable-consumer-compliance.yml .github/workflows/compliance-tooling.yml
-      - name: Compile policy checker
-        run: python3 -m py_compile scripts/verify-consumer-compliance.py
+      - name: Compile policy checkers
+        run: |
+          python3 -m py_compile \
+            scripts/verify-consumer-compliance.py \
+            scripts/verify-vendored-parser.py
       - name: Run policy unit tests
-        run: python3 -m unittest tests/test_consumer_compliance_policy.py
+        run: |
+          python3 -m unittest \
+            tests/test_consumer_compliance_policy.py \
+            tests/test_vendored_parser_identity.py
       - name: Run end-to-end policy fixtures
         run: bash tests/compliance/run.sh
