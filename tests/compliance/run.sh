@@ -6,7 +6,12 @@ CHECKER="$ROOT_DIR/scripts/verify-consumer-compliance.py"
 PARSER_REF="377bff1a4e7424eb98377997a232ddc0fc700f59"
 TMP_DIR="${TMPDIR:-/tmp}/flags2env-compliance-$$"
 trap 'rm -rf "$TMP_DIR"' EXIT
-mkdir -p "$TMP_DIR/good" "$TMP_DIR/bad-secret" "$TMP_DIR/bad-unknown" "$TMP_DIR/bad-pin"
+mkdir -p \
+  "$TMP_DIR/good" \
+  "$TMP_DIR/bad-secret" \
+  "$TMP_DIR/bad-unknown" \
+  "$TMP_DIR/bad-pin" \
+  "$TMP_DIR/bad-cwd"
 
 write_rust_files() {
   local dir="$1"
@@ -86,6 +91,27 @@ if python3 "$CHECKER" --root "$TMP_DIR/bad-pin" --parser-ref "$PARSER_REF" --kin
   echo "mutable or mismatched dependency pin should fail compliance" >&2
   exit 1
 fi
+
+cp -R "$TMP_DIR/good/." "$TMP_DIR/bad-cwd/"
+mkdir -p "$TMP_DIR/bad-cwd/src"
+cat >"$TMP_DIR/bad-cwd/src/flags.rs" <<'EOF'
+use std::path::PathBuf;
+
+fn resolve_contract() -> PathBuf {
+    std::env::current_dir()
+        .expect("current working directory")
+        .join(".cli-flags.toml")
+}
+EOF
+if python3 "$CHECKER" --root "$TMP_DIR/bad-cwd" --parser-ref "$PARSER_REF" --kind server --rust-manifest Cargo.toml; then
+  echo "long-running consumer should not trust an ambient CWD contract" >&2
+  exit 1
+fi
+python3 "$CHECKER" \
+  --root "$TMP_DIR/bad-cwd" \
+  --parser-ref "$PARSER_REF" \
+  --kind cli \
+  --rust-manifest Cargo.toml
 
 if python3 "$CHECKER" --root "$TMP_DIR/good" --parser-ref main --kind server --rust-manifest Cargo.toml; then
   echo "non-immutable parser_ref should fail compliance" >&2
