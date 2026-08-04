@@ -11,6 +11,7 @@ on:
       - "tests/test_consumer_compliance_policy.py"
       - "tests/test_vendored_parser_identity.py"
       - "docs/consumer-compliance.md"
+      - "docs/vendored-parser-identity.md"
   push:
     branches: [main]
     paths:
@@ -22,6 +23,7 @@ on:
       - "tests/test_consumer_compliance_policy.py"
       - "tests/test_vendored_parser_identity.py"
       - "docs/consumer-compliance.md"
+      - "docs/vendored-parser-identity.md"
 
 permissions:
   contents: read
