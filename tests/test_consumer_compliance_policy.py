@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -49,6 +50,86 @@ class ConsumerCompliancePolicyTests(unittest.TestCase):
         ]:
             with self.subTest(env=env):
                 self.assertTrue(MODULE.is_secret_bearing_env(env))
+
+    def test_long_running_rust_consumer_cannot_load_contract_from_cwd(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "src" / "flags.rs"
+            source.parent.mkdir(parents=True)
+            source.write_text(
+                '''
+use std::path::PathBuf;
+
+fn resolve() -> PathBuf {
+    std::env::current_dir()
+        .expect("cwd")
+        .join(".cli-flags.toml")
+}
+''',
+                encoding="utf-8",
+            )
+            errors = MODULE.check_trusted_contract_resolution(root, "server")
+            self.assertEqual(len(errors), 1)
+            self.assertIn("src/flags.rs", errors[0])
+            self.assertIn("current working directory", errors[0])
+
+    def test_cli_project_local_contract_remains_an_explicit_kind_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "src" / "main.rs"
+            source.parent.mkdir(parents=True)
+            source.write_text(
+                'let path = std::env::current_dir()?.join(".cli-flags.toml");\n',
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                MODULE.check_trusted_contract_resolution(root, "cli"), []
+            )
+
+    def test_test_fixture_comments_and_string_only_mentions_are_ignored(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture = root / "tests" / "cwd_config.rs"
+            fixture.parent.mkdir(parents=True)
+            fixture.write_text(
+                'let path = std::env::current_dir()?.join(".cli-flags.toml");\n',
+                encoding="utf-8",
+            )
+            source = root / "src" / "flags.rs"
+            source.parent.mkdir(parents=True)
+            source.write_text(
+                '''
+// std::env::current_dir()?.join(".cli-flags.toml");
+/* A nested example:
+   /* current_dir().join(".cli-flags.toml") */
+*/
+const EXPLANATION: &str = "do not call current_dir when locating policy";
+const CONTRACT_NAME: &str = ".cli-flags.toml";
+''',
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                MODULE.check_trusted_contract_resolution(root, "worker"), []
+            )
+
+    def test_executable_relative_contract_is_trusted(self) -> None:
+        source = '''
+let executable = std::env::current_exe()?;
+let path = executable
+    .parent()
+    .expect("executable parent")
+    .join("../share/example/.cli-flags.toml");
+'''
+        self.assertFalse(MODULE.source_resolves_contract_from_cwd(source))
+
+    def test_nested_block_comments_are_removed_without_losing_real_code(self) -> None:
+        source = '''
+/* current_dir().join(".cli-flags.toml")
+   /* nested current_dir example */
+*/
+let path = env::current_dir()?.join(".cli-flags.toml");
+'''
+        self.assertTrue(MODULE.source_resolves_contract_from_cwd(source))
 
 
 if __name__ == "__main__":
