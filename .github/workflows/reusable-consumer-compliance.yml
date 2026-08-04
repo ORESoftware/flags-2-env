@@ -35,6 +35,16 @@ on:
         required: false
         default: Cargo.lock
         type: string
+      vendored_parser_c_path:
+        description: Optional parser.c path actually compiled by the consumer; requires vendored_parser_h_path
+        required: false
+        default: ""
+        type: string
+      vendored_parser_h_path:
+        description: Optional parser.h path actually compiled by the consumer; requires vendored_parser_c_path
+        required: false
+        default: ""
+        type: string
       runtime_smoke_script:
         description: Optional repository-controlled runtime smoke script path
         required: false
@@ -61,6 +71,8 @@ jobs:
           PARSER_REF: ${{ inputs.parser_ref }}
           RUNTIME_SMOKE: ${{ inputs.runtime_smoke_script }}
           TOOLING_REF: ${{ inputs.tooling_ref }}
+          VENDORED_PARSER_C: ${{ inputs.vendored_parser_c_path }}
+          VENDORED_PARSER_H: ${{ inputs.vendored_parser_h_path }}
         shell: bash
         run: |
           set -euo pipefail
@@ -87,6 +99,11 @@ jobs:
             echo 'CLI consumers must provide a runtime smoke script that checks the real --help surface' >&2
             exit 1
           fi
+          if [[ -n "$VENDORED_PARSER_C" && -z "$VENDORED_PARSER_H" ]] \
+            || [[ -z "$VENDORED_PARSER_C" && -n "$VENDORED_PARSER_H" ]]; then
+            echo 'vendored parser C and header paths must be supplied together' >&2
+            exit 1
+          fi
 
       - name: Check out consumer
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -109,6 +126,20 @@ jobs:
           ref: ${{ inputs.parser_ref }}
           path: flags2env-parser
           persist-credentials: false
+
+      - name: Verify vendored parser byte identity
+        if: ${{ inputs.vendored_parser_c_path != '' || inputs.vendored_parser_h_path != '' }}
+        env:
+          VENDORED_PARSER_C: ${{ inputs.vendored_parser_c_path }}
+          VENDORED_PARSER_H: ${{ inputs.vendored_parser_h_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 flags2env-tooling/scripts/verify-vendored-parser.py \
+            --consumer-root consumer \
+            --canonical-root flags2env-parser \
+            --parser-c-path "$VENDORED_PARSER_C" \
+            --parser-h-path "$VENDORED_PARSER_H"
 
       - name: Install real shell runtimes
         shell: bash
