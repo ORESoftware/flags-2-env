@@ -73,6 +73,9 @@ NON_SECRET_TOKEN_METADATA = {
     "ISSUER",
     "AUDIENCE",
 }
+NON_SECRET_KEY_METADATA = {
+    "GRACE",
+}
 EXACT_SECRET_ENVS = {
     "OTEL_EXPORTER_OTLP_HEADERS",
     "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
@@ -95,8 +98,9 @@ def is_secret_bearing_env(env: str) -> bool:
     """Return whether an environment name represents secret material.
 
     `*_TOKEN_TTL_*` and similar names describe token metadata, not the token
-    value itself. Keep that exception deliberately narrow and continue
-    rejecting any additional secret marker in the same name.
+    value itself. Likewise, `*_KEY_GRACE_*` describes lifecycle timing for a
+    domain key rather than key material. Keep both exceptions deliberately
+    narrow and continue rejecting any additional secret marker in the name.
     """
 
     if env in EXACT_SECRET_ENVS:
@@ -112,6 +116,12 @@ def is_secret_bearing_env(env: str) -> bool:
             segment == "TOKEN"
             and index + 1 < len(segments)
             and segments[index + 1] in NON_SECRET_TOKEN_METADATA
+        ):
+            continue
+        if (
+            segment == "KEY"
+            and index + 1 < len(segments)
+            and segments[index + 1] in NON_SECRET_KEY_METADATA
         ):
             continue
         return True
