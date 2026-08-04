@@ -25,6 +25,7 @@ CURRENT_DIR_RE = re.compile(
     re.MULTILINE,
 )
 CONTRACT_LITERAL_RE = re.compile(r"\.cli-flags\.toml")
+RAW_STRING_START_RE = re.compile(r'(?:b|c)?r(#+)?"')
 LONG_RUNNING_KINDS = {"server", "mcp", "worker"}
 IGNORED_RUST_PATH_PARTS = {
     ".git",
@@ -194,12 +195,35 @@ def check_rust_pin(
     return errors
 
 
-def strip_rust_comments(source: str) -> str:
-    """Remove Rust comments while preserving strings and character literals.
+def starts_rust_char_literal(source: str, index: int) -> bool:
+    """Distinguish a character literal from a lifetime such as `'static`."""
 
-    The compliance rule needs to see the `.cli-flags.toml` string literal but
-    must not flag examples mentioned only in comments. This scanner handles
-    nested block comments and keeps quoted/raw-string contents intact.
+    if index >= len(source) or source[index] != "'" or index + 2 >= len(source):
+        return False
+    cursor = index + 1
+    if source[cursor] in "\r\n'":
+        return False
+    if source[cursor] != "\\":
+        return cursor + 1 < len(source) and source[cursor + 1] == "'"
+
+    cursor += 1
+    if cursor >= len(source):
+        return False
+    if source[cursor] == "u" and cursor + 1 < len(source) and source[cursor + 1] == "{":
+        closing_brace = source.find("}", cursor + 2)
+        return (
+            closing_brace >= 0
+            and closing_brace + 1 < len(source)
+            and source[closing_brace + 1] == "'"
+        )
+    return cursor + 1 < len(source) and source[cursor + 1] == "'"
+
+
+def strip_rust_comments(source: str) -> str:
+    """Remove Rust comments while preserving code and literal positions.
+
+    Rust block comments may nest. Newlines and total character width are kept
+    so later diagnostics and proximity checks remain stable.
     """
 
     output: list[str] = []
@@ -283,7 +307,7 @@ def strip_rust_comments(source: str) -> str:
             index += 2
             continue
 
-        raw_match = re.match(r'(?:b)?r(#+)?"', source[index:])
+        raw_match = RAW_STRING_START_RE.match(source, index)
         if raw_match:
             token = raw_match.group(0)
             raw_hashes = len(raw_match.group(1) or "")
@@ -296,9 +320,79 @@ def strip_rust_comments(source: str) -> str:
             output.append(char)
             index += 1
             continue
-        if char == "'":
+        if char == "'" and starts_rust_char_literal(source, index):
             in_char = True
             output.append(char)
+            index += 1
+            continue
+
+        output.append(char)
+        index += 1
+
+    return "".join(output)
+
+
+def mask_rust_literals(source: str) -> str:
+    """Mask string/character contents while preserving source positions."""
+
+    output: list[str] = []
+    index = 0
+    in_string = False
+    in_char = False
+    escape = False
+    raw_hashes: int | None = None
+
+    while index < len(source):
+        char = source[index]
+
+        if raw_hashes is not None:
+            if char == '"' and source.startswith("#" * raw_hashes, index + 1):
+                width = 1 + raw_hashes
+                output.extend(" " * width)
+                index += width
+                raw_hashes = None
+                continue
+            output.append("\n" if char == "\n" else " ")
+            index += 1
+            continue
+
+        if in_string:
+            output.append("\n" if char == "\n" else " ")
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            index += 1
+            continue
+
+        if in_char:
+            output.append("\n" if char == "\n" else " ")
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == "'":
+                in_char = False
+            index += 1
+            continue
+
+        raw_match = RAW_STRING_START_RE.match(source, index)
+        if raw_match:
+            token = raw_match.group(0)
+            raw_hashes = len(raw_match.group(1) or "")
+            output.extend(" " * len(token))
+            index += len(token)
+            continue
+        if char == '"':
+            in_string = True
+            output.append(" ")
+            index += 1
+            continue
+        if char == "'" and starts_rust_char_literal(source, index):
+            in_char = True
+            output.append(" ")
             index += 1
             continue
 
@@ -320,13 +414,16 @@ def iter_production_rust_sources(root: Path) -> Iterable[Path]:
 
 
 def source_resolves_contract_from_cwd(source: str) -> bool:
-    source = strip_rust_comments(source)
-    contract_positions = [match.start() for match in CONTRACT_LITERAL_RE.finditer(source)]
+    without_comments = strip_rust_comments(source)
+    code_only = mask_rust_literals(without_comments)
+    contract_positions = [
+        match.start() for match in CONTRACT_LITERAL_RE.finditer(without_comments)
+    ]
     if not contract_positions:
         return False
-    for current_dir in CURRENT_DIR_RE.finditer(source):
+    for current_dir in CURRENT_DIR_RE.finditer(code_only):
         start = max(0, current_dir.start() - 256)
-        end = min(len(source), current_dir.end() + 2048)
+        end = min(len(without_comments), current_dir.end() + 2048)
         if any(start <= position <= end for position in contract_positions):
             return True
     return False
