@@ -28,6 +28,14 @@ class ConsumerCompliancePolicyTests(unittest.TestCase):
             with self.subTest(env=env):
                 self.assertFalse(MODULE.is_secret_bearing_env(env))
 
+    def test_domain_key_grace_metadata_is_not_key_material(self) -> None:
+        for env in [
+            "LMX_IDLE_KEY_GRACE_MS",
+            "LOCK_KEY_GRACE_SECONDS",
+        ]:
+            with self.subTest(env=env):
+                self.assertFalse(MODULE.is_secret_bearing_env(env))
+
     def test_secret_values_and_compound_connection_strings_remain_blocked(self) -> None:
         for env in [
             "API_TOKEN",
@@ -47,6 +55,8 @@ class ConsumerCompliancePolicyTests(unittest.TestCase):
             "AUTH_TOKEN_TTL_SECRET",
             "API_TOKEN_EXPIRY_PASSWORD",
             "ACCESS_TOKEN_LIFETIME_KEY",
+            "LOCK_KEY_GRACE_SECRET",
+            "LOCK_KEY_GRACE_PASSWORD",
         ]:
             with self.subTest(env=env):
                 self.assertTrue(MODULE.is_secret_bearing_env(env))
