@@ -3,8 +3,9 @@
 
 The canonical C audit remains the source of truth for contract syntax and parser
 semantics. This companion check enforces cross-repository adoption policy:
-immutable pins, strict unknown-option handling, and secret-only environment
-variables staying out of the flag surface.
+immutable pins, strict unknown-option handling, secret-only environment
+variables staying out of the flag surface, and trusted contract discovery for
+long-running Rust processes.
 """
 
 from __future__ import annotations
@@ -19,6 +20,32 @@ from typing import Any, Iterable
 
 PIN_RE = re.compile(r"^[0-9a-f]{40}$")
 ENV_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+CURRENT_DIR_RE = re.compile(
+    r"(?:std\s*::\s*)?(?:env\s*::\s*)?current_dir\s*\(",
+    re.MULTILINE,
+)
+CONTRACT_LITERAL_RE = re.compile(r"\.cli-flags\.toml")
+RAW_STRING_START_RE = re.compile(r'(?:b|c)?r(#+)?"')
+LONG_RUNNING_KINDS = {"server", "mcp", "worker"}
+IGNORED_RUST_PATH_PARTS = {
+    ".git",
+    ".nix",
+    ".venv",
+    "benches",
+    "build",
+    "dist",
+    "examples",
+    "fixture",
+    "fixtures",
+    "generated",
+    "node_modules",
+    "target",
+    "test",
+    "tests",
+    "third_party",
+    "vendor",
+    "venv",
+}
 SECRET_SEGMENTS = {
     "TOKEN",
     "SECRET",
@@ -135,7 +162,9 @@ def find_flags2env_dependency(manifest: dict[str, Any]) -> Any:
     return None
 
 
-def check_rust_pin(root: Path, manifest_path: str, lock_path: str, parser_ref: str) -> list[str]:
+def check_rust_pin(
+    root: Path, manifest_path: str, lock_path: str, parser_ref: str
+) -> list[str]:
     errors: list[str] = []
     try:
         manifest_file = safe_child(root, manifest_path, "Rust manifest")
@@ -147,18 +176,276 @@ def check_rust_pin(root: Path, manifest_path: str, lock_path: str, parser_ref: s
         manifest = tomllib.load(handle)
     dependency = find_flags2env_dependency(manifest)
     if not isinstance(dependency, dict):
-        errors.append("Cargo.toml must declare flags2env as a git table with an immutable rev")
+        errors.append(
+            "Cargo.toml must declare flags2env as a git table with an immutable rev"
+        )
     else:
         if dependency.get("git") != UPSTREAM_GIT:
             errors.append(f"flags2env git source must be {UPSTREAM_GIT}")
         if dependency.get("rev") != parser_ref:
             errors.append("flags2env Cargo rev must exactly match parser_ref")
         if any(key in dependency for key in ("branch", "tag", "version")):
-            errors.append("flags2env dependency must not combine rev with branch, tag, or version")
+            errors.append(
+                "flags2env dependency must not combine rev with branch, tag, or version"
+            )
 
     lock_text = lock_file.read_text(encoding="utf-8")
     if UPSTREAM_GIT not in lock_text or parser_ref not in lock_text:
         errors.append("Cargo.lock does not contain the exact flags2env git revision")
+    return errors
+
+
+def starts_rust_char_literal(source: str, index: int) -> bool:
+    """Distinguish a character literal from a lifetime such as `'static`."""
+
+    if index >= len(source) or source[index] != "'" or index + 2 >= len(source):
+        return False
+    cursor = index + 1
+    if source[cursor] in "\r\n'":
+        return False
+    if source[cursor] != "\\":
+        return cursor + 1 < len(source) and source[cursor + 1] == "'"
+
+    cursor += 1
+    if cursor >= len(source):
+        return False
+    if source[cursor] == "u" and cursor + 1 < len(source) and source[cursor + 1] == "{":
+        closing_brace = source.find("}", cursor + 2)
+        return (
+            closing_brace >= 0
+            and closing_brace + 1 < len(source)
+            and source[closing_brace + 1] == "'"
+        )
+    return cursor + 1 < len(source) and source[cursor + 1] == "'"
+
+
+def strip_rust_comments(source: str) -> str:
+    """Remove Rust comments while preserving code and literal positions.
+
+    Rust block comments may nest. Newlines and total character width are kept
+    so later diagnostics and proximity checks remain stable.
+    """
+
+    output: list[str] = []
+    index = 0
+    block_depth = 0
+    in_line_comment = False
+    in_string = False
+    in_char = False
+    escape = False
+    raw_hashes: int | None = None
+
+    while index < len(source):
+        char = source[index]
+        nxt = source[index + 1] if index + 1 < len(source) else ""
+
+        if in_line_comment:
+            if char == "\n":
+                in_line_comment = False
+                output.append(char)
+            else:
+                output.append(" ")
+            index += 1
+            continue
+
+        if block_depth:
+            if char == "/" and nxt == "*":
+                block_depth += 1
+                output.extend((" ", " "))
+                index += 2
+                continue
+            if char == "*" and nxt == "/":
+                block_depth -= 1
+                output.extend((" ", " "))
+                index += 2
+                continue
+            output.append("\n" if char == "\n" else " ")
+            index += 1
+            continue
+
+        if raw_hashes is not None:
+            if char == '"' and source.startswith("#" * raw_hashes, index + 1):
+                output.append(char)
+                output.extend("#" * raw_hashes)
+                index += 1 + raw_hashes
+                raw_hashes = None
+                continue
+            output.append(char)
+            index += 1
+            continue
+
+        if in_string:
+            output.append(char)
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            index += 1
+            continue
+
+        if in_char:
+            output.append(char)
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == "'":
+                in_char = False
+            index += 1
+            continue
+
+        if char == "/" and nxt == "/":
+            in_line_comment = True
+            output.extend((" ", " "))
+            index += 2
+            continue
+        if char == "/" and nxt == "*":
+            block_depth = 1
+            output.extend((" ", " "))
+            index += 2
+            continue
+
+        raw_match = RAW_STRING_START_RE.match(source, index)
+        if raw_match:
+            token = raw_match.group(0)
+            raw_hashes = len(raw_match.group(1) or "")
+            output.extend(token)
+            index += len(token)
+            continue
+
+        if char == '"':
+            in_string = True
+            output.append(char)
+            index += 1
+            continue
+        if char == "'" and starts_rust_char_literal(source, index):
+            in_char = True
+            output.append(char)
+            index += 1
+            continue
+
+        output.append(char)
+        index += 1
+
+    return "".join(output)
+
+
+def mask_rust_literals(source: str) -> str:
+    """Mask string/character contents while preserving source positions."""
+
+    output: list[str] = []
+    index = 0
+    in_string = False
+    in_char = False
+    escape = False
+    raw_hashes: int | None = None
+
+    while index < len(source):
+        char = source[index]
+
+        if raw_hashes is not None:
+            if char == '"' and source.startswith("#" * raw_hashes, index + 1):
+                width = 1 + raw_hashes
+                output.extend(" " * width)
+                index += width
+                raw_hashes = None
+                continue
+            output.append("\n" if char == "\n" else " ")
+            index += 1
+            continue
+
+        if in_string:
+            output.append("\n" if char == "\n" else " ")
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            index += 1
+            continue
+
+        if in_char:
+            output.append("\n" if char == "\n" else " ")
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == "'":
+                in_char = False
+            index += 1
+            continue
+
+        raw_match = RAW_STRING_START_RE.match(source, index)
+        if raw_match:
+            token = raw_match.group(0)
+            raw_hashes = len(raw_match.group(1) or "")
+            output.extend(" " * len(token))
+            index += len(token)
+            continue
+        if char == '"':
+            in_string = True
+            output.append(" ")
+            index += 1
+            continue
+        if char == "'" and starts_rust_char_literal(source, index):
+            in_char = True
+            output.append(" ")
+            index += 1
+            continue
+
+        output.append(char)
+        index += 1
+
+    return "".join(output)
+
+
+def iter_production_rust_sources(root: Path) -> Iterable[Path]:
+    for path in sorted(root.rglob("*.rs")):
+        relative = path.relative_to(root)
+        folded_parts = {part.casefold() for part in relative.parts}
+        if folded_parts & IGNORED_RUST_PATH_PARTS:
+            continue
+        if path.name.endswith(("_test.rs", "_tests.rs")):
+            continue
+        yield path
+
+
+def source_resolves_contract_from_cwd(source: str) -> bool:
+    without_comments = strip_rust_comments(source)
+    code_only = mask_rust_literals(without_comments)
+    contract_positions = [
+        match.start() for match in CONTRACT_LITERAL_RE.finditer(without_comments)
+    ]
+    if not contract_positions:
+        return False
+    for current_dir in CURRENT_DIR_RE.finditer(code_only):
+        start = max(0, current_dir.start() - 256)
+        end = min(len(without_comments), current_dir.end() + 2048)
+        if any(start <= position <= end for position in contract_positions):
+            return True
+    return False
+
+
+def check_trusted_contract_resolution(root: Path, kind: str) -> list[str]:
+    if kind not in LONG_RUNNING_KINDS:
+        return []
+
+    errors: list[str] = []
+    for path in iter_production_rust_sources(root):
+        try:
+            source = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            errors.append(f"{path.relative_to(root)} is not valid UTF-8 Rust source")
+            continue
+        if source_resolves_contract_from_cwd(source):
+            errors.append(
+                f"{path.relative_to(root)} resolves .cli-flags.toml from the process "
+                "current working directory; long-running consumers must use an "
+                "explicit reviewed override and executable/package-relative trusted paths"
+            )
     return errors
 
 
@@ -167,7 +454,9 @@ def main() -> int:
     parser.add_argument("--root", default=".")
     parser.add_argument("--contract", default=".cli-flags.toml")
     parser.add_argument("--parser-ref", required=True)
-    parser.add_argument("--kind", choices=("server", "mcp", "cli", "worker"), required=True)
+    parser.add_argument(
+        "--kind", choices=("server", "mcp", "cli", "worker"), required=True
+    )
     parser.add_argument("--rust-manifest")
     parser.add_argument("--cargo-lock", default="Cargo.lock")
     args = parser.parse_args()
@@ -192,7 +481,9 @@ def main() -> int:
 
     parse = contract.get("parse", {})
     if isinstance(parse, dict) and parse.get("allow_unknown") is True:
-        errors.append("parse.allow_unknown must be false or omitted for compliant executables")
+        errors.append(
+            "parse.allow_unknown must be false or omitted for compliant executables"
+        )
 
     flags = list(iter_flag_tables(contract, ""))
     if not flags:
@@ -208,21 +499,34 @@ def main() -> int:
             errors.append(f"{flag.path} and {previous} both map to {flag.env}")
         secret_bearing = is_secret_bearing_env(flag.env)
         if secret_bearing:
-            errors.append(f"{flag.path} exposes secret-bearing env {flag.env}; keep it environment-only")
+            errors.append(
+                f"{flag.path} exposes secret-bearing env {flag.env}; keep it environment-only"
+            )
         if flag.default_present and secret_bearing:
-            errors.append(f"{flag.path} gives secret-bearing env {flag.env} a default")
+            errors.append(
+                f"{flag.path} gives secret-bearing env {flag.env} a default"
+            )
 
     env_policy = contract.get("env", {})
     ignored = env_policy.get("ignore", []) if isinstance(env_policy, dict) else []
     if ignored and not isinstance(ignored, list):
         errors.append("env.ignore must be a TOML array")
     elif isinstance(ignored, list):
-        invalid_ignored = [value for value in ignored if not isinstance(value, str) or not ENV_RE.fullmatch(value)]
+        invalid_ignored = [
+            value
+            for value in ignored
+            if not isinstance(value, str) or not ENV_RE.fullmatch(value)
+        ]
         if invalid_ignored:
-            errors.append("env.ignore contains non-string or invalid environment names")
+            errors.append(
+                "env.ignore contains non-string or invalid environment names"
+            )
 
     if args.rust_manifest:
-        errors.extend(check_rust_pin(root, args.rust_manifest, args.cargo_lock, args.parser_ref))
+        errors.extend(
+            check_rust_pin(root, args.rust_manifest, args.cargo_lock, args.parser_ref)
+        )
+        errors.extend(check_trusted_contract_resolution(root, args.kind))
 
     if errors:
         for error in errors:
