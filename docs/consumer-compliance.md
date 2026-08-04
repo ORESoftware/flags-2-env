@@ -33,14 +33,27 @@ Ordinary pull-request checks need only `contents: read`.
 4. The contract owns at least one real process-level flag.
 5. Secret-bearing environment variables are not declared as flags or given defaults.
 6. Rust consumers use the exact upstream Git source and full immutable `rev`, with a matching committed `Cargo.lock`.
-7. The generated help menu renders successfully through wide and narrow pseudo-terminals, contains each visible option and description, and does not fall back to JSON.
-8. Bash completion parses, registers for `command_name`, executes in a real Bash process, and returns a declared option or command.
-9. Zsh completion parses, registers through `compinit`, autoloads in a real Zsh process, and contains declared candidates.
-10. Optional runtime and artifact checks are repository-controlled script files, not arbitrary workflow input commands.
-11. MCP consumers must provide a runtime/stdio smoke script so stdout protocol cleanliness is tested by the repository that owns the binary.
-12. CLI consumers must provide a runtime smoke script that checks the actual executable's help surface rather than only the canonical generator's table.
+7. Long-running Rust consumers (`server`, `mcp`, and `worker`) do not discover `.cli-flags.toml` from the ambient process current working directory.
+8. The generated help menu renders successfully through wide and narrow pseudo-terminals, contains each visible option and description, and does not fall back to JSON.
+9. Bash completion parses, registers for `command_name`, executes in a real Bash process, and returns a declared option or command.
+10. Zsh completion parses, registers through `compinit`, autoloads in a real Zsh process, and contains declared candidates.
+11. Optional runtime and artifact checks are repository-controlled script files, not arbitrary workflow input commands.
+12. MCP consumers must provide a runtime/stdio smoke script so stdout protocol cleanliness is tested by the repository that owns the binary.
+13. CLI consumers must provide a runtime smoke script that checks the actual executable's help surface rather than only the canonical generator's table.
 
 The canonical C audit remains the source of truth for syntax, aliases, subcommand scoping, type validation, duplicate destinations, and generated help/completion behavior. The Python policy checker adds cross-repository security and pinning rules. The shell-contract verifier exercises the canonical output in real terminal and shell runtimes.
+
+## Trusted contract discovery
+
+A flag contract is executable policy: it decides which process arguments are accepted, which environment destinations they may write, which defaults are applied, and what operators see in help and completion. Long-running or privileged processes must not silently select that policy from `current_dir()/.cli-flags.toml`. Service launchers, container `WORKDIR`, test harnesses, process supervisors, and operators can all change the working directory independently of the packaged binary.
+
+For `server`, `mcp`, and `worker` consumers, use this precedence instead:
+
+1. an explicit, documented environment override whose path must exist;
+2. a package-owned path relative to the executable, such as `../share/<package>/.cli-flags.toml`;
+3. an explicitly supported colocated artifact path beside the executable.
+
+Repository-local CLIs may intentionally use the current project directory as their policy boundary. That exception is represented by `kind: cli`; it must not be copied into daemons or protocol servers. Tests should prove that an attacker-controlled CWD contract is ignored, that the explicit override still works, and that the final release image contains the trusted package-relative contract.
 
 ## Central consumer-fleet verification
 
@@ -56,7 +69,7 @@ The canonical C audit remains the source of truth for syntax, aliases, subcomman
 6. installs both completion variants twice and verifies idempotency;
 7. records the consumer and tooling commit SHAs in the Actions summary.
 
-The fleet workflow runs when its data or tooling changes, on a daily schedule, and on manual dispatch. It is a cross-repository compatibility signal, not a replacement for the reusable workflow above: consumers still need repository-owned runtime and final-artifact smokes to prove their actual executable, container, protocol, parser pin, and secret boundary.
+The fleet workflow runs when its data or tooling changes, on a daily schedule, and on manual dispatch. It is a cross-repository compatibility signal, not a replacement for the reusable workflow above: consumers still need repository-owned runtime and final-artifact smokes to prove their actual executable, container, protocol, parser pin, secret boundary, and trusted contract path.
 
 ### Dependency-free mirrored consumers
 
@@ -96,8 +109,10 @@ Smoke scripts should be deterministic and credential-free. They should:
 - exercise one declared non-secret operational flag;
 - prove an undeclared secret-bearing flag fails closed;
 - avoid printing environment values or credentials;
+- for long-running consumers, launch from an attacker-controlled temporary CWD and prove the packaged contract remains authoritative;
+- prove a documented explicit contract-path override still works;
 - for CLIs, invoke the real binary's root and representative subcommand `--help` paths and assert the expected options/descriptions;
-- for containers, inspect the final runtime image and verify `.cli-flags.toml` is packaged;
+- for containers, inspect the final runtime image and verify `.cli-flags.toml` is packaged at the trusted path;
 - for MCP servers, verify normal startup writes no application diagnostics to stdout;
 - use test-only ports, temporary paths, and bounded timeouts.
 
