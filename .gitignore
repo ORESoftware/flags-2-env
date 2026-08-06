@@ -8,3 +8,7 @@ clients/*/.gradle/
 clients/dart/pubspec.lock
 __pycache__/
 *.log
+tmp
+temp
+tmp/worktrees
+temp/worktrees
