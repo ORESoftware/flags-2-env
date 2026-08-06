@@ -115,6 +115,8 @@ typedef struct {
   char env_audit_ignored_keys[F2E_MAX_ENV_FILE_KEYS][F2E_MAX_ENV];
   size_t env_audit_ignored_count;
   int invalid_env_audit_ignore;
+  int dotenv_enabled;  /* read ./.env at parse time; default on */
+  int dotenv_override; /* default for flags that do not declare dotenv_override */
   char help_url[F2E_MAX_VALUE];
   unsigned help_columns;
   int help_columns_configured;
