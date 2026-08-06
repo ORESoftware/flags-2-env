@@ -1217,6 +1217,7 @@ static int f2e_load_commands_table(F2EConfig *config,
 static int f2e_load_config(const char *config_path, F2EConfig *config) {
   memset(config, 0, sizeof(*config));
   config->allow_separated_values = 1;
+  config->dotenv_enabled = 1;
   config->help_columns = F2E_HELP_COL_DEFAULTS;
 
   FILE *file = fopen(config_path, "r");
