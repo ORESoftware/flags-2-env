@@ -30,6 +30,23 @@ extern "C" {
 const char *f2e_version(void);
 
 /*
+ * Value resolution, highest precedence first:
+ *   1. argv flags
+ *   2. the live process environment
+ *   3. ./.env in the process working directory
+ *   4. the [flags.*] default declared in .cli-flags.toml
+ * Steps 2 and 3 swap for a key that declares [flags.*] dotenv_override = true,
+ * or for every key when the config sets [env] override = true.
+ *
+ * Only ./.env is read: no upward walk, and no lookup next to an explicitly
+ * passed config path. A ./.env symlink is followed. Only [flags.*] env keys
+ * are taken from it. Parse-derived keys -- the command path, per-command
+ * markers, positionals, unknown options, and parse errors -- are never read
+ * from .env or the environment, so neither can forge them. Set
+ * FLAGS2ENV_DOTENV=0 or [env] load = false to skip .env entirely.
+ */
+
+/*
  * Parses argv using the nearest .cli-flags.toml found by walking upward from
  * the current working directory. Refuses to use $HOME/.cli-flags.toml. Returns
  * a heap-allocated JSON object string. Call f2e_free() with the returned pointer.
