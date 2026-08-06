@@ -6672,7 +6672,7 @@ char *f2e_parse_structured_from_file(const char *config_path, int argc, const ch
   }
 
   char *result = NULL;
-  if (flags_json && provided_flags_json && lists_ok &&
+  if (flags_json && provided_flags_json && dotenv_below_json && dotenv_above_json && lists_ok &&
       f2e_json_list_close(&subcommands) &&
       f2e_json_list_close(&extras) &&
       f2e_json_list_close(&unknown_options) &&
@@ -6683,6 +6683,10 @@ char *f2e_parse_structured_from_file(const char *config_path, int argc, const ch
                f2e_buffer_append(&out, flags_json) &&
                f2e_buffer_append(&out, ",\"providedFlags\":") &&
                f2e_buffer_append(&out, provided_flags_json) &&
+               f2e_buffer_append(&out, ",\"dotenv\":") &&
+               f2e_buffer_append(&out, dotenv_below_json) &&
+               f2e_buffer_append(&out, ",\"dotenvOverrides\":") &&
+               f2e_buffer_append(&out, dotenv_above_json) &&
                f2e_buffer_append(&out, ",\"command\":") &&
                f2e_buffer_append_json_string(&out, label) &&
                f2e_buffer_append(&out, ",\"subcommands\":") &&
