@@ -6662,6 +6662,8 @@ char *f2e_parse_structured_from_file(const char *config_path, int argc, const ch
 
   char *flags_json = f2e_pairs_to_json(pairs, F2E_MAX_PAIRS);
   char *provided_flags_json = f2e_pairs_to_json(provided_pairs, F2E_MAX_PAIRS);
+  char *dotenv_below_json = f2e_pairs_to_json(dotenv_below_pairs, F2E_MAX_PAIRS);
+  char *dotenv_above_json = f2e_pairs_to_json(dotenv_above_pairs, F2E_MAX_PAIRS);
   char label[F2E_MAX_VALUE];
   label[0] = '\0';
   if (path.depth > 0 &&
