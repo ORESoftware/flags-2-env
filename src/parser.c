@@ -1376,6 +1376,18 @@ static int f2e_load_config(const char *config_path, F2EConfig *config) {
                                     value)) {
           config->invalid_env_audit_ignore = 1;
         }
+      } else if (f2e_streq(key, "load_dotenv") || f2e_streq(key, "dotenv")) {
+        int parsed = 0;
+        if (f2e_parse_config_bool(value, &parsed)) {
+          config->dotenv_enabled = parsed;
+        }
+      } else if (f2e_streq(key, "dotenv_override") ||
+                 f2e_streq(key, "env_file_override") ||
+                 f2e_streq(key, "env_file_wins")) {
+        int parsed = 0;
+        if (f2e_parse_config_bool(value, &parsed)) {
+          config->dotenv_override = parsed;
+        }
       }
       continue;
     }
