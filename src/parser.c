@@ -6708,6 +6708,8 @@ char *f2e_parse_structured_from_file(const char *config_path, int argc, const ch
 
   f2e_free(flags_json);
   f2e_free(provided_flags_json);
+  f2e_free(dotenv_below_json);
+  f2e_free(dotenv_above_json);
   f2e_json_list_discard(&positionals);
   f2e_json_list_discard(&unknown_options);
   f2e_json_list_discard(&errors);
@@ -6715,6 +6717,8 @@ char *f2e_parse_structured_from_file(const char *config_path, int argc, const ch
   f2e_json_list_discard(&subcommands);
   free(pairs);
   free(provided_pairs);
+  free(dotenv_below_pairs);
+  free(dotenv_above_pairs);
   free(config);
   return result;
 }
