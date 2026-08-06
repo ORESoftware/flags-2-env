@@ -1524,6 +1524,14 @@ static int f2e_load_config(const char *config_path, F2EConfig *config) {
         current->has_default = 1;
         f2e_strlcpy(current->default_value, parsed, sizeof(current->default_value));
       }
+    } else if (f2e_streq(key, "dotenv_override") ||
+               f2e_streq(key, "env_file_override") ||
+               f2e_streq(key, "env_file_wins")) {
+      int parsed = 0;
+      if (f2e_parse_config_bool(value, &parsed)) {
+        current->dotenv_override = parsed;
+        current->dotenv_override_set = 1;
+      }
     } else if (f2e_streq(key, "help") || f2e_streq(key, "description") || f2e_streq(key, "example")) {
       char parsed[F2E_MAX_VALUE];
       if (f2e_parse_bare_value(value, parsed, sizeof(parsed))) {
