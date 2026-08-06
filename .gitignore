@@ -14,3 +14,7 @@ __pycache__/
 .zig-cache/
 .cache/
 .direnv/
+tmp
+temp
+tmp/worktrees
+temp/worktrees
