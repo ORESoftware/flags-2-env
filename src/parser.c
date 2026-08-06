@@ -6583,6 +6583,17 @@ char *f2e_parse_structured_from_file(const char *config_path, int argc, const ch
     f2e_apply_defaults(config, pairs, F2E_MAX_PAIRS);
   }
 
+  F2EDotEnv *dotenv = f2e_dotenv_open(config);
+  f2e_apply_env_sources(config,
+                        pairs,
+                        F2E_MAX_PAIRS,
+                        &path,
+                        dotenv,
+                        dotenv_below_pairs,
+                        dotenv_above_pairs,
+                        lists_ok ? &errors : NULL);
+  free(dotenv);
+
   f2e_scan_argv(config,
                 pairs,
                 F2E_MAX_PAIRS,
