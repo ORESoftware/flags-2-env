@@ -6534,8 +6534,13 @@ char *f2e_parse_structured_from_file(const char *config_path, int argc, const ch
     return NULL;
   }
   F2EPair *provided_pairs = (F2EPair *)calloc(F2E_MAX_PAIRS, sizeof(F2EPair));
-  if (!provided_pairs) {
+  F2EPair *dotenv_below_pairs = (F2EPair *)calloc(F2E_MAX_PAIRS, sizeof(F2EPair));
+  F2EPair *dotenv_above_pairs = (F2EPair *)calloc(F2E_MAX_PAIRS, sizeof(F2EPair));
+  if (!provided_pairs || !dotenv_below_pairs || !dotenv_above_pairs) {
     free(pairs);
+    free(provided_pairs);
+    free(dotenv_below_pairs);
+    free(dotenv_above_pairs);
     free(config);
     return NULL;
   }
