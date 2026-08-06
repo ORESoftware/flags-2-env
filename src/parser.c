@@ -6398,9 +6398,9 @@ char *f2e_parse_from_file(const char *config_path, int argc, const char *const a
   int allow_unknown = f2e_resolve_allow_unknown(config, argc, argv, &allow_unknown_forced);
 
   int lenient = 0;
+  F2ECommandPath path;
+  memset(&path, 0, sizeof(path));
   if (config->command_count > 0) {
-    F2ECommandPath path;
-    memset(&path, 0, sizeof(path));
     f2e_resolve_command_path(config, argc, argv, &path);
     /* a wrapper script may have consumed the subcommand before argv reached
        this parser; when nothing matched, fall back to lenient global
@@ -6421,6 +6421,17 @@ char *f2e_parse_from_file(const char *config_path, int argc, const char *const a
   } else {
     f2e_apply_defaults(config, pairs, F2E_MAX_PAIRS);
   }
+
+  F2EDotEnv *dotenv = f2e_dotenv_open(config);
+  f2e_apply_env_sources(config,
+                        pairs,
+                        F2E_MAX_PAIRS,
+                        &path,
+                        dotenv,
+                        NULL,
+                        NULL,
+                        track_errors ? &errors : NULL);
+  free(dotenv);
 
   f2e_scan_argv(config,
                 pairs,
