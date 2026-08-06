@@ -4,6 +4,8 @@ set -eu
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 FULL=0
 DRY_RUN=0
+ONLY=""
+MATCHED=0
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -13,8 +15,16 @@ while [ "$#" -gt 0 ]; do
     --dry-run)
       DRY_RUN=1
       ;;
+    --only)
+      shift
+      if [ "$#" -eq 0 ]; then
+        printf '%s\n' '--only requires a client label' >&2
+        exit 2
+      fi
+      ONLY="$1"
+      ;;
     *)
-      printf 'usage: %s [--full] [--dry-run]\n' "$0" >&2
+      printf 'usage: %s [--full] [--dry-run] [--only LABEL]\n' "$0" >&2
       exit 2
       ;;
   esac
@@ -25,6 +35,10 @@ run() {
   label="$1"
   image="$2"
   command="$3"
+  if [ -n "$ONLY" ] && [ "$ONLY" != "$label" ]; then
+    return
+  fi
+  MATCHED=1
   if [ "$DRY_RUN" -eq 1 ]; then
     printf '[dry-run] docker check %s: %s\n' "$label" "$image"
     printf '[dry-run] docker command %s: %s\n' "$label" "$command"
@@ -61,7 +75,7 @@ for directory, pattern in packages:
 PY'
 
 run java maven:3.9-eclipse-temurin-21 \
-  'mvn -q -f clients/java/pom.xml -DskipTests package source:jar-no-fork javadoc:jar && jar tf clients/java/target/flags2env-0.1.0.jar > /tmp/flags2env-java-jar-files && jar tf clients/java/target/flags2env-0.1.0-sources.jar > /tmp/flags2env-java-sources-files && jar tf clients/java/target/flags2env-0.1.0-javadoc.jar > /tmp/flags2env-java-javadoc-files && grep -Fxq com/oresoftware/flags2env/Flags2Env.class /tmp/flags2env-java-jar-files && grep -Fxq native/parser.c /tmp/flags2env-java-jar-files && grep -Fxq native/parser.h /tmp/flags2env-java-jar-files && grep -Fxq com/oresoftware/flags2env/Flags2Env.java /tmp/flags2env-java-sources-files && grep -Eq "(index|com/oresoftware/flags2env/Flags2Env)\.html$" /tmp/flags2env-java-javadoc-files && if grep -Eq "(^|/)(Flags2EnvTest\.java|Dockerfile|publish\.sh)$" /tmp/flags2env-java-jar-files /tmp/flags2env-java-sources-files /tmp/flags2env-java-javadoc-files; then printf "Maven artifact includes forbidden local file\n" >&2; exit 1; fi'
+  'mvn -q -f clients/java/pom.xml -DskipTests package && jar tf clients/java/target/flags2env-0.1.0.jar > /tmp/flags2env-java-jar-files && jar tf clients/java/target/flags2env-0.1.0-sources.jar > /tmp/flags2env-java-sources-files && jar tf clients/java/target/flags2env-0.1.0-javadoc.jar > /tmp/flags2env-java-javadoc-files && grep -Fxq com/oresoftware/flags2env/Flags2Env.class /tmp/flags2env-java-jar-files && grep -Fxq native/parser.c /tmp/flags2env-java-jar-files && grep -Fxq native/parser.h /tmp/flags2env-java-jar-files && grep -Fxq com/oresoftware/flags2env/Flags2Env.java /tmp/flags2env-java-sources-files && grep -Eq "(index|com/oresoftware/flags2env/Flags2Env)\.html$" /tmp/flags2env-java-javadoc-files && if grep -Eq "(^|/)(Flags2EnvTest\.java|Dockerfile|publish\.sh)$" /tmp/flags2env-java-jar-files /tmp/flags2env-java-sources-files /tmp/flags2env-java-javadoc-files; then printf "Maven artifact includes forbidden local file\n" >&2; exit 1; fi'
 
 run python python:3.12-bookworm \
   'cd clients/python && python -m pip install --no-cache-dir --upgrade build twine && rm -rf dist build *.egg-info && python -m build && python -m twine check dist/* && python - <<PY
@@ -103,16 +117,16 @@ int main() {
 EOF'
 
 run fortran gcc:13-bookworm \
-  'apt-get update && apt-get install -y --no-install-recommends gfortran && cc -std=c99 -Wall -Wextra -Wpedantic -O2 -fPIC -c clients/fortran/src/parser.c -Iclients/fortran/src -o /tmp/flags2env-parser.o && gfortran -c clients/fortran/src/flags2env.f90 -J /tmp -o /tmp/flags2env-fortran.o && gfortran -I /tmp clients/fortran/test.f90 /tmp/flags2env-fortran.o /tmp/flags2env-parser.o -o /tmp/flags2env-fortran-test && /tmp/flags2env-fortran-test'
+  'apt-get update && apt-get install -y --no-install-recommends gfortran-12 && cc -std=c99 -Wall -Wextra -Wpedantic -O2 -fPIC -c clients/fortran/src/parser.c -Iclients/fortran/src -o /tmp/flags2env-parser.o && gfortran-12 -c clients/fortran/src/flags2env.f90 -J /tmp -o /tmp/flags2env-fortran.o && gfortran-12 -I /tmp clients/fortran/test.f90 /tmp/flags2env-fortran.o /tmp/flags2env-parser.o -o /tmp/flags2env-fortran-test && /tmp/flags2env-fortran-test'
 
-run zig kassany/bookworm-ziglang:0.13.0 \
+run zig kassany/bookworm-ziglang:0.14.0 \
   'zig version && cd clients/zig && zig build test'
 
 run lua debian:bookworm \
   'apt-get update && apt-get install -y --no-install-recommends build-essential make luajit luarocks && make clean && make all && FLAGS2ENV_NATIVE_LIB=build/libflags2env.so luajit clients/lua/test.lua && luarocks lint clients/lua/flags2env-0.1.0-1.rockspec && luarocks lint clients/lua/flags2env-dev-1.rockspec'
 
-run php php:8.3-cli \
-  'apt-get update && apt-get install -y --no-install-recommends build-essential libffi-dev make composer unzip && docker-php-ext-install ffi && make clean && make all && php -d ffi.enable=true clients/php/test.php && cd clients/php && composer validate --strict && rm -f /tmp/flags2env-php-archive.zip && composer archive --format=zip --file=/tmp/flags2env-php-archive && unzip -Z1 /tmp/flags2env-php-archive.zip > /tmp/flags2env-php-archive-files && for required in lib.php README.md LICENSE composer.json; do grep -Eq "(^|/)$required$" /tmp/flags2env-php-archive-files || { printf "Composer archive missing %s\n" "$required" >&2; exit 1; }; done && if grep -Eq "(^|/)(Dockerfile|publish\.sh|test\.php)$" /tmp/flags2env-php-archive-files; then printf "Composer archive includes forbidden local file\n" >&2; exit 1; fi'
+run php php:8.3-cli-bookworm \
+  'apt-get update && apt-get install -y --no-install-recommends build-essential libffi-dev make unzip && curl -fsSL https://getcomposer.org/download/2.10.2/composer.phar -o /usr/local/bin/composer && echo "5ee7125f8a30a34d246cefdc0bc85b8a783b28f2aec968994118512350d28027  /usr/local/bin/composer" | sha256sum -c - && chmod +x /usr/local/bin/composer && docker-php-ext-install ffi && make clean && make all && php -d ffi.enable=true clients/php/test.php && cd clients/php && composer validate --strict && rm -f /tmp/flags2env-php-archive.zip && composer archive --format=zip --dir=/tmp --file=flags2env-php-archive && unzip -Z1 /tmp/flags2env-php-archive.zip > /tmp/flags2env-php-archive-files && for required in lib.php README.md LICENSE composer.json; do grep -Eq "(^|/)$required$" /tmp/flags2env-php-archive-files || { printf "Composer archive missing %s\n" "$required" >&2; exit 1; }; done && if grep -Eq "(^|/)(Dockerfile|publish\.sh|test\.php)$" /tmp/flags2env-php-archive-files; then printf "Composer archive includes forbidden local file\n" >&2; exit 1; fi'
 
 run dart dart:stable \
   'apt-get update && apt-get install -y --no-install-recommends build-essential make && make clean && make all && cd clients/dart && dart pub get && dart run test.dart && dart pub publish --dry-run'
@@ -121,10 +135,10 @@ run nim nimlang/nim:2.0.10 \
   'apt-get update && apt-get install -y --no-install-recommends build-essential make && make clean && make all && cd clients/nim && nimble check && cd ../.. && LD_LIBRARY_PATH=build nim c -r clients/nim/test.nim'
 
 run crystal crystallang/crystal:1.13.3 \
-  'apt-get update && apt-get install -y --no-install-recommends build-essential make && make clean && make all && cd clients/crystal && shards install --production && cd ../.. && LIBRARY_PATH=build LD_LIBRARY_PATH=build crystal clients/crystal/test.cr'
+  'apt-get update && apt-get install -y --no-install-recommends build-essential make && make clean && make all && cd clients/crystal && shards install && cd ../.. && LD_LIBRARY_PATH=/work/build crystal run --link-flags "-L/work/build" clients/crystal/test.cr'
 
 run r r-base:4.4.2 \
-  'apt-get update && apt-get install -y --no-install-recommends build-essential make && Rscript -e "install.packages(\"jsonlite\", repos=\"https://cloud.r-project.org\")" && R CMD INSTALL clients/r && cd tests/fixtures && Rscript -e "library(flags2env); parsed <- parse_flags(c(\"app\", \"--debug=t\", \"--port\", \"8181\")); stopifnot(parsed[[\"DEBUG\"]] == \"true\", parsed[[\"PORT\"]] == \"8181\")" && cd /work && R CMD build clients/r && R CMD check --no-manual flags2env_0.1.0.tar.gz && tar -tf flags2env_0.1.0.tar.gz > /tmp/flags2env-r-sdist-files && for required in DESCRIPTION NAMESPACE R/flags2env.R src/flags2env_r.c src/parser.c src/parser.h tests/smoke.R README.md LICENSE; do grep -Fxq "flags2env/$required" /tmp/flags2env-r-sdist-files || { printf "R source package missing %s\n" "$required" >&2; exit 1; }; done && if grep -Eq "/(Dockerfile|publish\.sh|.*\.Rcheck|flags2env_.*\.tar\.gz)$" /tmp/flags2env-r-sdist-files; then printf "R source package includes forbidden local file\n" >&2; exit 1; fi'
+  'apt-get update && apt-get install -y --no-install-recommends build-essential make && Rscript -e "install.packages(\"jsonlite\", repos=\"https://cloud.r-project.org\")" && R CMD INSTALL clients/r && cd tests/fixtures && Rscript -e "library(flags2env); parsed <- parse_flags(c(\"app\", \"--debug=t\", \"--port\", \"8181\")); stopifnot(parsed[[\"DEBUG\"]] == \"true\", parsed[[\"PORT\"]] == \"8181\")" && cd /work && R CMD build clients/r && R CMD check --no-manual flags2env_0.1.0.tar.gz && tar -tf flags2env_0.1.0.tar.gz > /tmp/flags2env-r-sdist-files && for required in DESCRIPTION NAMESPACE R/flags2env.R man/flags2env.Rd src/flags2env_r.c src/parser.c src/parser.h tests/smoke.R README.md LICENSE; do grep -Fxq "flags2env/$required" /tmp/flags2env-r-sdist-files || { printf "R source package missing %s\n" "$required" >&2; exit 1; }; done && if grep -Eq "/(Dockerfile|publish\.sh|.*\.Rcheck|flags2env_.*\.tar\.gz)$" /tmp/flags2env-r-sdist-files; then printf "R source package includes forbidden local file\n" >&2; exit 1; fi'
 
 run clojure clojure:temurin-21-tools-deps \
   'apt-get update && apt-get install -y --no-install-recommends maven && mvn -q -f clients/java/pom.xml -DskipTests install && cd clients/clojure && clojure -T:build jar && clojure -T:build source-jar && clojure -T:build javadoc-jar && jar tf target/flags2env-clojure-0.1.0.jar > /tmp/flags2env-clojure-jar-files && jar tf target/flags2env-clojure-0.1.0-sources.jar > /tmp/flags2env-clojure-sources-files && jar tf target/flags2env-clojure-0.1.0-javadoc.jar > /tmp/flags2env-clojure-javadoc-files && grep -Fxq com/oresoftware/flags2env.clj /tmp/flags2env-clojure-jar-files && grep -Fxq META-INF/maven/com.oresoftware/flags2env-clojure/pom.xml /tmp/flags2env-clojure-jar-files && grep -Fxq com/oresoftware/flags2env.clj /tmp/flags2env-clojure-sources-files && grep -Fxq README.md /tmp/flags2env-clojure-javadoc-files && if grep -Eq "(^|/)(Dockerfile|publish\.sh|build\.clj|deps\.edn|.*Test.*)$" /tmp/flags2env-clojure-jar-files /tmp/flags2env-clojure-sources-files /tmp/flags2env-clojure-javadoc-files; then printf "Clojure artifact includes forbidden local file\n" >&2; exit 1; fi'
@@ -133,10 +147,10 @@ run erlang-hex erlang:27 \
   'cd clients/erlang && rebar3 hex build package && mkdir -p /tmp/flags2env-erlang-hex && tar -xf _build/default/lib/flags2env/hex/flags2env-0.1.0.tar -C /tmp/flags2env-erlang-hex contents.tar.gz metadata.config && tar -tzf /tmp/flags2env-erlang-hex/contents.tar.gz > /tmp/flags2env-erlang-hex-files && for required in src/flags2env.erl src/flags2env.app.src c_src/flags2env_nif.c c_src/parser.c c_src/parser.h README.md LICENSE rebar.config; do grep -Fxq "$required" /tmp/flags2env-erlang-hex-files || { printf "Erlang Hex package missing %s\n" "$required" >&2; exit 1; }; done && grep -Fq "{<<\"name\">>,<<\"flags2env\">>}." /tmp/flags2env-erlang-hex/metadata.config && grep -Fq "{<<\"version\">>,<<\"0.1.0\">>}." /tmp/flags2env-erlang-hex/metadata.config && if grep -Eq "(^|/)(Dockerfile|publish\.sh|flags2env_test\.erl)$" /tmp/flags2env-erlang-hex-files; then printf "Erlang Hex package includes forbidden local file\n" >&2; exit 1; fi'
 
 run solidity node:22-bookworm \
-  'cd clients/solidity && npm install --no-package-lock --ignore-scripts && npm test && npm pack --dry-run --json > /tmp/flags2env-solidity-pack.json && for required in contracts/Flags2Env.sol package.json README.md LICENSE; do grep -Fq "\"path\":\"$required\"" /tmp/flags2env-solidity-pack.json || grep -Fq "\"path\": \"$required\"" /tmp/flags2env-solidity-pack.json || { printf "Solidity npm package missing %s\n" "$required" >&2; exit 1; }; done && if grep -Eq "\"path\"[[:space:]]*:[[:space:]]*\"(test\\.(js|ts)|Dockerfile|publish\\.sh)\"" /tmp/flags2env-solidity-pack.json; then printf "Solidity npm package includes forbidden local file\n" >&2; exit 1; fi'
+  'cd clients/solidity && npm ci --ignore-scripts && npm audit && npm test && npm pack --dry-run --json > /tmp/flags2env-solidity-pack.json && for required in contracts/Flags2Env.sol package.json README.md LICENSE; do grep -Fq "\"path\":\"$required\"" /tmp/flags2env-solidity-pack.json || grep -Fq "\"path\": \"$required\"" /tmp/flags2env-solidity-pack.json || { printf "Solidity npm package missing %s\n" "$required" >&2; exit 1; }; done && if grep -Eq "\"path\"[[:space:]]*:[[:space:]]*\"(test\\.(js|ts)|Dockerfile|publish\\.sh)\"" /tmp/flags2env-solidity-pack.json; then printf "Solidity npm package includes forbidden local file\n" >&2; exit 1; fi'
 
-run packaging debian:bookworm \
-  'sh scripts/audit-client-packaging.sh'
+run packaging node:24-bookworm \
+  'apt-get update && apt-get install -y --no-install-recommends build-essential perl ruby zip unzip && make clean && make all && sh scripts/audit-client-packaging.sh'
 
 if [ "$FULL" -eq 1 ]; then
   run jvm gradle:8.10-jdk21 \
@@ -156,4 +170,9 @@ if [ "$FULL" -eq 1 ]; then
 
   run julia julia:1.10 \
     'make clean && make all && LD_LIBRARY_PATH=build julia --project=clients/julia -e "using Pkg; Pkg.instantiate(); Pkg.test()"'
+fi
+
+if [ -n "$ONLY" ] && [ "$MATCHED" -eq 0 ]; then
+  printf 'unknown or disabled client label: %s\n' "$ONLY" >&2
+  exit 2
 fi

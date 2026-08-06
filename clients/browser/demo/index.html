@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <title>flags-2-env browser client</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">WebAssembly browser contract</p>
+        <h1>flags-2-env</h1>
+        <p>
+          This page runs the native C parser in WebAssembly. The TOML config is
+          written to an in-memory filesystem; no parser logic is duplicated in JavaScript.
+        </p>
+        <p id="status" role="status" aria-live="polite">Loading parser…</p>
+      </header>
+
+      <section aria-labelledby="argv-heading">
+        <h2 id="argv-heading">Arguments</h2>
+        <label for="argv-json">argv JSON</label>
+        <textarea id="argv-json" rows="5" spellcheck="false">["tool","serve","--port","8080","--debug"]</textarea>
+        <div class="actions" aria-label="Parser actions">
+          <button type="button" data-action="parse">Parse</button>
+          <button type="button" data-action="structured">Structured parse</button>
+          <button type="button" data-action="help">Help</button>
+          <button type="button" data-action="audit">Audit config</button>
+        </div>
+      </section>
+
+      <section aria-labelledby="coerce-heading">
+        <h2 id="coerce-heading">Typed coercion</h2>
+        <label for="coerce-json">Environment JSON</label>
+        <textarea id="coerce-json" rows="4" spellcheck="false">{"PORT":"8080","DEBUG":"true","TOOL_VERBOSE":"false"}</textarea>
+        <button type="button" data-action="coerce">Coerce</button>
+      </section>
+
+      <section aria-labelledby="output-heading">
+        <h2 id="output-heading">Output</h2>
+        <pre id="output" tabindex="0" aria-live="polite">Waiting for the parser.</pre>
+      </section>
+    </main>
+    <script type="module" src="./app.mjs"></script>
+  </body>
+</html>

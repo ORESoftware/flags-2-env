@@ -1,0 +1,9 @@
+[flags.mode]
+env = "MODE"
+type = "string"
+default = "safe"
+
+[help]
+columns = [
+  "options",
+  "env",

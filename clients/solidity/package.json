@@ -14,6 +14,9 @@
   "devDependencies": {
     "solc": "^0.8.20"
   },
+  "overrides": {
+    "tmp": "^0.2.6"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ORESoftware/flags-2-env.git"

@@ -1,0 +1,336 @@
+name: End-to-end
+
+on:
+  workflow_dispatch:
+    inputs:
+      r2g_ref:
+        description: "ORESoftware/r2g branch, tag, or SHA"
+        required: false
+        default: "61b62f4b9eae255cccf72b7152dced829589190c"
+      zed_cli_ref:
+        description: "zed-pkg/zed-cli branch, tag, or SHA"
+        required: false
+        default: "8d04bc598a4b0b464466cbec3c44d18cf2922137"
+      zed_interfaces_ref:
+        description: "zed-pkg/zed-interfaces branch, tag, or SHA"
+        required: false
+        default: "07d01604461d00e237c7d86ad3855464167574ec"
+  pull_request:
+    paths:
+      - ".github/workflows/e2e.yml"
+      - ".zpkg.toml"
+      - "Makefile"
+      - "clients/nodejs/**"
+      - "clients/bash/flags2env.bash"
+      - "clients/fsharp/**"
+      - "clients/zsh/flags2env.zsh"
+      - "package-lock.json"
+      - "package.json"
+      - "packaging/homebrew/**"
+      - "scripts/fuzz-smoke.sh"
+      - "scripts/verify-zed-package.sh"
+      - "src/**"
+      - "tests/allocation_failure.c"
+      - "tests/flags-2-env-e2e.sh"
+      - "tests/fuzz_parser.c"
+      - "tests/npm-package-e2e.mjs"
+  push:
+    paths:
+      - ".github/workflows/e2e.yml"
+      - ".zpkg.toml"
+      - "Makefile"
+      - "clients/nodejs/**"
+      - "clients/bash/flags2env.bash"
+      - "clients/fsharp/**"
+      - "clients/zsh/flags2env.zsh"
+      - "package-lock.json"
+      - "package.json"
+      - "packaging/homebrew/**"
+      - "scripts/fuzz-smoke.sh"
+      - "scripts/verify-zed-package.sh"
+      - "src/**"
+      - "tests/allocation_failure.c"
+      - "tests/flags-2-env-e2e.sh"
+      - "tests/fuzz_parser.c"
+      - "tests/npm-package-e2e.mjs"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: end-to-end-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sanitizers:
+    name: Sanitizers and fuzz smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Run API tests with AddressSanitizer and UBSan
+        shell: bash
+        run: |
+          set -euo pipefail
+          cc -std=c99 -O1 -g -fno-omit-frame-pointer \
+            -fsanitize=address,undefined -Isrc \
+            src/parser.c tests/api_hardening.c \
+            -o "$RUNNER_TEMP/api-hardening"
+          ASAN_OPTIONS=detect_leaks=1:strict_string_checks=1 \
+          UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 \
+            "$RUNNER_TEMP/api-hardening"
+
+      - name: Fail every parser allocation under sanitizers
+        shell: bash
+        run: |
+          set -euo pipefail
+          cc -std=c99 -O1 -g -fno-omit-frame-pointer \
+            -fsanitize=address,undefined -Isrc \
+            tests/allocation_failure.c \
+            -o "$RUNNER_TEMP/allocation-failure"
+          ASAN_OPTIONS=detect_leaks=1:strict_string_checks=1 \
+          UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 \
+            "$RUNNER_TEMP/allocation-failure" \
+            tests/subcommands-deep/.cli-flags.toml
+
+      - name: Fuzz public parser boundaries
+        env:
+          F2E_FUZZ_SECONDS: "30"
+          F2E_FUZZ_WORK_DIR: ${{ runner.temp }}/flags2env-fuzz
+        run: scripts/fuzz-smoke.sh
+
+  npm-package:
+    name: npm package (${{ matrix.os }}, Node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            node: "20"
+          - os: ubuntu-latest
+            node: "22"
+          - os: ubuntu-latest
+            node: "24"
+          - os: macos-latest
+            node: "22"
+          - os: windows-latest
+            node: "22"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Install packed artifact and exercise CLI, CJS, and ESM
+        run: node tests/npm-package-e2e.mjs
+
+      - name: Compile and run the native Windows CLI
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+          $installation = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $installation) {
+            throw "Visual Studio C++ build tools were not found"
+          }
+          $devcmd = Join-Path $installation "Common7\Tools\VsDevCmd.bat"
+          New-Item -ItemType Directory -Force "build\windows" | Out-Null
+          $compile = "`"$devcmd`" -arch=x64 -host_arch=x64 && cl /nologo /std:c11 /W4 /D_CRT_SECURE_NO_WARNINGS src\parser.c src\main.c /Fe:build\windows\flags2env.exe shell32.lib"
+          & $env:COMSPEC /d /s /c $compile
+          if ($LASTEXITCODE -ne 0) {
+            throw "MSVC compilation failed with exit code $LASTEXITCODE"
+          }
+          Push-Location "tests\fixtures"
+          try {
+            $actual = & "..\..\build\windows\flags2env.exe" app --port 8282 --debug
+            if ($LASTEXITCODE -ne 0) {
+              throw "native CLI exited with $LASTEXITCODE"
+            }
+            $parsed = $actual | ConvertFrom-Json
+            if ($parsed.PORT -ne "8282" -or $parsed.DEBUG -ne "true") {
+              throw "unexpected native CLI output: $actual"
+            }
+          } finally {
+            Pop-Location
+          }
+
+  homebrew:
+    name: Homebrew source install
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Build formula from this exact commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/flags-2-env-${GITHUB_SHA}.tar.gz"
+          brew tap-new --no-git flags2env/ci
+          tap_repo="$(brew --repository flags2env/ci)"
+          formula="$tap_repo/Formula/flags2env.rb"
+          git archive --format=tar.gz --prefix=flags-2-env-source/ HEAD -o "$archive"
+          sha="$(shasum -a 256 "$archive" | awk '{print $1}')"
+          brew ruby - "$archive" "$sha" "$formula" <<'RUBY'
+          source, sha, output = ARGV
+          formula = File.read("packaging/homebrew/Formula/flags2env.rb")
+          formula.sub!(
+            /^  url .*tag:.*$/,
+            "  url \"file://#{source}\"\n  sha256 \"#{sha}\""
+          )
+          formula.sub!(/^  head .*?\n/, "")
+          File.write(output, formula)
+          RUBY
+          HOMEBREW_NO_AUTO_UPDATE=1 brew install --build-from-source flags2env/ci/flags2env
+          brew test flags2env/ci/flags2env
+          brew linkage --test flags2env
+
+  r2g:
+    name: r2g downstream consumer
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: flags-2-env
+          persist-credentials: false
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ORESoftware/r2g
+          ref: ${{ inputs.r2g_ref || '61b62f4b9eae255cccf72b7152dced829589190c' }}
+          path: r2g
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "24"
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.13"
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: "stable"
+
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: stable
+
+      - name: Install Python package build tooling
+        run: python -m pip install --disable-pip-version-check build
+
+      - name: Pack the current flags-2-env source
+        id: flags2env
+        working-directory: flags-2-env
+        shell: bash
+        run: |
+          set -euo pipefail
+          tarball="$(npm pack --silent --pack-destination "$RUNNER_TEMP")"
+          echo "tarball=$RUNNER_TEMP/$tarball" >> "$GITHUB_OUTPUT"
+
+      - name: Install the exact artifact into r2g
+        working-directory: r2g
+        env:
+          R2G_FLAGS2ENV_PATH: ${{ runner.temp }}/no-local-flags2env
+        run: npm install --no-audit --no-fund --no-save '${{ steps.flags2env.outputs.tarball }}'
+
+      - name: Run r2g's flags contract and unit suite
+        working-directory: r2g
+        env:
+          R2G_FLAGS2ENV_PATH: ${{ runner.temp }}/no-local-flags2env
+        run: |
+          set -euo pipefail
+          npm test
+          npm run audit:cli
+
+      - name: Run r2g's real downstream package fixtures
+        working-directory: r2g
+        env:
+          R2G_E2E_ECOSYSTEMS: rust,go,python
+          R2G_FLAGS2ENV_PATH: ${{ runner.temp }}/no-local-flags2env
+        run: npm run test:e2e
+
+  zed-package:
+    name: zed package consumer
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: flags-2-env
+          persist-credentials: false
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: zed-pkg/zed-interfaces
+          ref: ${{ inputs.zed_interfaces_ref || '07d01604461d00e237c7d86ad3855464167574ec' }}
+          path: zed-interfaces
+          persist-credentials: false
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ inputs.zed_cli_ref || '8d04bc598a4b0b464466cbec3c44d18cf2922137' }}
+          path: zed-cli
+          persist-credentials: false
+
+      - name: Install Zsh for installed shell-contract tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes zsh
+
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
+        with:
+          workspaces: zed-cli
+
+      - name: Build zed
+        run: cargo build --locked --manifest-path zed-cli/Cargo.toml
+
+      - name: Pack flags-2-env twice and verify the zed artifact
+        working-directory: flags-2-env
+        shell: bash
+        run: |
+          set -euo pipefail
+          first="$RUNNER_TEMP/zed-pack-first"
+          second="$RUNNER_TEMP/zed-pack-second"
+          ../zed-cli/target/debug/zed pack --out "$first"
+          ../zed-cli/target/debug/zed pack --out "$second"
+          first_archive="$(find "$first" -maxdepth 1 -name '*.tar.gz' -print -quit)"
+          second_archive="$(find "$second" -maxdepth 1 -name '*.tar.gz' -print -quit)"
+          test -n "$first_archive"
+          test -n "$second_archive"
+          test "$(sha256sum "$first_archive" | awk '{print $1}')" = "$(sha256sum "$second_archive" | awk '{print $1}')"
+          tar -tzf "$first_archive" > "$RUNNER_TEMP/zed-package-files.txt"
+          grep -Fxq "pkg/.zpkg.toml" "$RUNNER_TEMP/zed-package-files.txt"
+          grep -Fxq "pkg/src/parser.c" "$RUNNER_TEMP/zed-package-files.txt"
+          grep -Fxq "pkg/clients/nodejs/lib.cjs" "$RUNNER_TEMP/zed-package-files.txt"
+          if grep -Eq '(^|/)(node_modules|build|target)/' "$RUNNER_TEMP/zed-package-files.txt"; then
+            echo "zed artifact contains a generated dependency/build directory" >&2
+            exit 1
+          fi
+
+      - name: Install the Zed artifact across native project layouts
+        working-directory: flags-2-env
+        env:
+          F2E_E2E_ROOT: ${{ runner.temp }}/flags-2-env-e2e
+        shell: bash
+        run: tests/flags-2-env-e2e.sh "$GITHUB_WORKSPACE/zed-cli/target/debug/zed"

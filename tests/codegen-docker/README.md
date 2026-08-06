@@ -5,7 +5,8 @@ This suite generates every supported interface from
 container image, and runs a small program against the resulting type.
 
 The Node.js target additionally installs the packed `@oresoftware/f2e` package
-and runs the full `parseFromArgs()` plus schema-backed `coerce()` flow.
+and runs the full default-free `parseOverridesFromArgs()` plus schema-backed
+`coerce()` flow, including environment/default/CLI precedence.
 
 Run the complete matrix:
 

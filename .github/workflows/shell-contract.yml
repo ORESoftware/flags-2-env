@@ -1,0 +1,105 @@
+name: Shell completion and terminal help
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/shell-contract.yml"
+      - ".cli-flags.toml"
+      - ".zpkg.toml"
+      - ".zpkg.lock"
+      - "Makefile"
+      - "scripts/verify-shell-contract.py"
+      - "src/**"
+      - "tests/subcommands/.cli-flags.toml"
+      - "tests/subcommands-deep/.cli-flags.toml"
+      - "tests/completion/**"
+  push:
+    paths:
+      - ".github/workflows/shell-contract.yml"
+      - ".cli-flags.toml"
+      - ".zpkg.toml"
+      - ".zpkg.lock"
+      - "Makefile"
+      - "scripts/verify-shell-contract.py"
+      - "src/**"
+      - "tests/subcommands/.cli-flags.toml"
+      - "tests/subcommands-deep/.cli-flags.toml"
+      - "tests/completion/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shell-contract-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shell-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Install real shell runtimes
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes zsh
+
+      - name: Validate package metadata and verifier syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fxq 'version = 1' .zpkg.lock
+          python3 -m py_compile scripts/verify-shell-contract.py
+
+      - name: Build canonical CLI
+        run: make cli
+
+      - name: Exercise package help and idempotent completion installation
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/flags2env-shell-canonical.log"
+          if ! python3 scripts/verify-shell-contract.py \
+            --cli build/flags2env \
+            --contract .cli-flags.toml \
+            --command flags2env \
+            --install >"$log" 2>&1; then
+            cat "$log"
+            exit 1
+          fi
+          cat "$log"
+
+      - name: Exercise nested subcommand help and completion
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/flags2env-shell-nested.log"
+          if ! python3 scripts/verify-shell-contract.py \
+            --cli build/flags2env \
+            --contract tests/subcommands/.cli-flags.toml \
+            --command gitish >"$log" 2>&1; then
+            cat "$log"
+            exit 1
+          fi
+          cat "$log"
+
+      - name: Exercise command-alias scope and value-consumption regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tests/completion/run.bash
+
+      - name: Upload shell contract diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: shell-contract-diagnostics
+          path: ${{ runner.temp }}/flags2env-shell-*.log
+          if-no-files-found: error
+          retention-days: 7

@@ -1,0 +1,46 @@
+[parse]
+command_env = "TOOL_COMMAND"
+errors_env = "TOOL_ERRORS"
+unknown_options_env = "TOOL_UNKNOWN_OPTIONS"
+
+[help]
+url = "https://github.com/ORESoftware/flags-2-env"
+columns = ["options", "env", "type", "default", "description"]
+
+[flags.verbose]
+env = "TOOL_VERBOSE"
+aliases = ["verbose"]
+short = "v"
+type = "bool"
+default = "false"
+help = "Enable verbose output."
+
+[commands.serve]
+help = "Run the browser demo service."
+env = "TOOL_SERVE"
+
+[commands.serve.flags.port]
+env = "PORT"
+aliases = ["port"]
+short = "p"
+type = "integer"
+default = 3000
+help = "TCP port used by the demo service."
+
+[commands.serve.flags.debug]
+env = "DEBUG"
+aliases = ["debug"]
+short = "d"
+type = "bool"
+default = "false"
+help = "Enable debug logging."
+
+[commands.serve.commands.worker]
+help = "Run a nested worker."
+env = "TOOL_WORKER"
+
+[commands.serve.commands.worker.flags.name]
+env = "WORKER_NAME"
+aliases = ["name"]
+type = "string"
+help = "Worker display name."

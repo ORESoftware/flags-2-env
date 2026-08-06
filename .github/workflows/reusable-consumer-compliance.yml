@@ -1,0 +1,231 @@
+name: Reusable flags2env consumer compliance
+
+on:
+  workflow_call:
+    inputs:
+      tooling_ref:
+        description: Full immutable flags-2-env commit SHA containing this reusable workflow and its verifier scripts
+        required: true
+        type: string
+      parser_ref:
+        description: Full immutable flags-2-env commit SHA actually shipped by the consumer
+        required: true
+        type: string
+      kind:
+        description: "Executable kind: server, mcp, cli, or worker"
+        required: true
+        type: string
+      command_name:
+        description: Command name used to generate and exercise help/completion
+        required: false
+        default: flags2env-consumer
+        type: string
+      contract_path:
+        description: Contract path relative to the consumer repository root
+        required: false
+        default: .cli-flags.toml
+        type: string
+      rust_manifest_path:
+        description: Optional Cargo.toml path relative to the consumer root
+        required: false
+        default: ""
+        type: string
+      cargo_lock_path:
+        description: Cargo.lock path relative to the consumer root
+        required: false
+        default: Cargo.lock
+        type: string
+      vendored_parser_c_path:
+        description: Optional parser.c path actually compiled by the consumer; requires vendored_parser_h_path
+        required: false
+        default: ""
+        type: string
+      vendored_parser_h_path:
+        description: Optional parser.h path actually compiled by the consumer; requires vendored_parser_c_path
+        required: false
+        default: ""
+        type: string
+      runtime_smoke_script:
+        description: Optional repository-controlled runtime smoke script path
+        required: false
+        default: ""
+        type: string
+      artifact_smoke_script:
+        description: Optional final image or release artifact smoke script path
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  compliance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Validate reusable workflow inputs
+        env:
+          COMMAND_NAME: ${{ inputs.command_name }}
+          KIND: ${{ inputs.kind }}
+          PARSER_REF: ${{ inputs.parser_ref }}
+          RUNTIME_SMOKE: ${{ inputs.runtime_smoke_script }}
+          TOOLING_REF: ${{ inputs.tooling_ref }}
+          VENDORED_PARSER_C: ${{ inputs.vendored_parser_c_path }}
+          VENDORED_PARSER_H: ${{ inputs.vendored_parser_h_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in PARSER_REF TOOLING_REF; do
+            value="${!name}"
+            [[ "$value" =~ ^[0-9a-f]{40}$ ]] || {
+              echo "$name must be a full lowercase commit SHA" >&2
+              exit 1
+            }
+          done
+          [[ "$COMMAND_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*$ ]] || {
+            echo 'command_name must be a safe shell command basename' >&2
+            exit 1
+          }
+          case "$KIND" in
+            server|mcp|cli|worker) ;;
+            *) echo "unsupported executable kind: $KIND" >&2; exit 1 ;;
+          esac
+          if [[ "$KIND" == mcp && -z "$RUNTIME_SMOKE" ]]; then
+            echo 'MCP consumers must provide a stdio/runtime smoke script' >&2
+            exit 1
+          fi
+          if [[ "$KIND" == cli && -z "$RUNTIME_SMOKE" ]]; then
+            echo 'CLI consumers must provide a runtime smoke script that checks the real --help surface' >&2
+            exit 1
+          fi
+          if [[ -n "$VENDORED_PARSER_C" && -z "$VENDORED_PARSER_H" ]] \
+            || [[ -z "$VENDORED_PARSER_C" && -n "$VENDORED_PARSER_H" ]]; then
+            echo 'vendored parser C and header paths must be supplied together' >&2
+            exit 1
+          fi
+
+      - name: Check out consumer
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: consumer
+          persist-credentials: false
+
+      - name: Check out immutable compliance tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ORESoftware/flags-2-env
+          ref: ${{ inputs.tooling_ref }}
+          path: flags2env-tooling
+          persist-credentials: false
+
+      - name: Check out exact shipped parser revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ORESoftware/flags-2-env
+          ref: ${{ inputs.parser_ref }}
+          path: flags2env-parser
+          persist-credentials: false
+
+      - name: Verify vendored parser byte identity
+        if: ${{ inputs.vendored_parser_c_path != '' || inputs.vendored_parser_h_path != '' }}
+        env:
+          VENDORED_PARSER_C: ${{ inputs.vendored_parser_c_path }}
+          VENDORED_PARSER_H: ${{ inputs.vendored_parser_h_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 flags2env-tooling/scripts/verify-vendored-parser.py \
+            --consumer-root consumer \
+            --canonical-root flags2env-parser \
+            --parser-c-path "$VENDORED_PARSER_C" \
+            --parser-h-path "$VENDORED_PARSER_H"
+
+      - name: Install real shell runtimes
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes zsh
+
+      - name: Build exact shipped parser CLI
+        run: make -C flags2env-parser cli
+
+      - name: Audit parser contract
+        env:
+          CONTRACT_PATH: ${{ inputs.contract_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          contract="$(realpath -e "consumer/$CONTRACT_PATH")"
+          case "$contract" in
+            "$GITHUB_WORKSPACE/consumer/"*) ;;
+            *) echo 'contract_path escapes the consumer checkout' >&2; exit 1 ;;
+          esac
+          flags2env-parser/build/flags2env audit "$contract"
+
+      - name: Enforce cross-repository compliance policy
+        env:
+          CONTRACT_PATH: ${{ inputs.contract_path }}
+          KIND: ${{ inputs.kind }}
+          PARSER_REF: ${{ inputs.parser_ref }}
+          RUST_MANIFEST_PATH: ${{ inputs.rust_manifest_path }}
+          CARGO_LOCK_PATH: ${{ inputs.cargo_lock_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(
+            --root consumer
+            --contract "$CONTRACT_PATH"
+            --parser-ref "$PARSER_REF"
+            --kind "$KIND"
+          )
+          if [[ -n "$RUST_MANIFEST_PATH" ]]; then
+            args+=(--rust-manifest "$RUST_MANIFEST_PATH" --cargo-lock "$CARGO_LOCK_PATH")
+          fi
+          python3 flags2env-tooling/scripts/verify-consumer-compliance.py "${args[@]}"
+
+      - name: Exercise terminal help and Bash/Zsh completion
+        env:
+          COMMAND_NAME: ${{ inputs.command_name }}
+          CONTRACT_PATH: ${{ inputs.contract_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          contract="$(realpath -e "consumer/$CONTRACT_PATH")"
+          case "$contract" in
+            "$GITHUB_WORKSPACE/consumer/"*) ;;
+            *) echo 'contract_path escapes the consumer checkout' >&2; exit 1 ;;
+          esac
+          python3 flags2env-tooling/scripts/verify-shell-contract.py \
+            --cli flags2env-parser/build/flags2env \
+            --contract "$contract" \
+            --command "$COMMAND_NAME"
+
+      - name: Run repository-controlled runtime smoke
+        if: ${{ inputs.runtime_smoke_script != '' }}
+        env:
+          SCRIPT_PATH: ${{ inputs.runtime_smoke_script }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate="$(realpath -e "consumer/$SCRIPT_PATH")"
+          case "$candidate" in
+            "$GITHUB_WORKSPACE/consumer/"*) ;;
+            *) echo 'runtime smoke script escapes the consumer checkout' >&2; exit 1 ;;
+          esac
+          bash "$candidate"
+
+      - name: Run final artifact smoke
+        if: ${{ inputs.artifact_smoke_script != '' }}
+        env:
+          SCRIPT_PATH: ${{ inputs.artifact_smoke_script }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate="$(realpath -e "consumer/$SCRIPT_PATH")"
+          case "$candidate" in
+            "$GITHUB_WORKSPACE/consumer/"*) ;;
+            *) echo 'artifact smoke script escapes the consumer checkout' >&2; exit 1 ;;
+          esac
+          bash "$candidate"

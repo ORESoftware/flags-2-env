@@ -1,0 +1,45 @@
+[package]
+org = "oresoftware"
+name = "flags-2-env"
+version = "0.1.0"
+description = "Portable nested CLI flag-to-environment parser and polyglot bindings"
+license = "MIT"
+keywords = ["cli", "flags", "environment", "polyglot"]
+
+[package.repository]
+vcs = "git"
+url = "https://github.com/ORESoftware/flags-2-env"
+
+[publish]
+include_readme = true
+tag_format = "v{version}"
+smoke_test = "sh \"$ZED_PKG_TEST_TARGET/scripts/verify-zed-package.sh\" \"$ZED_PKG_TEST_TARGET\""
+exclude = [
+  ".build/**",
+  "clients/**/.dart_tool/**",
+  "clients/**/.gradle/**",
+  "clients/**/.zig-cache/**",
+  "clients/**/_build/**",
+  "clients/**/build/**",
+  "clients/**/target/**",
+]
+
+[build]
+command = "make cli"
+outputs = [
+  "build/flags2env",
+  "clients/bash/flags2env.bash",
+  "clients/zsh/flags2env.zsh",
+  "scripts/verify-zed-package.sh",
+  "scripts/verify-shell-contract.py",
+  ".cli-flags.toml",
+]
+
+[bin]
+flags2env = "build/flags2env"
+
+[install]
+adapter = "none"
+
+[scripts]
+test = "make test"

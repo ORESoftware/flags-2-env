@@ -15,6 +15,7 @@
 #define NATIVE_SCALARS_CONFIG "tests/native-scalars/.cli-flags.toml"
 #define CODEGEN_CONFIG "tests/codegen/.cli-flags.toml"
 #define SUBCOMMANDS_CONFIG "tests/subcommands/.cli-flags.toml"
+#define SUBCOMMANDS_DEEP_CONFIG "tests/subcommands-deep/.cli-flags.toml"
 #define INVALID_CODEGEN_CONFIG "tests/audit-invalid-codegen/.cli-flags.toml"
 #define INVALID_TYPED_CONFIG "tests/audit-invalid-typed/.cli-flags.toml"
 #define INVALID_TYPE_CONFIG "tests/audit-invalid-type/.cli-flags.toml"
@@ -179,6 +180,25 @@ int main(void) {
   expect_json("coerce rejects non-object input",
               f2e_coerce_json_from_file(CODEGEN_CONFIG, "[]"),
               "{\"ok\":false,\"errors\":[\"values must be a valid JSON object with supported value sizes\"]}");
+
+  expect_json("coerce omits inactive command-scoped defaults",
+              f2e_coerce_json_from_file(SUBCOMMANDS_CONFIG, "{}"),
+              "{\"ok\":true,\"value\":{\"GITISH_VERBOSE\":false}}");
+
+  expect_json("coerce applies defaults for parse.command_env path",
+              f2e_coerce_json_from_file(SUBCOMMANDS_CONFIG,
+                                        "{\"GITISH_COMMAND\":\"remote add\"}"),
+              "{\"ok\":true,\"value\":{\"GITISH_VERBOSE\":false,\"GITISH_REMOTE_ADD_FETCH\":false,\"GITISH_COMMAND\":\"remote add\"}}");
+
+  expect_json("coerce applies defaults for active command marker",
+              f2e_coerce_json_from_file(SUBCOMMANDS_CONFIG,
+                                        "{\"GITISH_CMD_REMOTE_ADD\":\"true\"}"),
+              "{\"ok\":true,\"value\":{\"GITISH_VERBOSE\":false,\"GITISH_REMOTE_ADD_FETCH\":false,\"GITISH_CMD_REMOTE_ADD\":true}}");
+
+  expect_json("coerce preserves explicit scoped values without a command",
+              f2e_coerce_json_from_file(SUBCOMMANDS_CONFIG,
+                                        "{\"GITISH_REMOTE_ADD_FETCH\":\"true\"}"),
+              "{\"ok\":true,\"value\":{\"GITISH_VERBOSE\":false,\"GITISH_REMOTE_ADD_FETCH\":true}}");
 
   char *typescript_types = f2e_generate_types_from_file(CODEGEN_CONFIG, "typescript", "CliStuff");
   expect_contains("typescript codegen interface", typescript_types, "export interface CliStuff");
@@ -403,7 +423,17 @@ int main(void) {
   expect_contains("structured parse has subcommands channel", structured, "\"subcommands\":[\"remote\",\"add\"]");
   expect_contains("structured parse has extras channel", structured, "\"extras\":[\"abc\"]");
   expect_contains("structured parse keeps flags map", structured, "\"GITISH_REMOTE_ADD_FETCH\":\"true\"");
+  expect_contains("structured parse exposes argv-only flags", structured,
+                  "\"providedFlags\":{\"GITISH_COMMAND\":\"remote add\",\"GITISH_CMD_REMOTE_ADD\":\"true\",\"GITISH_REMOTE_ADD_FETCH\":\"true\",\"GITISH_POSITIONALS\":\"[\\\"gitish\\\",\\\"abc\\\"]\"}");
   f2e_free(structured);
+
+  char *structured_defaults = f2e_parse_structured_json_argv_from_file(
+      CODEGEN_CONFIG, "[\"app\",\"--ratio=1.25\"]");
+  expect_contains("structured flags retain schema defaults", structured_defaults,
+                  "\"flags\":{\"PORT\":\"3000\",\"RATIO\":\"1.25\",\"DEBUG\":\"false\"");
+  expect_contains("structured provided flags omit schema defaults", structured_defaults,
+                  "\"providedFlags\":{\"RATIO\":\"1.25\"}");
+  f2e_free(structured_defaults);
 
   char *structured_missing = f2e_parse_structured_from_file(NULL, 0, NULL);
   if (structured_missing) {
@@ -419,6 +449,32 @@ int main(void) {
   char *resolved_none = f2e_resolve_commands_json_argv_from_file(SUBCOMMANDS_CONFIG, "[\"gitish\",\"--verbose\"]");
   expect_contains("resolve commands empty path", resolved_none, "{\"path\":[],\"label\":\"\"}");
   f2e_free(resolved_none);
+
+  char *resolved_aliases = f2e_resolve_commands_json_argv_from_file(
+      SUBCOMMANDS_DEEP_CONFIG,
+      "[\"tool\",\"workspace\",\"remotes\",\"create\",\"annotate\"]");
+  expect_json("resolve nested aliases returns canonical path", resolved_aliases,
+              "{\"path\":[\"ws\",\"remote\",\"add\",\"tag\"],\"label\":\"ws remote add tag\"}");
+
+  char *structured_aliases = f2e_parse_structured_json_argv_from_file(
+      SUBCOMMANDS_DEEP_CONFIG,
+      "[\"tool\",\"workspace\",\"remotes\",\"create\",\"annotate\",\"--name\",\"v2\"]");
+  expect_contains("structured aliases report canonical command", structured_aliases,
+                  "\"command\":\"ws remote add tag\"");
+  expect_contains("structured aliases report canonical subcommands", structured_aliases,
+                  "\"subcommands\":[\"ws\",\"remote\",\"add\",\"tag\"]");
+  expect_contains("structured aliases retain scoped flags", structured_aliases,
+                  "\"TOOL_TAG_NAME\":\"v2\"");
+  f2e_free(structured_aliases);
+
+  char *alias_help = f2e_help_table_for_json_argv_from_file(
+      SUBCOMMANDS_DEEP_CONFIG,
+      "tool",
+      "[\"tool\",\"workspace\",\"remotes\",\"create\",\"annotate\",\"--help\"]",
+      110);
+  expect_contains("alias help renders canonical command path", alias_help,
+                  "Command: tool ws remote add tag [OPTIONS]");
+  f2e_free(alias_help);
 
   char *json_argv_help = f2e_help_table_for_json_argv_from_file(SUBCOMMANDS_CONFIG,
                                                                 "gitish",

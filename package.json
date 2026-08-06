@@ -66,10 +66,12 @@
     "configuration"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=20.17"
+  },
+  "dependencies": {
+    "node-gyp": "^12.4.0"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
-    "node-gyp": "^10.0.0"
+    "@types/node": "^22.0.0"
   }
 }

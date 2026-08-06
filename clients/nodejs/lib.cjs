@@ -92,9 +92,11 @@ function parseFromArgs(argv = process.argv, options = {}) {
 }
 
 /**
- * Structured parse: {flags, command, subcommands, extras, unknownOptions,
- * errors} as separate channels (dashdash-style), so nothing is packed into —
- * or shadowed by — env keys. `flags` is the same map parse() returns.
+ * Structured parse: {flags, providedFlags, command, subcommands, extras,
+ * unknownOptions, errors} as separate channels (dashdash-style), so nothing
+ * is packed into — or shadowed by — env keys. `flags` is the same
+ * default-bearing map parse() returns; `providedFlags` contains only
+ * argv-derived values and command markers.
  */
 function parseStructured(argv = process.argv, options = {}) {
   if (!Array.isArray(argv)) {
@@ -106,6 +108,34 @@ function parseStructured(argv = process.argv, options = {}) {
     ? native().parseStructuredJson(argvJson, options.configPath)
     : native().parseStructuredJson(argvJson);
   return withHelpMetadata(JSON.parse(raw), argvItems, argvJson, options);
+}
+
+/**
+ * Returns strict argv-derived overrides suitable for
+ * `{...process.env, ...overrides}`. Schema defaults are deliberately omitted
+ * so they cannot shadow real environment values.
+ */
+function parseOverridesFromArgs(argv = process.argv, options = {}) {
+  const parsed = parseStructured(argv, options);
+  if (!parsed.providedFlags || typeof parsed.providedFlags !== "object") {
+    throw new TypeError("the loaded flags2env addon does not support argv-only overrides");
+  }
+  if (parsed.unknownOptions.length > 0 || parsed.errors.length > 0) {
+    throw new TypeError(
+      `flags2env rejected ${parsed.unknownOptions.length} unknown option(s) and ${parsed.errors.length} invalid value(s); call parseStructured() for details`,
+    );
+  }
+  Object.defineProperties(parsed.providedFlags, {
+    isHelpMenu: {
+      enumerable: false,
+      value: parsed.isHelpMenu,
+    },
+    printTable: {
+      enumerable: false,
+      value: parsed.printTable,
+    },
+  });
+  return parsed.providedFlags;
 }
 
 /** Resolves just the [commands.*] path for argv: {path: string[], label}. */
@@ -190,6 +220,7 @@ function coerce(values = process.env, options = {}) {
 module.exports = {
   parse,
   parseFromArgs,
+  parseOverridesFromArgs,
   parseStructured,
   resolveCommands,
   parseProcess,

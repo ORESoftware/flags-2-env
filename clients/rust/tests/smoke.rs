@@ -1,4 +1,5 @@
-use flags2env::Flags2Env;
+use flags2env::{CoercionError, Flags2Env};
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
@@ -13,6 +14,14 @@ impl Drop for CwdGuard {
     }
 }
 
+#[allow(non_snake_case)]
+#[derive(Debug, Deserialize)]
+struct GeneratedConfig {
+    PORT: i64,
+    DEBUG: bool,
+    COLOR: bool,
+}
+
 #[test]
 fn parse_finds_parent_config() {
     let original = env::current_dir().unwrap();
@@ -22,14 +31,29 @@ fn parse_finds_parent_config() {
 
     let sdk = unsafe { Flags2Env::load(Some(library.to_str().unwrap())).unwrap() };
     env::set_current_dir(config_root.join("nested/deeper")).unwrap();
-    let parsed = sdk.parse(&["app".into(), "--debug=t".into(), "--port".into(), "8181".into()], None).unwrap();
+    let parsed = sdk
+        .parse(
+            &[
+                "app".into(),
+                "--debug=t".into(),
+                "--port".into(),
+                "8181".into(),
+            ],
+            None,
+        )
+        .unwrap();
 
     assert_eq!(parsed.get("DEBUG"), Some(&"true".to_string()));
     assert_eq!(parsed.get("PORT"), Some(&"8181".to_string()));
     assert_eq!(parsed.get("COLOR"), Some(&"true".to_string()));
 
     let config_path = config_root.join(".cli-flags.toml");
-    let explicit = sdk.parse(&["app".into(), "--debug=f".into()], Some(config_path.to_str().unwrap())).unwrap();
+    let explicit = sdk
+        .parse(
+            &["app".into(), "--debug=f".into()],
+            Some(config_path.to_str().unwrap()),
+        )
+        .unwrap();
     assert_eq!(explicit.get("DEBUG"), Some(&"false".to_string()));
     assert_eq!(explicit.get("PORT"), Some(&"3000".to_string()));
 
@@ -37,7 +61,11 @@ fn parse_finds_parent_config() {
         ("PORT".to_string(), "env".to_string()),
         ("KEEP".to_string(), "1".to_string()),
     ]);
-    sdk.apply(&mut combined, &["app".into(), "--port".into(), "8181".into()]).unwrap();
+    sdk.apply(
+        &mut combined,
+        &["app".into(), "--port".into(), "8181".into()],
+    )
+    .unwrap();
     assert_eq!(combined.get("PORT"), Some(&"8181".to_string()));
     assert_eq!(combined.get("KEEP"), Some(&"1".to_string()));
     assert_eq!(combined.get("COLOR"), Some(&"true".to_string()));
@@ -58,9 +86,23 @@ fn parse_structured_returns_separate_channels() {
         .collect();
     let structured = sdk.parse_structured(&argv, Some(config)).unwrap();
     assert_eq!(structured.command, "remote add");
-    assert_eq!(structured.subcommands, vec!["remote".to_string(), "add".to_string()]);
-    assert_eq!(structured.extras, vec!["abc".to_string(), "efg".to_string()]);
-    assert_eq!(structured.flags.get("GITISH_REMOTE_ADD_FETCH"), Some(&"true".to_string()));
+    assert_eq!(
+        structured.subcommands,
+        vec!["remote".to_string(), "add".to_string()]
+    );
+    assert_eq!(
+        structured.extras,
+        vec!["abc".to_string(), "efg".to_string()]
+    );
+    assert_eq!(
+        structured.flags.get("GITISH_REMOTE_ADD_FETCH"),
+        Some(&"true".to_string())
+    );
+    assert_eq!(
+        structured.provided_flags.get("GITISH_REMOTE_ADD_FETCH"),
+        Some(&"true".to_string())
+    );
+    assert!(!structured.provided_flags.contains_key("GITISH_VERBOSE"));
     assert!(structured.unknown_options.is_empty());
     assert!(structured.errors.is_empty());
 
@@ -69,16 +111,73 @@ fn parse_structured_returns_separate_channels() {
         .map(|value| value.to_string())
         .collect();
     let dashed_result = sdk.parse_structured(&dashed, Some(config)).unwrap();
-    assert_eq!(dashed_result.extras, vec!["xyz".to_string(), "-q".to_string()]);
+    assert_eq!(
+        dashed_result.extras,
+        vec!["xyz".to_string(), "-q".to_string()]
+    );
 
     let resolved = sdk.resolve_commands(&argv, Some(config)).unwrap();
     assert_eq!(resolved.path, vec!["remote".to_string(), "add".to_string()]);
     assert_eq!(resolved.label, "remote add");
 }
 
+#[test]
+fn dynamic_coerce_returns_typed_config_and_structured_errors() {
+    let library = compile_test_library();
+    let config_root = create_config_tree();
+    let config_path = config_root.join(".cli-flags.toml");
+    let config = config_path.to_str().unwrap();
+    let sdk = unsafe { Flags2Env::load(Some(library.to_str().unwrap())).unwrap() };
+
+    let defaults_only = sdk.parse_structured(&["app".into()], Some(config)).unwrap();
+    let mut environment = HashMap::from([("PORT".to_string(), "9191".to_string())]);
+    environment.extend(defaults_only.provided_flags);
+    let env_typed: GeneratedConfig = sdk.coerce(&environment, Some(config)).unwrap();
+    assert_eq!(env_typed.PORT, 9191);
+
+    let parsed = sdk
+        .parse_structured(
+            &[
+                "app".into(),
+                "--debug=t".into(),
+                "--port".into(),
+                "8181".into(),
+            ],
+            Some(config),
+        )
+        .unwrap();
+    let mut combined = HashMap::from([("PORT".to_string(), "9191".to_string())]);
+    combined.extend(parsed.provided_flags);
+    let typed: GeneratedConfig = sdk.coerce(&combined, Some(config)).unwrap();
+
+    assert_eq!(typed.PORT, 8181);
+    assert!(typed.DEBUG);
+    assert!(typed.COLOR);
+
+    let invalid = HashMap::from([
+        ("PORT".to_string(), "not-an-integer".to_string()),
+        ("DEBUG".to_string(), "maybe".to_string()),
+    ]);
+    let error = sdk
+        .coerce::<GeneratedConfig, _>(&invalid, Some(config))
+        .expect_err("invalid values must fail");
+    let messages = error.validation_errors().expect("schema validation errors");
+
+    assert!(matches!(&error, CoercionError::Validation { .. }));
+    assert_eq!(messages.len(), 2);
+    for key in ["PORT", "DEBUG"] {
+        assert!(
+            messages.iter().any(|message| message.contains(key)),
+            "missing validation message for {key}: {messages:?}"
+        );
+    }
+}
+
 fn create_subcommand_config() -> PathBuf {
     let root = temp_dir("subcommands");
-    fs::write(root.join(".cli-flags.toml"), r#"[flags.verbose]
+    fs::write(
+        root.join(".cli-flags.toml"),
+        r#"[flags.verbose]
 env = "GITISH_VERBOSE"
 aliases = ["verbose"]
 type = "bool"
@@ -94,7 +193,9 @@ env = "GITISH_REMOTE_ADD_FETCH"
 aliases = ["fetch"]
 short = "f"
 type = "bool"
-"#).unwrap();
+"#,
+    )
+    .unwrap();
     root
 }
 
@@ -113,15 +214,22 @@ fn compile_test_library() -> PathBuf {
     command.args(["native/parser.c", "-o"]);
     command.arg(&output);
 
-    let status = command.status().expect("failed to start C compiler for Rust smoke test");
-    assert!(status.success(), "failed to compile native/parser.c for Rust smoke test");
+    let status = command
+        .status()
+        .expect("failed to start C compiler for Rust smoke test");
+    assert!(
+        status.success(),
+        "failed to compile native/parser.c for Rust smoke test"
+    );
     output
 }
 
 fn create_config_tree() -> PathBuf {
     let root = temp_dir("config");
     fs::create_dir_all(root.join("nested/deeper")).unwrap();
-    fs::write(root.join(".cli-flags.toml"), r#"[flags.port]
+    fs::write(
+        root.join(".cli-flags.toml"),
+        r#"[flags.port]
 env = "PORT"
 aliases = ["port"]
 type = "integer"
@@ -140,7 +248,9 @@ env = "COLOR"
 aliases = ["color"]
 type = "bool"
 default = "true"
-"#).unwrap();
+"#,
+    )
+    .unwrap();
     root
 }
 

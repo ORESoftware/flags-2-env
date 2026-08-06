@@ -6,6 +6,10 @@ open System.Runtime.InteropServices
 open System.Text
 open System.Text.Json
 
+/// Public marker used by consumers that need the assembly containing the
+/// native bindings (for example, to register a DllImport resolver).
+type LibraryMarker = class end
+
 module Flags2Env =
   [<DllImport("flags2env", CallingConvention = CallingConvention.Cdecl)>]
   extern nativeint f2e_parse_json_argv(nativeint argvJson)

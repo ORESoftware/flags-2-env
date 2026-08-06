@@ -203,6 +203,26 @@ case "$actual" in
     ;;
 esac
 
+actual="$("$ROOT_DIR/scripts/audit-changed-cli-flags.sh" \
+  "tests/audit-invalid-subcommand-nesting/.cli-flags.toml" \
+  "tests/env-audit-drift/.env")"
+case "$actual" in
+  *'cli-flags audit: skipping expected-negative fixture tests/audit-invalid-subcommand-nesting/.cli-flags.toml'*)
+    ;;
+  *)
+    printf 'Expected changed-config helper to skip negative fixtures:\n%s\n' "$actual" >&2
+    exit 1
+    ;;
+esac
+case "$actual" in
+  *'cli-flags audit: skipping expected-negative fixture tests/env-audit-drift/.cli-flags.toml'*)
+    ;;
+  *)
+    printf 'Expected changed-env helper to skip negative fixtures:\n%s\n' "$actual" >&2
+    exit 1
+    ;;
+esac
+
 set +e
 actual="$("$CLI" audit env "$ROOT_DIR/tests/env-audit-drift/.cli-flags.toml" "$ROOT_DIR/tests/env-audit-drift/.env")"
 status=$?
@@ -609,6 +629,8 @@ run_deep_case() {
 DEEP_BASE_POSITIONALS="\"TOOL_POSITIONALS\":\"[\\\"$CLI\\\",\\\"tool\\\"]\""
 # four-level command path with a flag scoped four levels deep
 run_deep_case "{\"TOOL_COMMAND\":\"ws remote add tag\",\"TOOL_CMD_TAG\":\"true\",\"TOOL_DRY_RUN\":\"false\",\"TOOL_TAG_NAME\":\"v1\",\"TOOL_TAG_DRY_RUN\":\"true\",$DEEP_BASE_POSITIONALS}" tool ws remote add tag --name v1 -n
+# aliases at every level resolve to the same canonical command path and marker
+run_deep_case "{\"TOOL_COMMAND\":\"ws remote add tag\",\"TOOL_CMD_TAG\":\"true\",\"TOOL_DRY_RUN\":\"false\",\"TOOL_TAG_NAME\":\"v2\",\"TOOL_TAG_DRY_RUN\":\"true\",$DEEP_BASE_POSITIONALS}" tool workspace remotes create annotate --name v2 -n
 # -n resolves to the ws-scoped flag one level down
 run_deep_case "{\"TOOL_COMMAND\":\"ws\",\"TOOL_DRY_RUN\":\"false\",\"TOOL_WS_DRY_RUN\":\"true\",$DEEP_BASE_POSITIONALS}" tool ws -n
 # a separated flag value that looks like a command must not select the command
@@ -641,7 +663,7 @@ fi
 
 deep_help="$(cd "$SUBCOMMANDS_DEEP_DIR" && COLUMNS=110 "$CLI" tool --help)"
 case "$deep_help" in
-  *'Command: tool [COMMAND] [OPTIONS]'*'| ws '*'| ws remote '*'| ws remote add '*'| ws remote add tag '*)
+  *'Command: tool [COMMAND] [OPTIONS]'*'| ws, workspace '*'| ws remote, remotes '*'| ws remote add, create '*'| ws remote add tag, annotate '*)
     ;;
   *)
     printf 'Deep help should list the full nested command tree:\n%s\n' "$deep_help" >&2
@@ -699,9 +721,70 @@ set +e
 actual="$("$CLI" audit "$INVALID_SUBCOMMAND_CONFIG")"
 status=$?
 set -e
-expected='{"ok":false,"errorCount":3,"warningCount":0,"errors":["commands.add env \"GIT_CMD_ADD\" collides with flags.marker env","commands.add and commands.stage share a name or alias","flags.all and flags.everything both use short flag \"A\""],"warnings":[]}'
+expected='{"ok":false,"errorCount":4,"warningCount":0,"errors":["commands.add env \"GIT_CMD_ADD\" collides with flags.marker env","commands.add and commands.stage share a name or alias","commands.commit alias \"commit\" duplicates its canonical name","flags.all and flags.everything both use short flag \"A\""],"warnings":[]}'
 if [ "$status" -eq 0 ] || [ "$actual" != "$expected" ]; then
   printf 'Expected failing subcommand audit status and report:\n%s\nActual status: %s\nActual: %s\n' "$expected" "$status" "$actual" >&2
+  exit 1
+fi
+
+MULTILINE_ARRAY_DIR="$ROOT_DIR/tests/multiline-arrays"
+MULTILINE_ARRAY_CONFIG="$MULTILINE_ARRAY_DIR/.cli-flags.toml"
+actual="$("$CLI" audit "$MULTILINE_ARRAY_CONFIG")"
+expected='{"ok":true,"errorCount":0,"warningCount":0,"errors":[],"warnings":[]}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected clean multiline-array audit: %s\nActual:                                %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+
+actual="$(cd "$MULTILINE_ARRAY_DIR" && "$CLI" multiline --operation-mode fast --color=without-color)"
+expected='{"MULTILINE_COMMAND":"","MODE":"fast","COLOR":"false"}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected multiline global aliases: %s\nActual:                            %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+
+actual="$(cd "$MULTILINE_ARRAY_DIR" && "$CLI" multiline ship --destination production --color=yes-color)"
+expected='{"MULTILINE_COMMAND":"deploy","MODE":"safe","COLOR":"true","TARGET":"production"}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected multiline command aliases: %s\nActual:                             %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+
+multiline_help="$(cd "$MULTILINE_ARRAY_DIR" && COLUMNS=132 "$CLI" multiline --help)"
+case "$multiline_help" in
+  *'| Option(s)'*'| Env'*'| Description'*'More help: https://example.com/multiline'*)
+    ;;
+  *)
+    printf 'Unexpected multiline-array help table:\n%s\n' "$multiline_help" >&2
+    exit 1
+    ;;
+esac
+case "$multiline_help" in
+  *'| Type'*|*'| Default'*)
+    printf 'Multiline help.columns should omit type/default:\n%s\n' "$multiline_help" >&2
+    exit 1
+    ;;
+esac
+
+INVALID_MULTILINE_TYPE_CONFIG="$ROOT_DIR/tests/audit-invalid-multiline-type/.cli-flags.toml"
+set +e
+actual="$("$CLI" audit "$INVALID_MULTILINE_TYPE_CONFIG")"
+status=$?
+set -e
+expected='{"ok":false,"errorCount":1,"warningCount":0,"errors":["env.ignore must be a list of env var names"],"warnings":[]}'
+if [ "$status" -eq 0 ] || [ "$actual" != "$expected" ]; then
+  printf 'Expected invalid multiline element audit failure:\n%s\nActual status: %s\nActual: %s\n' "$expected" "$status" "$actual" >&2
+  exit 1
+fi
+
+INVALID_MULTILINE_UNCLOSED_CONFIG="$ROOT_DIR/tests/audit-invalid-multiline-unclosed/.cli-flags.toml"
+set +e
+actual="$("$CLI" audit "$INVALID_MULTILINE_UNCLOSED_CONFIG")"
+status=$?
+set -e
+expected='{"ok":false,"errorCount":1,"warningCount":0,"errors":["help.columns must be a list of supported table column names"],"warnings":[]}'
+if [ "$status" -eq 0 ] || [ "$actual" != "$expected" ]; then
+  printf 'Expected unclosed multiline array audit failure:\n%s\nActual status: %s\nActual: %s\n' "$expected" "$status" "$actual" >&2
   exit 1
 fi
 

@@ -50,10 +50,18 @@ if [ -z "$files" ]; then
   exit 0
 fi
 
-status_file="$(mktemp)"
-printf '0\n' >"$status_file"
+status=0
 
-printf '%s\n' "$files" | while IFS= read -r file; do
+while IFS= read -r file; do
+  case "$file" in
+    tests/audit-invalid*/.cli-flags.toml | \
+    tests/audit-unsafe-shell/.cli-flags.toml | \
+    tests/env-audit-drift/.cli-flags.toml)
+      printf 'cli-flags audit: skipping expected-negative fixture %s\n' "$file"
+      continue
+      ;;
+  esac
+
   case "$file" in
     /*) path="$file" ;;
     *) path="$ROOT_DIR/$file" ;;
@@ -72,7 +80,7 @@ printf '%s\n' "$files" | while IFS= read -r file; do
   printf '%s\n' "$report"
 
   if [ "$audit_status" -ne 0 ]; then
-    printf '1\n' >"$status_file"
+    status=1
     if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
       printf '::error file=%s::flags2env config audit failed\n' "$file"
     fi
@@ -97,13 +105,13 @@ printf '%s\n' "$files" | while IFS= read -r file; do
   printf '%s\n' "$env_report"
 
   if [ "$env_audit_status" -ne 0 ]; then
-    printf '1\n' >"$status_file"
+    status=1
     if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
       printf '::error file=%s::flags2env env audit failed\n' "$env_file"
     fi
   fi
-done
+done <<EOF
+$files
+EOF
 
-status="$(cat "$status_file")"
-rm -f "$status_file"
 exit "$status"

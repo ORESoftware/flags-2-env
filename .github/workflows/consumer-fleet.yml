@@ -1,0 +1,230 @@
+name: Consumer fleet shell contracts
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/consumer-fleet.yml"
+      - "consumer-fleet.json"
+      - "scripts/render-consumer-fleet.py"
+      - "scripts/verify-consumer-compliance.py"
+      - "scripts/verify-shell-contract.py"
+      - "tests/test_consumer_compliance_policy.py"
+      - "tests/test_consumer_fleet.py"
+      - "tests/test_shell_contract_verifier.py"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/consumer-fleet.yml"
+      - "consumer-fleet.json"
+      - "scripts/render-consumer-fleet.py"
+      - "scripts/verify-consumer-compliance.py"
+      - "scripts/verify-shell-contract.py"
+      - "tests/test_consumer_compliance_policy.py"
+      - "tests/test_consumer_fleet.py"
+      - "tests/test_shell_contract_verifier.py"
+  schedule:
+    - cron: "17 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    name: Validate and render the consumer matrix
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.fleet.outputs.matrix }}
+      tooling_ref: ${{ steps.source.outputs.tooling_ref }}
+      consumer_count: ${{ steps.fleet.outputs.consumer_count }}
+      central_count: ${{ steps.fleet.outputs.central_count }}
+      in_repo_count: ${{ steps.fleet.outputs.in_repo_count }}
+      in_repo_evidence: ${{ steps.fleet.outputs.in_repo_evidence }}
+    steps:
+      - name: Check out fleet definition
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Validate GitHub Actions syntax
+        uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+        with:
+          args: .github/workflows/consumer-fleet.yml
+
+      - name: Compile and test fleet safety tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            scripts/render-consumer-fleet.py \
+            scripts/verify-consumer-compliance.py \
+            scripts/verify-shell-contract.py \
+            tests/test_consumer_compliance_policy.py \
+            tests/test_consumer_fleet.py \
+            tests/test_shell_contract_verifier.py
+          python3 -m unittest \
+            tests/test_consumer_compliance_policy.py \
+            tests/test_consumer_fleet.py \
+            tests/test_shell_contract_verifier.py
+
+      - name: Render the immutable read-only matrix
+        id: fleet
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/render-consumer-fleet.py \
+            --fleet consumer-fleet.json \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Select the exact canonical tooling commit under review
+        id: source
+        env:
+          SOURCE_REF: ${{ github.event.pull_request.head.sha || github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_REF" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "tooling source is not an immutable full commit: $SOURCE_REF" >&2
+            exit 1
+          }
+          echo "tooling_ref=$SOURCE_REF" >> "$GITHUB_OUTPUT"
+
+      - name: Summarize fleet scope and private-repository evidence
+        env:
+          BASELINE_REF: ${{ steps.fleet.outputs.tooling_ref }}
+          CENTRAL_COUNT: ${{ steps.fleet.outputs.central_count }}
+          CONSUMER_COUNT: ${{ steps.fleet.outputs.consumer_count }}
+          IN_REPO_COUNT: ${{ steps.fleet.outputs.in_repo_count }}
+          IN_REPO_EVIDENCE: ${{ steps.fleet.outputs.in_repo_evidence }}
+          TOOLING_REF: ${{ steps.source.outputs.tooling_ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          import os
+
+          evidence = json.loads(os.environ["IN_REPO_EVIDENCE"])
+          print("### flags2env consumer fleet")
+          print()
+          print(f"- Total contracts: {os.environ['CONSUMER_COUNT']}")
+          print(f"- Central read-only matrix: {os.environ['CENTRAL_COUNT']}")
+          print(f"- In-repository verification: {os.environ['IN_REPO_COUNT']}")
+          print(f"- Tooling under review: `{os.environ['TOOLING_REF']}`")
+          print(f"- Minimum reviewed baseline: `{os.environ['BASELINE_REF']}`")
+          print("- Central checkout permissions: read-only")
+          if evidence:
+              print("- Private-repository evidence:")
+              for item in evidence:
+                  label = f"{item['repository']}:{item['contract']}"
+                  print(
+                      f"  - [{label}]({item['evidence_pr']}) via "
+                      f"`{item['workflow']}` at `{item['evidence_commit']}`"
+                  )
+          PY
+
+  shell-contract:
+    name: ${{ matrix.label }}
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    steps:
+      - name: Check out consumer without credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ${{ matrix.repository }}
+          path: consumer
+          persist-credentials: false
+
+      - name: Check out immutable canonical tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ORESoftware/flags-2-env
+          ref: ${{ needs.prepare.outputs.tooling_ref }}
+          path: flags2env-tooling
+          persist-credentials: false
+
+      - name: Install real shell runtimes
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes zsh
+
+      - name: Build the immutable canonical parser CLI
+        shell: bash
+        run: make -C flags2env-tooling cli
+
+      - name: Resolve and audit the consumer contract
+        id: contract
+        env:
+          CONTRACT_PATH: ${{ matrix.contract }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          consumer_root="$(realpath -e consumer)"
+          contract="$(realpath -e "consumer/$CONTRACT_PATH")"
+          case "$contract" in
+            "$consumer_root"/*) ;;
+            *) echo "contract escapes the consumer checkout: $contract" >&2; exit 1 ;;
+          esac
+          [[ "$(basename "$contract")" == ".cli-flags.toml" ]] || {
+            echo "unexpected contract basename: $contract" >&2
+            exit 1
+          }
+          flags2env-tooling/build/flags2env audit "$contract"
+          echo "path=$contract" >> "$GITHUB_OUTPUT"
+
+      - name: Exercise terminal help and Bash/Zsh completion
+        env:
+          COMMAND_NAME: ${{ matrix.command }}
+          CONTRACT: ${{ steps.contract.outputs.path }}
+        shell: bash
+        run: |
+          set -o pipefail
+          log="$RUNNER_TEMP/${COMMAND_NAME}-shell-contract.log"
+          python3 flags2env-tooling/scripts/verify-shell-contract.py \
+            --cli flags2env-tooling/build/flags2env \
+            --contract "$CONTRACT" \
+            --command "$COMMAND_NAME" \
+            --install 2>&1 | tee "$log"
+
+      - name: Upload bounded shell-contract diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ${{ matrix.command }}-shell-contract-log
+          path: ${{ runner.temp }}/${{ matrix.command }}-shell-contract.log
+          if-no-files-found: ignore
+          retention-days: 1
+
+      - name: Record immutable evidence
+        env:
+          COMMAND_NAME: ${{ matrix.command }}
+          CONTRACT_PATH: ${{ matrix.contract }}
+          KIND: ${{ matrix.kind }}
+          REPOSITORY: ${{ matrix.repository }}
+          TOOLING_REF: ${{ needs.prepare.outputs.tooling_ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          consumer_sha="$(git -C consumer rev-parse HEAD)"
+          {
+            echo "### $REPOSITORY"
+            echo
+            echo "- Contract: \`$CONTRACT_PATH\`"
+            echo "- Command: \`$COMMAND_NAME\`"
+            echo "- Kind: \`$KIND\`"
+            echo "- Consumer commit: \`$consumer_sha\`"
+            echo "- Canonical tooling: \`$TOOLING_REF\`"
+            echo "- Verified: audit, wide/narrow terminal help, Bash registration/execution, Zsh compinit/autoload, idempotent install"
+          } >> "$GITHUB_STEP_SUMMARY"

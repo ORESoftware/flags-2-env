@@ -6,16 +6,12 @@ class Flags2env < Formula
   license "MIT"
   head "https://github.com/ORESoftware/flags-2-env.git", branch: "main"
 
-  on_linux do
-    depends_on "gcc" => :build
-  end
-
   def install
     system "make", "all"
 
     # Keep the Cellar payload intentionally small; repository tests are never installed.
     bin.install "build/flags2env"
-    include.install "src/parser.h" => "flags2env/parser.h"
+    (include/"flags2env").install "src/parser.h"
     lib.install "build/libflags2env.a"
     if OS.mac?
       lib.install "build/libflags2env.dylib"
@@ -50,8 +46,10 @@ class Flags2env < Formula
       type = "bool"
     TOML
 
-    assert_match "\"PORT\":\"8181\"", shell_output("#{bin}/flags2env --port 8181")
-    assert_match "export DEBUG='true'", shell_output("#{bin}/flags2env shell-env -- --debug")
+    assert_match "export PORT='8181'",
+                 shell_output("#{bin}/flags2env shell-env --config #{testpath/".cli-flags.toml"} -- --port 8181")
+    assert_match "export DEBUG='true'",
+                 shell_output("#{bin}/flags2env shell-env --config #{testpath/".cli-flags.toml"} -- --debug")
     assert_match "export interface CliStuff",
                  shell_output("#{bin}/flags2env generate typescript .cli-flags.toml --name CliStuff")
 

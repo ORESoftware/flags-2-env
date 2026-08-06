@@ -3,7 +3,11 @@ import assert from "node:assert/strict";
 import * as f2e from "@oresoftware/f2e";
 import type { CliStuff } from "./cli-interfaces.js";
 
-const raw = f2e.parseFromArgs([
+const environmentOnly = f2e.parseOverridesFromArgs(["node", "app"]);
+const environmentConfig: CliStuff = f2e.coerce({ PORT: "5151", ...environmentOnly });
+assert.equal(environmentConfig.PORT, 5151);
+
+const raw = f2e.parseOverridesFromArgs([
   "node",
   "app",
   "--port",
