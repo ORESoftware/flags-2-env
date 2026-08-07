@@ -7,6 +7,10 @@
  * stability. Run it under leaks(1) or valgrind for allocation coverage.
  */
 
+#if defined(__linux__) && !defined(_POSIX_C_SOURCE)
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #include "parser.h"
 
 #include <stdio.h>
