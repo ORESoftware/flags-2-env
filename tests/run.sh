@@ -854,16 +854,19 @@ expect_dotenv 'Expected a symlinked ./.env to be followed' \
   '{"F2E_DOTENV_PORT":"8080","F2E_DOTENV_DEBUG":"true","F2E_DOTENV_HOST":"db.internal","F2E_DOTENV_TOKEN":"from-dotenv"}' \
   "$(cd "$DOTENV_LINK_DIR" && $DOTENV_CLEAN "$CLI" app)"
 
-# only the working directory is searched: an explicit --config never drags in
-# the .env sitting next to it
-DOTENV_EMPTY_DIR="$TMP_TEST_DIR/dotenv-empty"
-mkdir -p "$DOTENV_EMPTY_DIR"
-expect_dotenv 'Expected no .env to be read from the config directory' \
+# only the working directory is searched. Config discovery still walks upward,
+# so running from a subdirectory finds the parent's .cli-flags.toml and must
+# not pick up the .env sitting beside it.
+DOTENV_NESTED_ROOT="$TMP_TEST_DIR/dotenv-nested"
+mkdir -p "$DOTENV_NESTED_ROOT/child"
+cp "$DOTENV_DIR/.cli-flags.toml" "$DOTENV_NESTED_ROOT/.cli-flags.toml"
+cp "$DOTENV_DIR/.env" "$DOTENV_NESTED_ROOT/.env"
+expect_dotenv 'Expected .env lookup not to walk upward with config discovery' \
   '{"F2E_DOTENV_PORT":"3000","F2E_DOTENV_DEBUG":"false"}' \
-  "$(cd "$DOTENV_EMPTY_DIR" && $DOTENV_CLEAN "$CLI" shell-env --config "$DOTENV_DIR/.cli-flags.toml" -- app | sed -e 's/^export //' -e "s/'//g" | tr '\n' ' ' | sed -e 's/ $//' -e 's/^/{/' -e 's/$/}/' -e 's/ /,/g' -e 's/\([A-Z0-9_]*\)=\([^,}]*\)/"\1":"\2"/g')"
+  "$(cd "$DOTENV_NESTED_ROOT/child" && $DOTENV_CLEAN "$CLI" app)"
 
-# .env is still audited, so a value that does not fit its declared type is a
-# reported parse error rather than a silent substitution
+# a .env value that does not fit its declared type is a reported parse error
+# rather than a silent substitution
 DOTENV_BAD_DIR="$TMP_TEST_DIR/dotenv-bad"
 mkdir -p "$DOTENV_BAD_DIR"
 {
@@ -875,10 +878,13 @@ expect_dotenv 'Expected an invalid .env value to be reported and skipped' \
   '{"F2E_DOTENV_PORT":"3000","F2E_DOTENV_DEBUG":"false","F2E_DOTENV_ERRORS":"[\".env F2E_DOTENV_PORT value \\\"not-a-number\\\" is not a valid integer for flags.port\"]"}' \
   "$(cd "$DOTENV_BAD_DIR" && $DOTENV_CLEAN "$CLI" app)"
 
-# an invalid live environment value is not this parser's to police: it is
-# skipped without becoming a parse error
+# the ambient environment is not this parser's to police: a live value that
+# does not fit its declared type is skipped without becoming a parse error
+DOTENV_NO_FILE_DIR="$TMP_TEST_DIR/dotenv-no-file"
+mkdir -p "$DOTENV_NO_FILE_DIR"
+cp "$DOTENV_BAD_DIR/.cli-flags.toml" "$DOTENV_NO_FILE_DIR/.cli-flags.toml"
 expect_dotenv 'Expected an invalid live env value to be skipped silently' \
   '{"F2E_DOTENV_PORT":"3000","F2E_DOTENV_DEBUG":"false"}' \
-  "$(cd "$DOTENV_EMPTY_DIR" && $DOTENV_CLEAN F2E_DOTENV_PORT=not-a-number "$CLI" --config "$DOTENV_BAD_DIR/.cli-flags.toml" app 2>/dev/null || cd "$DOTENV_EMPTY_DIR" && $DOTENV_CLEAN F2E_DOTENV_PORT=not-a-number "$CLI" app)"
+  "$(cd "$DOTENV_NO_FILE_DIR" && $DOTENV_CLEAN F2E_DOTENV_PORT=not-a-number "$CLI" app)"
 
 printf 'flags2env tests passed\n'
