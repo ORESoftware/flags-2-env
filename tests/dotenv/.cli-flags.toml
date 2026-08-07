@@ -1,0 +1,30 @@
+[env]
+ignore = ["F2E_DOTENV_UNDECLARED"]
+
+[flags.port]
+env = "F2E_DOTENV_PORT"
+aliases = ["port"]
+short = "p"
+type = "integer"
+default = 3000
+help = "TCP port for the app listener."
+
+[flags.host]
+env = "F2E_DOTENV_HOST"
+aliases = ["host"]
+type = "string"
+help = "Host interface or address to bind."
+
+[flags.token]
+env = "F2E_DOTENV_TOKEN"
+aliases = ["token"]
+type = "string"
+dotenv_override = true
+help = "Credential the checked-in .env is allowed to pin over the live environment."
+
+[flags.debug]
+env = "F2E_DOTENV_DEBUG"
+aliases = ["debug"]
+type = "bool"
+default = "false"
+help = "Enable debug logging."
