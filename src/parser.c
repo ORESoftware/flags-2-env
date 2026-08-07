@@ -3786,34 +3786,83 @@ static void f2e_report_invalid_dotenv_value(F2EJsonList *errors, const F2EFlag *
 }
 
 /*
- * Overlays ./.env and the live environment between the schema defaults and
- * argv, so the resolved precedence is argv > live env > .env > default. A flag
- * with dotenv_override (or a config-wide [env] override) swaps the middle two
- * for that key only.
+ * Resolves the preference order for one env key, most specific declaration
+ * first: an [order-of-preference] entry, then the flag's own dotenv_override,
+ * then [env] order, then [env] override, then the built-in default.
+ */
+static void f2e_resolve_source_order(const F2EConfig *config,
+                                     const F2EFlag *flag,
+                                     F2ESourceOrder *out) {
+  for (size_t i = 0; i < config->env_order_count; i++) {
+    if (f2e_streq(config->env_orders[i].env, flag->env)) {
+      *out = config->env_orders[i].order;
+      return;
+    }
+  }
+  if (flag->dotenv_override_set) {
+    if (flag->dotenv_override) {
+      f2e_source_order_env_file_first(out);
+    } else {
+      f2e_source_order_default(out);
+    }
+    return;
+  }
+  if (config->default_order_set) {
+    *out = config->default_order;
+    return;
+  }
+  if (config->dotenv_override) {
+    f2e_source_order_env_file_first(out);
+    return;
+  }
+  f2e_source_order_default(out);
+}
+
+static int f2e_source_order_is_default(const F2ESourceOrder *order) {
+  for (size_t i = 0; i < F2E_SOURCE_COUNT; i++) {
+    if (order->sources[i] != F2E_DEFAULT_SOURCE_ORDER[i]) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+/*
+ * Ranks every declared source for each in-scope flag and writes the winner.
  *
- * Only [flags.*] env keys are overlaid. Parse-derived keys -- the command
- * path, per-command markers, positionals, unknown options, and parse errors --
+ * The default order is argv > live env > .env > the schema default, but
+ * [order-of-preference] can place any source anywhere, including ranking argv
+ * last so a checked-in value cannot be overridden from the command line. That
+ * is why argv arrives here as a map rather than being applied afterwards: it
+ * is a source like the others, and the caller has already scanned it.
+ *
+ * Only [flags.*] env keys are ranked. Parse-derived keys -- the command path,
+ * per-command markers, positionals, unknown options, and parse errors --
  * report what argv actually contained, so an ambient variable or a checked-in
  * .env must never be able to forge them.
  *
  * A .env value that does not fit its declared type is reported through the
- * errors channel and skipped: the file is project-owned input that env-audit
- * already holds to the schema. A live environment value that does not fit is
- * skipped silently, because the ambient environment is not this parser's to
- * validate and a stray DEBUG=verbose must not turn into a parse error.
+ * errors channel and skipped, leaving whatever ranked below it: the file is
+ * project-owned input that env-audit already holds to the schema. A live
+ * environment value that does not fit is skipped silently, because the ambient
+ * environment is not this parser's to validate and a stray DEBUG=verbose must
+ * not turn into a parse error.
  *
- * `dotenv_below` and `dotenv_above` are optional. They collect the .env values
- * that a caller merging channels by hand should apply under and over its own
- * environment snapshot, which is how per-flag override survives a spread.
+ * `dotenv_below` and `dotenv_above` are optional and split the .env values by
+ * their rank relative to the live environment, which is what lets a caller
+ * merging channels by hand reproduce per-key ordering with a flat spread.
  */
-static void f2e_apply_env_sources(F2EConfig *config,
-                                  F2EPair *pairs,
-                                  size_t pair_count,
-                                  const F2ECommandPath *path,
-                                  const F2EDotEnv *dotenv,
-                                  F2EPair *dotenv_below,
-                                  F2EPair *dotenv_above,
-                                  F2EJsonList *errors) {
+static void f2e_apply_value_sources(F2EConfig *config,
+                                    F2EPair *pairs,
+                                    size_t pair_count,
+                                    const F2ECommandPath *path,
+                                    const F2EDotEnv *dotenv,
+                                    const F2EPair *argv_pairs,
+                                    F2EPair *dotenv_below,
+                                    F2EPair *dotenv_above,
+                                    F2EJsonList *errors,
+                                    F2EBuffer *order_report,
+                                    size_t *order_report_count) {
   for (size_t i = 0; i < config->flag_count; i++) {
     const F2EFlag *flag = &config->flags[i];
     if (flag->env[0] == '\0') {
@@ -3823,33 +3872,60 @@ static void f2e_apply_env_sources(F2EConfig *config,
       continue;
     }
 
-    const char *from_file = f2e_dotenv_lookup(dotenv, flag->env);
-    const char *from_live = getenv(flag->env);
-    if (!from_file && !from_live) {
+    const F2EPair *from_argv =
+        argv_pairs ? f2e_find_pair((F2EPair *)argv_pairs, pair_count, flag->env) : NULL;
+    const char *values[F2E_SOURCE_COUNT];
+    values[F2E_SOURCE_FLAGS] = from_argv ? from_argv->value : NULL;
+    values[F2E_SOURCE_ENV_SHELL] = getenv(flag->env);
+    values[F2E_SOURCE_ENV_FILE] = f2e_dotenv_lookup(dotenv, flag->env);
+
+    F2ESourceOrder order;
+    f2e_resolve_source_order(config, flag, &order);
+
+    if (order_report && order_report_count && !f2e_source_order_is_default(&order)) {
+      int ok = (*order_report_count == 0 || f2e_buffer_append_char(order_report, ',')) &&
+               f2e_buffer_append_json_string(order_report, flag->env) &&
+               f2e_buffer_append(order_report, ":[");
+      for (size_t slot = 0; ok && slot < order.count; slot++) {
+        ok = (slot == 0 || f2e_buffer_append_char(order_report, ',')) &&
+             f2e_buffer_append_json_string(order_report, f2e_source_name((F2ESource)order.sources[slot]));
+      }
+      if (ok && f2e_buffer_append_char(order_report, ']')) {
+        (*order_report_count)++;
+      }
+    }
+
+    if (!values[F2E_SOURCE_FLAGS] && !values[F2E_SOURCE_ENV_SHELL] && !values[F2E_SOURCE_ENV_FILE]) {
       continue;
     }
 
-    int file_wins = flag->dotenv_override_set ? flag->dotenv_override : config->dotenv_override;
-    /* applied low precedence first, so a rejected value leaves the one below */
-    const char *ordered[2];
-    ordered[0] = file_wins ? from_live : from_file;
-    ordered[1] = file_wins ? from_file : from_live;
-
-    for (int slot = 0; slot < 2; slot++) {
-      const char *value = ordered[slot];
+    /* lowest precedence first, so a rejected value leaves the one beneath it */
+    for (size_t slot = order.count; slot > 0; slot--) {
+      F2ESource source = (F2ESource)order.sources[slot - 1];
+      const char *value = values[source];
       if (!value) {
         continue;
       }
       char normalized[F2E_MAX_VALUE];
       if (!f2e_normalize_flag_value(flag, value, normalized, sizeof(normalized))) {
-        if (value == from_file) {
+        if (source == F2E_SOURCE_ENV_FILE) {
           f2e_report_invalid_dotenv_value(errors, flag, value);
         }
         continue;
       }
       f2e_set_pair(pairs, pair_count, flag->env, normalized);
-      if (value == from_file) {
-        F2EPair *channel = file_wins ? dotenv_above : dotenv_below;
+      if (source == F2E_SOURCE_ENV_FILE) {
+        /* rank the file against the shell to decide which channel it belongs in */
+        size_t file_rank = order.count;
+        size_t shell_rank = order.count;
+        for (size_t r = 0; r < order.count; r++) {
+          if (order.sources[r] == F2E_SOURCE_ENV_FILE) {
+            file_rank = r;
+          } else if (order.sources[r] == F2E_SOURCE_ENV_SHELL) {
+            shell_rank = r;
+          }
+        }
+        F2EPair *channel = file_rank < shell_rank ? dotenv_above : dotenv_below;
         if (channel) {
           f2e_set_pair(channel, pair_count, flag->env, normalized);
         }
