@@ -209,6 +209,27 @@ jobs:
           log="$RUNNER_TEMP/${{ matrix.repository }}.log"
           docker run --rm "f2e-fixture-${{ matrix.repository }}" 2>&1 | tee "$log"
 
+      # A green fixture only means something if a red one is reachable. Mount a
+      # contract with one altered default over the real one and require the
+      # container to fail. If it still passes, the assertions are not reaching
+      # the parser and the step above proved nothing about this commit.
+      - name: Prove the fixture can still fail
+        shell: bash
+        run: |
+          set -euo pipefail
+          mutant="$(mktemp -d)/.cli-flags.toml"
+          sed 's/^default = 3000$/default = 3001/' fixture/.cli-flags.toml > "$mutant"
+          cmp -s fixture/.cli-flags.toml "$mutant" && {
+            echo "::error::mutation was a no-op; the vacuity check is itself broken" >&2
+            exit 1
+          }
+          if docker run --rm -v "$mutant:/app/.cli-flags.toml:ro" \
+               "f2e-fixture-${{ matrix.repository }}" >/dev/null 2>&1; then
+            echo "::error::${{ matrix.repository }} passes against a mutated contract" >&2
+            exit 1
+          fi
+          echo "${{ matrix.repository }} correctly rejects a mutated contract"
+
       - name: Upload fixture output
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
