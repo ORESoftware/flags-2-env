@@ -6840,17 +6840,6 @@ char *f2e_parse_from_file(const char *config_path, int argc, const char *const a
     f2e_apply_defaults(config, pairs, F2E_MAX_PAIRS);
   }
 
-  F2EDotEnv *dotenv = f2e_dotenv_open(config);
-  f2e_apply_env_sources(config,
-                        pairs,
-                        F2E_MAX_PAIRS,
-                        &path,
-                        dotenv,
-                        NULL,
-                        NULL,
-                        track_errors ? &errors : NULL);
-  free(dotenv);
-
   f2e_scan_argv(config,
                 pairs,
                 F2E_MAX_PAIRS,
@@ -6865,6 +6854,45 @@ char *f2e_parse_from_file(const char *config_path, int argc, const char *const a
                 allow_unknown_forced,
                 lenient,
                 NULL);
+
+  /*
+   * argv is one ranked source, not an unconditional last word, so it is
+   * scanned again on its own and then placed by the resolved order. The pass
+   * above stays because it is what collects positionals, unknown options, and
+   * parse errors.
+   */
+  F2EPair *argv_pairs = (F2EPair *)calloc(F2E_MAX_PAIRS, sizeof(F2EPair));
+  if (argv_pairs) {
+    f2e_scan_argv(config,
+                  argv_pairs,
+                  F2E_MAX_PAIRS,
+                  argc,
+                  argv,
+                  NULL,
+                  NULL,
+                  NULL,
+                  NULL,
+                  0,
+                  allow_unknown,
+                  allow_unknown_forced,
+                  lenient,
+                  NULL);
+  }
+
+  F2EDotEnv *dotenv = f2e_dotenv_open(config);
+  f2e_apply_value_sources(config,
+                          pairs,
+                          F2E_MAX_PAIRS,
+                          &path,
+                          dotenv,
+                          argv_pairs,
+                          NULL,
+                          NULL,
+                          track_errors ? &errors : NULL,
+                          NULL,
+                          NULL);
+  free(dotenv);
+  free(argv_pairs);
 
   if (track_positionals && positionals.count > 0) {
     char value[F2E_MAX_VALUE];
