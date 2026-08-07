@@ -788,4 +788,97 @@ if [ "$status" -eq 0 ] || [ "$actual" != "$expected" ]; then
   exit 1
 fi
 
+# --- ./.env loading -----------------------------------------------------
+#
+# Resolution is argv > live env > ./.env > default, and only ./.env in the
+# process working directory is read. The fixture uses F2E_DOTENV_* keys so an
+# ambient variable cannot decide the outcome, and every case still clears them
+# explicitly.
+
+DOTENV_DIR="$ROOT_DIR/tests/dotenv"
+DOTENV_OVERRIDE_DIR="$ROOT_DIR/tests/dotenv-global-override"
+DOTENV_CLEAN="env -u F2E_DOTENV_PORT -u F2E_DOTENV_HOST -u F2E_DOTENV_TOKEN -u F2E_DOTENV_DEBUG -u FLAGS2ENV_DOTENV"
+
+expect_dotenv() {
+  label="$1"
+  expected="$2"
+  actual="$3"
+  if [ "$actual" != "$expected" ]; then
+    printf '%s\nExpected: %s\nActual:   %s\n' "$label" "$expected" "$actual" >&2
+    exit 1
+  fi
+}
+
+# .env supplies every declared key it names; the undeclared key stays out
+expect_dotenv 'Expected .env values' \
+  '{"F2E_DOTENV_PORT":"8080","F2E_DOTENV_DEBUG":"true","F2E_DOTENV_HOST":"db.internal","F2E_DOTENV_TOKEN":"from-dotenv"}' \
+  "$(cd "$DOTENV_DIR" && $DOTENV_CLEAN "$CLI" app)"
+
+# argv beats .env
+expect_dotenv 'Expected argv to beat .env' \
+  '{"F2E_DOTENV_PORT":"9999","F2E_DOTENV_DEBUG":"true","F2E_DOTENV_HOST":"db.internal","F2E_DOTENV_TOKEN":"from-dotenv"}' \
+  "$(cd "$DOTENV_DIR" && $DOTENV_CLEAN "$CLI" app --port 9999)"
+
+# the live environment beats .env for a key that did not opt into override,
+# while the opted-in token still takes its .env value
+expect_dotenv 'Expected live env to beat .env except for the override key' \
+  '{"F2E_DOTENV_PORT":"7777","F2E_DOTENV_DEBUG":"true","F2E_DOTENV_HOST":"db.internal","F2E_DOTENV_TOKEN":"from-dotenv"}' \
+  "$(cd "$DOTENV_DIR" && $DOTENV_CLEAN F2E_DOTENV_PORT=7777 F2E_DOTENV_TOKEN=from-live "$CLI" app)"
+
+# argv still outranks the live environment
+expect_dotenv 'Expected argv to beat the live environment' \
+  '{"F2E_DOTENV_PORT":"9999","F2E_DOTENV_DEBUG":"true","F2E_DOTENV_HOST":"db.internal","F2E_DOTENV_TOKEN":"from-dotenv"}' \
+  "$(cd "$DOTENV_DIR" && $DOTENV_CLEAN F2E_DOTENV_PORT=7777 "$CLI" app --port 9999)"
+
+# [env] override = true flips .env above the live environment for every key
+expect_dotenv 'Expected [env] override to lift .env over the live environment' \
+  '{"F2E_DOTENV_PORT":"8080","F2E_DOTENV_DEBUG":"true","F2E_DOTENV_HOST":"db.internal","F2E_DOTENV_TOKEN":"from-dotenv"}' \
+  "$(cd "$DOTENV_OVERRIDE_DIR" && $DOTENV_CLEAN F2E_DOTENV_PORT=7777 "$CLI" app)"
+
+expect_dotenv 'Expected argv to beat an overriding .env' \
+  '{"F2E_DOTENV_PORT":"9999","F2E_DOTENV_DEBUG":"true","F2E_DOTENV_HOST":"db.internal","F2E_DOTENV_TOKEN":"from-dotenv"}' \
+  "$(cd "$DOTENV_OVERRIDE_DIR" && $DOTENV_CLEAN F2E_DOTENV_PORT=7777 "$CLI" app --port 9999)"
+
+# FLAGS2ENV_DOTENV=0 skips the file without touching the config
+expect_dotenv 'Expected FLAGS2ENV_DOTENV=0 to skip .env' \
+  '{"F2E_DOTENV_PORT":"3000","F2E_DOTENV_DEBUG":"false"}' \
+  "$(cd "$DOTENV_DIR" && $DOTENV_CLEAN FLAGS2ENV_DOTENV=0 "$CLI" app)"
+
+# a ./.env symlink is followed like a regular file
+DOTENV_LINK_DIR="$TMP_TEST_DIR/dotenv-symlink"
+mkdir -p "$DOTENV_LINK_DIR/shared"
+cp "$DOTENV_DIR/.cli-flags.toml" "$DOTENV_LINK_DIR/.cli-flags.toml"
+cp "$DOTENV_DIR/.env" "$DOTENV_LINK_DIR/shared/team.env"
+ln -s shared/team.env "$DOTENV_LINK_DIR/.env"
+expect_dotenv 'Expected a symlinked ./.env to be followed' \
+  '{"F2E_DOTENV_PORT":"8080","F2E_DOTENV_DEBUG":"true","F2E_DOTENV_HOST":"db.internal","F2E_DOTENV_TOKEN":"from-dotenv"}' \
+  "$(cd "$DOTENV_LINK_DIR" && $DOTENV_CLEAN "$CLI" app)"
+
+# only the working directory is searched: an explicit --config never drags in
+# the .env sitting next to it
+DOTENV_EMPTY_DIR="$TMP_TEST_DIR/dotenv-empty"
+mkdir -p "$DOTENV_EMPTY_DIR"
+expect_dotenv 'Expected no .env to be read from the config directory' \
+  '{"F2E_DOTENV_PORT":"3000","F2E_DOTENV_DEBUG":"false"}' \
+  "$(cd "$DOTENV_EMPTY_DIR" && $DOTENV_CLEAN "$CLI" shell-env --config "$DOTENV_DIR/.cli-flags.toml" -- app | sed -e 's/^export //' -e "s/'//g" | tr '\n' ' ' | sed -e 's/ $//' -e 's/^/{/' -e 's/$/}/' -e 's/ /,/g' -e 's/\([A-Z0-9_]*\)=\([^,}]*\)/"\1":"\2"/g')"
+
+# .env is still audited, so a value that does not fit its declared type is a
+# reported parse error rather than a silent substitution
+DOTENV_BAD_DIR="$TMP_TEST_DIR/dotenv-bad"
+mkdir -p "$DOTENV_BAD_DIR"
+{
+  cat "$DOTENV_DIR/.cli-flags.toml"
+  printf '\n[parse]\nerrors_env = "F2E_DOTENV_ERRORS"\n'
+} > "$DOTENV_BAD_DIR/.cli-flags.toml"
+printf 'F2E_DOTENV_PORT=not-a-number\n' > "$DOTENV_BAD_DIR/.env"
+expect_dotenv 'Expected an invalid .env value to be reported and skipped' \
+  '{"F2E_DOTENV_PORT":"3000","F2E_DOTENV_DEBUG":"false","F2E_DOTENV_ERRORS":"[\".env F2E_DOTENV_PORT value \\\"not-a-number\\\" is not a valid integer for flags.port\"]"}' \
+  "$(cd "$DOTENV_BAD_DIR" && $DOTENV_CLEAN "$CLI" app)"
+
+# an invalid live environment value is not this parser's to police: it is
+# skipped without becoming a parse error
+expect_dotenv 'Expected an invalid live env value to be skipped silently' \
+  '{"F2E_DOTENV_PORT":"3000","F2E_DOTENV_DEBUG":"false"}' \
+  "$(cd "$DOTENV_EMPTY_DIR" && $DOTENV_CLEAN F2E_DOTENV_PORT=not-a-number "$CLI" --config "$DOTENV_BAD_DIR/.cli-flags.toml" app 2>/dev/null || cd "$DOTENV_EMPTY_DIR" && $DOTENV_CLEAN F2E_DOTENV_PORT=not-a-number "$CLI" app)"
+
 printf 'flags2env tests passed\n'
