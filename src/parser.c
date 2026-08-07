@@ -7029,17 +7029,6 @@ char *f2e_parse_structured_from_file(const char *config_path, int argc, const ch
     f2e_apply_defaults(config, pairs, F2E_MAX_PAIRS);
   }
 
-  F2EDotEnv *dotenv = f2e_dotenv_open(config);
-  f2e_apply_env_sources(config,
-                        pairs,
-                        F2E_MAX_PAIRS,
-                        &path,
-                        dotenv,
-                        dotenv_below_pairs,
-                        dotenv_above_pairs,
-                        lists_ok ? &errors : NULL);
-  free(dotenv);
-
   f2e_scan_argv(config,
                 pairs,
                 F2E_MAX_PAIRS,
@@ -7057,9 +7046,9 @@ char *f2e_parse_structured_from_file(const char *config_path, int argc, const ch
 
   /*
    * Scan the same argv without seeded defaults. Diagnostics and operands were
-   * already collected above; this pass only captures normalized CLI
-   * overrides for callers that merge them over a real environment before
-   * coercion.
+   * already collected above; this pass captures normalized CLI overrides for
+   * callers that merge them over a real environment before coercion, and it
+   * is also what lets argv be ranked as one source among several below.
    */
   f2e_scan_argv(config,
                 provided_pairs,
@@ -7075,6 +7064,23 @@ char *f2e_parse_structured_from_file(const char *config_path, int argc, const ch
                 allow_unknown_forced,
                 lenient,
                 NULL);
+
+  F2EDotEnv *dotenv = f2e_dotenv_open(config);
+  F2EBuffer order_report = {0};
+  size_t order_report_count = 0;
+  int order_report_ok = f2e_buffer_init(&order_report);
+  f2e_apply_value_sources(config,
+                          pairs,
+                          F2E_MAX_PAIRS,
+                          &path,
+                          dotenv,
+                          provided_pairs,
+                          dotenv_below_pairs,
+                          dotenv_above_pairs,
+                          lists_ok ? &errors : NULL,
+                          order_report_ok ? &order_report : NULL,
+                          order_report_ok ? &order_report_count : NULL);
+  free(dotenv);
 
   if (track_positionals && positionals.count > 0) {
     char value[F2E_MAX_VALUE];
