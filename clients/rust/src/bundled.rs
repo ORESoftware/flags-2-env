@@ -130,6 +130,7 @@ impl BundledFlags2Env {
             )?,
             dotenv: json_string_map(report.get("dotenv")),
             dotenv_overrides: json_string_map(report.get("dotenvOverrides")),
+            source_order: json_string_vec_map(report.get("sourceOrder")),
             command: report
                 .get("command")
                 .and_then(serde_json::Value::as_str)

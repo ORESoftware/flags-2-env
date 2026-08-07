@@ -135,6 +135,8 @@ pub struct StructuredParse {
     pub provided_flags: HashMap<String, String>,
     pub dotenv: HashMap<String, String>,
     pub dotenv_overrides: HashMap<String, String>,
+    /// Resolved source order for each key that deviates from the default.
+    pub source_order: HashMap<String, Vec<String>>,
     pub command: String,
     pub subcommands: Vec<String>,
     pub extras: Vec<String>,
@@ -168,6 +170,18 @@ fn json_string_map(value: Option<&serde_json::Value>) -> HashMap<String, String>
             object
                 .iter()
                 .filter_map(|(key, item)| item.as_str().map(|text| (key.clone(), text.to_string())))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn json_string_vec_map(value: Option<&serde_json::Value>) -> HashMap<String, Vec<String>> {
+    value
+        .and_then(|value| value.as_object())
+        .map(|object| {
+            object
+                .iter()
+                .map(|(key, item)| (key.clone(), json_string_vec(Some(item))))
                 .collect()
         })
         .unwrap_or_default()
@@ -408,6 +422,7 @@ impl Flags2Env {
             )?,
             dotenv: json_string_map(report.get("dotenv")),
             dotenv_overrides: json_string_map(report.get("dotenvOverrides")),
+            source_order: json_string_vec_map(report.get("sourceOrder")),
             command: report
                 .get("command")
                 .and_then(|value| value.as_str())
