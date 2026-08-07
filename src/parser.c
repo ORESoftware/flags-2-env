@@ -145,6 +145,14 @@ typedef struct {
   int invalid_env_audit_ignore;
   int dotenv_enabled;  /* read ./.env at parse time; default on */
   int dotenv_override; /* default for flags that do not declare dotenv_override */
+  F2EEnvOrder env_orders[F2E_MAX_FLAGS]; /* [order-of-preference] entries */
+  size_t env_order_count;
+  F2ESourceOrder default_order; /* [env] order, applied to unlisted keys */
+  int default_order_set;
+  char invalid_order_key[F2E_MAX_ENV];   /* first [order-of-preference] problem */
+  char invalid_order_value[F2E_MAX_VALUE];
+  int invalid_order_reason; /* F2EOrderProblem */
+  int too_many_env_orders;
   char help_url[F2E_MAX_VALUE];
   unsigned help_columns;
   int help_columns_configured;
