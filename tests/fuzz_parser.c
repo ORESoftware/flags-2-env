@@ -60,6 +60,15 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     return 0;
   }
 
+  /* .env is only ever read from the working directory, so move there once and
+     stay: every other path this harness uses is absolute */
+  static int cwd_ready = 0;
+  const char *dotenv_config = getenv("F2E_FUZZ_DOTENV_CONFIG");
+  const char *dotenv_cwd = getenv("F2E_FUZZ_DOTENV_CWD");
+  if (!cwd_ready && dotenv_cwd) {
+    cwd_ready = chdir(dotenv_cwd) == 0 ? 1 : -1;
+  }
+
   char *text = (char *)malloc(size + 1);
   if (!text) {
     return 0;
