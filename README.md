@@ -409,25 +409,45 @@ Only keys declared by a `[flags.*] env` are taken from the file. Undeclared keys
 
 A `.env` value that does not fit its declared type is reported through `[parse] errors_env` and skipped, leaving the value below it in the order. A live environment value that does not fit is skipped silently: the ambient environment is not the parser's to validate, and a stray `DEBUG=verbose` in someone's shell should not turn into a parse error.
 
-### Letting `.env` win
+### Changing the order per key
 
-Some values belong to the repo rather than to whatever the shell happens to export. Declare that per flag:
+The three sources are named `flags`, `env_shell`, and `env_file`. `[order-of-preference]` re-ranks them for individual env keys, highest first:
+
+```toml
+[order-of-preference]
+MY_ENV_1 = (env_file, env_shell, flags)
+MY_ENV_2 = (env_shell, flags)
+MY_ENV_3 = (env_file, flags)
+```
+
+Only keys that deviate from the default need an entry; everything else keeps `flags > env_shell > env_file`. Brackets work as well as parentheses (`MY_ENV_1 = [env_file, env_shell, flags]`), and entries may be bare or quoted.
+
+A list does not have to name every source. Whatever it omits is appended in default order, so `MY_ENV_2 = (env_shell, flags)` resolves to `env_shell > flags > env_file`, and `MY_ENV_3 = (env_file, flags)` resolves to `env_file > flags > env_shell`. At least two sources are required, since one says nothing about precedence.
+
+Note that `flags` can be ranked last, as `MY_ENV_1` does. That pins a value against the command line: `--my-env-1` will not override what `.env` supplies.
+
+`[env] order` sets a config-wide default for keys the table omits:
+
+```toml
+[env]
+order = (env_file, env_shell, flags)
+```
+
+Two shorthands remain for the common case of lifting `.env` over the shell while argv still wins — per flag, or for the whole config:
 
 ```toml
 [flags.token]
 env = "API_TOKEN"
 type = "string"
 dotenv_override = true
-```
 
-or for every key in the config:
-
-```toml
 [env]
 override = true
 ```
 
-Either way argv still wins; only the middle two ranks swap. Turn file loading off entirely with `[env] load = false`, or per process with `FLAGS2ENV_DOTENV=0`.
+Most specific declaration wins: an `[order-of-preference]` entry, then the flag's `dotenv_override`, then `[env] order`, then `[env] override`, then the default. `flags2env audit` rejects unknown source names, repeated sources, single-entry lists, and entries for env keys no `[flags.*]` table declares.
+
+Turn file loading off entirely with `[env] load = false`, or per process with `FLAGS2ENV_DOTENV=0`.
 
 Because `./.env` comes from the ambient working directory, long-running or privileged consumers should declare `[env] load = false` for the same reason they do not discover `.cli-flags.toml` from the CWD — see [consumer compliance](docs/consumer-compliance.md#trusted-contract-discovery). That declaration is authoritative: `FLAGS2ENV_DOTENV` can only switch loading off, never back on.
 
