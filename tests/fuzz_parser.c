@@ -21,6 +21,33 @@ static int write_bytes(const char *path, const uint8_t *data, size_t size) {
   return written == size && closed == 0;
 }
 
+/*
+ * Builds a ./.env whose declared keys carry the fuzz bytes as values and whose
+ * tail is the raw bytes, so one input exercises key validation, quote and
+ * escape handling, inline comments, oversized lines, and per-type value
+ * normalization at once.
+ */
+static int write_dotenv(const char *path, const uint8_t *data, size_t size) {
+  static const char *const keys[] = {
+      "F2E_FUZZ_STR", "F2E_FUZZ_INT", "F2E_FUZZ_BOOL", "F2E_FUZZ_JSON"};
+  FILE *file = fopen(path, "wb");
+  if (!file) {
+    return 0;
+  }
+  int ok = 1;
+  for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+    if (fprintf(file, "%s=", keys[i]) < 0 || fwrite(data, 1, size, file) != size ||
+        fputc('\n', file) == EOF) {
+      ok = 0;
+      break;
+    }
+  }
+  if (ok && (fwrite(data, 1, size, file) != size || fputc('\n', file) == EOF)) {
+    ok = 0;
+  }
+  return fclose(file) == 0 && ok;
+}
+
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   if (!data || size == 0 || size > F2E_FUZZ_MAX_INPUT) {
     return 0;
