@@ -110,6 +110,15 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         (void)f2e_audit_env_file_status_from_file(fixture, env_path);
       }
       break;
+
+    case 4:
+      if (cwd_ready == 1 && dotenv_config && write_dotenv(".env", data + 1, size - 1)) {
+        consume_owned(f2e_parse_json_argv_from_file(dotenv_config, "[\"fuzz\",\"--str=cli\"]"));
+        consume_owned(f2e_parse_structured_json_argv_from_file(
+            dotenv_config, "[\"fuzz\",\"--int=1\",\"--\",\"operand\"]"));
+        consume_owned(f2e_audit_env_file_from_file(dotenv_config, ".env"));
+      }
+      break;
   }
 
   free(text);
