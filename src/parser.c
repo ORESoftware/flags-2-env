@@ -14,11 +14,15 @@
 #include <string.h>
 
 #if defined(__APPLE__)
+#include <fcntl.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <sys/sysctl.h>
 #include <unistd.h>
 #elif defined(__unix__)
+#include <fcntl.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #elif defined(_WIN32)
 #include <windows.h>
