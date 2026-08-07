@@ -381,12 +381,15 @@ When the `.env` path is omitted, `flags2env` checks the `.env` file next to the 
 
 ## Env Files
 
-Parsing reads `./.env` from the process working directory. Values resolve in this order, highest first:
+Parsing reads `./.env` from the process working directory. A value can come from three sources, ranked highest first by default:
 
-1. argv flags
-2. the live process environment
-3. `./.env`
-4. the `[flags.*] default` declared in `.cli-flags.toml`
+| Source | Where it comes from |
+| --- | --- |
+| `flags` | argv |
+| `env_shell` | the live process environment |
+| `env_file` | `./.env` |
+
+Below all three sits the `[flags.*] default` declared in `.cli-flags.toml`. [`[order-of-preference]`](#changing-the-order-per-key) re-ranks the sources per env key.
 
 ```sh
 $ cat .env
