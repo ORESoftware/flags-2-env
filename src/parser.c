@@ -402,9 +402,9 @@ static int f2e_array_value_is_complete(const char *value) {
     if (in_quote) {
       continue;
     }
-    if (*cursor == '[') {
+    if (*cursor == opening) {
       depth++;
-    } else if (*cursor == ']') {
+    } else if (*cursor == closing) {
       depth--;
       if (depth <= 0) {
         return 1;
