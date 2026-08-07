@@ -788,4 +788,28 @@ if [ "$status" -eq 0 ] || [ "$actual" != "$expected" ]; then
   exit 1
 fi
 
+# Regression: a long inline `--flag=value` must not be truncated.
+#
+# The long-option parser used to copy the whole "name=value" token into the
+# F2E_MAX_NAME-sized name buffer and only then split on '=', which bounded the
+# *value* by the name buffer. Values longer than that were silently cut down to
+# a plausible-looking wrong string — a truncated path, URL, or JSON payload.
+LONG_VALUE_CONFIG="$ROOT_DIR/tests/long-inline-value/.cli-flags.toml"
+long_value="/var/folders/qr/l0klf0r566z1qdsfgcg9j7s00000gn/T/deeply/nested/build/output/definition.json"
+expected="export F2E_LONG_PATH='$long_value'"
+
+inline="$("$CLI" shell-env --config "$LONG_VALUE_CONFIG" -- prog "--path=$long_value")"
+if [ "$inline" != "$expected" ]; then
+  printf 'Long inline value was altered:\nExpected: %s\nActual:   %s\n' "$expected" "$inline" >&2
+  exit 1
+fi
+
+# The separated form never had the bug; asserting both keeps the two spellings
+# agreeing about what the value is.
+separated="$("$CLI" shell-env --config "$LONG_VALUE_CONFIG" -- prog --path "$long_value")"
+if [ "$separated" != "$inline" ]; then
+  printf 'Inline and separated forms disagree:\nInline:    %s\nSeparated: %s\n' "$inline" "$separated" >&2
+  exit 1
+fi
+
 printf 'flags2env tests passed\n'

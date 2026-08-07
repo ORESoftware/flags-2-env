@@ -2372,12 +2372,24 @@ static void f2e_apply_long_arg(F2EConfig *config, int scope, F2EPair *pairs, siz
   int negated = 0;
 
   const char *raw = token + 2;
-  f2e_strlcpy(name, raw, sizeof(name));
-  char *eq = strchr(name, '=');
+  /* Split on '=' in the raw token, not in a copy of it. Copying the whole
+     "name=value" token into `name` first bounded the *value* by F2E_MAX_NAME,
+     so a long inline value (a path, a URL, a JSON payload) was silently
+     truncated to fit the name buffer even though `inline_value` is
+     F2E_MAX_VALUE. Silent truncation is worse than an error: the caller gets a
+     plausible-looking wrong value. */
+  const char *eq = strchr(raw, '=');
   if (eq) {
-    *eq = '\0';
+    size_t name_length = (size_t)(eq - raw);
+    if (name_length >= sizeof(name)) {
+      name_length = sizeof(name) - 1;
+    }
+    memcpy(name, raw, name_length);
+    name[name_length] = '\0';
     f2e_strlcpy(inline_value, eq + 1, sizeof(inline_value));
     has_inline_value = 1;
+  } else {
+    f2e_strlcpy(name, raw, sizeof(name));
   }
 
   F2EFlag *flag = f2e_find_flag_by_alias(config, scope, name);
