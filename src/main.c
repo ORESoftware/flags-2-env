@@ -3,6 +3,7 @@
 #endif
 
 #include "parser.h"
+#include "terminal_context.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -586,6 +587,8 @@ static const char *f2e_cli_help_command_name(int argc, const char *const argv[])
       !f2e_cli_streq(argv[1], "completion") &&
       !f2e_cli_streq(argv[1], "completions") &&
       !f2e_cli_streq(argv[1], "autocomplete") &&
+      !f2e_cli_streq(argv[1], "context") &&
+      !f2e_cli_streq(argv[1], "terminal-context") &&
       !f2e_cli_streq(argv[1], "doctor") &&
       !f2e_cli_streq(argv[1], "diagnose") &&
       !f2e_cli_streq(argv[1], "env-audit") &&
@@ -629,6 +632,25 @@ static int f2e_cli_run_doctor(const char *config_path) {
   int ok = f2e_cli_stdout_line_locked(report);
   f2e_free(report);
   return ok ? status : 1;
+}
+
+/*
+ * `flags2env context` — print the terminal context this process sees.
+ *
+ * The detection already drives `requires_tty` and the help table width, but it
+ * was reachable only from C. Printing it is how someone answers "why did my
+ * CLI refuse to prompt" without attaching a debugger: run it in the same place
+ * the real command runs and read canPrompt.
+ */
+static int f2e_cli_run_context(void) {
+  char *report = f2e_terminal_context_json();
+  if (!report) {
+    f2e_cli_stderr_locked("%s", "flags2env: could not read the terminal context\n");
+    return 1;
+  }
+  int ok = f2e_cli_stdout_line_locked(report);
+  f2e_free(report);
+  return ok ? 0 : 1;
 }
 
 static int f2e_cli_run_env_audit(const char *config_path, const char *env_path) {
@@ -826,6 +848,11 @@ int main(int argc, const char *const argv[]) {
       return f2e_cli_run_audit(argc >= 4 ? argv[3] : NULL);
     }
     return f2e_cli_run_audit(argc >= 3 ? argv[2] : NULL);
+  }
+
+  if (argc >= 2 && (f2e_cli_streq(argv[1], "context") ||
+                    f2e_cli_streq(argv[1], "terminal-context"))) {
+    return f2e_cli_run_context();
   }
 
   if (argc >= 2 && (f2e_cli_streq(argv[1], "doctor") ||

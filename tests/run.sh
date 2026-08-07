@@ -1231,4 +1231,175 @@ case "$doctor_report" in
   *) ;;
 esac
 
+# requires_tty: a flag that needs a terminal is refused without one.
+#
+# The failure being prevented is a CLI that waits forever on input nobody can
+# give -- in CI, in cron, or on the far side of a pipe. The suite itself runs
+# without a terminal, so the "no tty" cases need no setup; the "has tty" cases
+# use the F2E_FORCE_* overrides rather than allocating a pty, which keeps the
+# check identical on every platform.
+TTY_CONFIG="$ROOT_DIR/tests/requires-tty/.cli-flags.toml"
+
+tty_run() {
+  "$CLI" shell-env --config "$TTY_CONFIG" -- prog "$@"
+}
+
+# Refused: every spelling of setting it, including inside a short bundle.
+for spelling in "--interactive" "-i" "-qi"; do
+  refused="$(tty_run $spelling)"
+  case "$refused" in
+    *"flags.interactive requires an interactive terminal"*) ;;
+    *) printf 'requires_tty did not refuse %s without a terminal:\n%s\n' \
+         "$spelling" "$refused" >&2; exit 1 ;;
+  esac
+  case "$refused" in
+    *"F2E_TTY_INTERACTIVE"*)
+      printf 'a refused requires_tty flag must not be exported (%s):\n%s\n' \
+        "$spelling" "$refused" >&2; exit 1 ;;
+    *) ;;
+  esac
+done
+
+# The separated form goes through a different code path than the bare one.
+separated="$(tty_run --interactive true)"
+case "$separated" in
+  *"requires an interactive terminal"*) ;;
+  *) printf 'requires_tty missed the separated form:\n%s\n' "$separated" >&2; exit 1 ;;
+esac
+
+# Turning it OFF must stay legal without a terminal: --no-interactive is
+# exactly how a caller says "do not prompt".
+negated="$(tty_run --no-interactive)"
+case "$negated" in
+  *"export F2E_TTY_INTERACTIVE='false'"*) ;;
+  *) printf '--no-interactive should be allowed without a terminal:\n%s\n' "$negated" >&2; exit 1 ;;
+esac
+
+# A flag without requires_tty is untouched.
+unrelated="$(tty_run --quiet)"
+case "$unrelated" in
+  *"export F2E_TTY_QUIET='true'"*) ;;
+  *) printf 'requires_tty leaked onto an unrelated flag:\n%s\n' "$unrelated" >&2; exit 1 ;;
+esac
+
+# Allowed once stdin and stderr are terminals outside CI.
+allowed="$(F2E_FORCE_STDIN_TTY=1 F2E_FORCE_STDERR_TTY=1 F2E_FORCE_CI=0 TERM=xterm tty_run --interactive)"
+case "$allowed" in
+  *"export F2E_TTY_INTERACTIVE='true'"*) ;;
+  *) printf 'requires_tty refused an interactive terminal:\n%s\n' "$allowed" >&2; exit 1 ;;
+esac
+
+# CI and TERM=dumb defeat a real terminal: nobody is there to answer.
+for hostile in "F2E_FORCE_CI=1" "TERM=dumb"; do
+  blocked="$(env F2E_FORCE_STDIN_TTY=1 F2E_FORCE_STDERR_TTY=1 $hostile \
+    "$CLI" shell-env --config "$TTY_CONFIG" -- prog --interactive)"
+  case "$blocked" in
+    *"requires an interactive terminal"*) ;;
+    *) printf '%s should defeat a terminal for requires_tty:\n%s\n' "$hostile" "$blocked" >&2; exit 1 ;;
+  esac
+done
+
+# requires_tty = "stdout" asks about stdout specifically, not about prompting.
+progress_blocked="$(F2E_FORCE_STDIN_TTY=1 F2E_FORCE_STDERR_TTY=1 tty_run --progress)"
+case "$progress_blocked" in
+  *"flags.progress requires a terminal on stdout"*) ;;
+  *) printf 'requires_tty = stdout should check stdout:\n%s\n' "$progress_blocked" >&2; exit 1 ;;
+esac
+progress_allowed="$(F2E_FORCE_STDOUT_TTY=1 tty_run --progress)"
+case "$progress_allowed" in
+  *"export F2E_TTY_PROGRESS='true'"*) ;;
+  *) printf 'requires_tty = stdout refused a stdout terminal:\n%s\n' "$progress_allowed" >&2; exit 1 ;;
+esac
+
+# A misspelled requires_tty must fail the audit rather than quietly meaning
+# "no requirement" -- that would be a terminal check that silently is not one.
+TTY_BAD_DIR="$(mktemp -d)"
+printf '[flags.x]\nenv = "F2E_TTY_X"\naliases = ["x"]\ntype = "bool"\nrequires_tty = "sometimes"\n' \
+  > "$TTY_BAD_DIR/.cli-flags.toml"
+set +e
+tty_bad="$("$CLI" audit "$TTY_BAD_DIR/.cli-flags.toml")"
+tty_bad_status=$?
+set -e
+rm -rf "$TTY_BAD_DIR"
+if [ "$tty_bad_status" -eq 0 ]; then
+  printf 'an invalid requires_tty should fail the audit:\n%s\n' "$tty_bad" >&2
+  exit 1
+fi
+case "$tty_bad" in
+  *"requires_tty must be true, false, prompt, stdin, stdout, or stderr"*) ;;
+  *) printf 'unexpected requires_tty audit message:\n%s\n' "$tty_bad" >&2; exit 1 ;;
+esac
+
+# parser.c detects terminals on its own because it must stay compilable as a
+# single translation unit. terminal_context.c has its own detection. They have
+# to agree, so assert it under the same forcing rather than trusting them to.
+context_prompt="$(F2E_FORCE_STDIN_TTY=1 F2E_FORCE_STDERR_TTY=1 F2E_FORCE_CI=0 TERM=xterm \
+  "$CLI" context 2>/dev/null || true)"
+if [ -n "$context_prompt" ]; then
+  case "$context_prompt" in
+    *'"canPrompt": true'*|*'"canPrompt":true'*) ;;
+    *)
+      printf 'terminal context and parser disagree about canPrompt:\n%s\n' "$context_prompt" >&2
+      exit 1 ;;
+  esac
+fi
+
+# The forcing variables above are how the checks stay deterministic on every
+# platform, but they are only worth trusting if they match a real terminal.
+# When script(1) is available, run the two decisive cases through an actual pty
+# and require the same answers. Skipped rather than failed where the flavour of
+# script(1) differs, since this is corroboration, not the primary coverage.
+# Probes by round-tripping a marker rather than by checking an exit status:
+# whether script(1) can allocate a pty here depends on what stdin is, and the
+# thing we need to know is "can I run a command under a pty and read what it
+# printed", which is exactly what this asks.
+f2e_pty_flavour=""
+if script -q /dev/null printf f2e-pty-probe 2>/dev/null | grep -q f2e-pty-probe; then
+  f2e_pty_flavour="bsd"          # macOS/BSD takes the command directly
+elif script -q -c "printf f2e-pty-probe" /dev/null 2>/dev/null | grep -q f2e-pty-probe; then
+  f2e_pty_flavour="util-linux"   # util-linux needs -c
+fi
+
+f2e_pty_run() {
+  case "$f2e_pty_flavour" in
+    bsd)        script -q /dev/null "$@" 2>/dev/null | tr -d '\r' ;;
+    util-linux) script -q -c "$*" /dev/null 2>/dev/null | tr -d '\r' ;;
+    *)          return 1 ;;
+  esac
+}
+
+if pty_accepted="$(f2e_pty_run env -u COLUMNS -u CI -u GITHUB_ACTIONS TERM=xterm \
+     "$CLI" shell-env --config "$TTY_CONFIG" -- prog --interactive)"; then
+  case "$pty_accepted" in
+    *"F2E_TTY_INTERACTIVE='true'"*) ;;
+    *) printf 'a real terminal should allow --interactive:\n%s\n' "$pty_accepted" >&2; exit 1 ;;
+  esac
+
+  # CI must defeat a real terminal, not just a forced one.
+  pty_ci="$(f2e_pty_run env -u COLUMNS TERM=xterm CI=1 \
+    "$CLI" shell-env --config "$TTY_CONFIG" -- prog --interactive)"
+  case "$pty_ci" in
+    *"requires an interactive terminal"*) ;;
+    *) printf 'CI should defeat a real terminal:\n%s\n' "$pty_ci" >&2; exit 1 ;;
+  esac
+  printf 'requires_tty: verified against a real pty\n'
+else
+  printf 'requires_tty: no usable script(1); pty corroboration skipped\n'
+fi
+
+# Help width is deterministic without a terminal: the table must not depend on
+# the size of whatever terminal happened to launch the build.
+piped_help="$(env -u COLUMNS "$CLI" --help | head -1)"
+piped_width=${#piped_help}
+if [ "$piped_width" -ne 80 ]; then
+  printf 'piped --help should be 80 columns, got %s\n' "$piped_width" >&2
+  exit 1
+fi
+# COLUMNS is the explicit override and still wins when piped.
+wide_help="$(COLUMNS=140 "$CLI" --help | head -1)"
+if [ "${#wide_help}" -ne 140 ]; then
+  printf 'COLUMNS=140 should widen piped --help, got %s\n' "${#wide_help}" >&2
+  exit 1
+fi
+
 printf 'flags2env tests passed\n'

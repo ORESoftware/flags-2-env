@@ -457,3 +457,25 @@ char *f2e_terminal_context_env_json(void) {
   }
   return json;
 }
+
+int f2e_terminal_stream_is_tty(const char *stream) {
+  if (!stream) {
+    return 0;
+  }
+  struct f2e_terminal_snapshot snapshot = f2e_detect_snapshot();
+  if (f2e_ascii_equal_ci(stream, "stdin")) {
+    return snapshot.stdin_tty;
+  }
+  if (f2e_ascii_equal_ci(stream, "stdout")) {
+    return snapshot.stdout_tty;
+  }
+  if (f2e_ascii_equal_ci(stream, "stderr")) {
+    return snapshot.stderr_tty;
+  }
+  return 0;
+}
+
+int f2e_terminal_can_prompt(void) {
+  struct f2e_terminal_snapshot snapshot = f2e_detect_snapshot();
+  return snapshot.can_prompt;
+}
