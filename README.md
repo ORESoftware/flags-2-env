@@ -379,6 +379,63 @@ build/flags2env env-audit .cli-flags.toml .env
 
 When the `.env` path is omitted, `flags2env` checks the `.env` file next to the selected `.cli-flags.toml`. Unknown `.env` keys are errors unless they are listed in `[env] ignore`; non-ignored TOML-declared env keys missing from `.env` are warnings because they may be optional, defaulted, or supplied by deployment infrastructure.
 
+## Env Files
+
+Parsing reads `./.env` from the process working directory. Values resolve in this order, highest first:
+
+1. argv flags
+2. the live process environment
+3. `./.env`
+4. the `[flags.*] default` declared in `.cli-flags.toml`
+
+```sh
+$ cat .env
+PORT=8080
+HOST="db.internal"
+
+$ mycli serve
+{"PORT":"8080","HOST":"db.internal","DEBUG":"false"}
+
+$ PORT=7777 mycli serve            # a live variable outranks the file
+{"PORT":"7777","HOST":"db.internal","DEBUG":"false"}
+
+$ PORT=7777 mycli serve --port 9999  # argv outranks both
+{"PORT":"9999","HOST":"db.internal","DEBUG":"false"}
+```
+
+Only `./.env` is read. There is no upward walk the way config discovery has one, and no lookup next to an explicitly passed config path, so a `--config` pointing into another tree never drags that tree's `.env` along. A `./.env` symlink is followed like a regular file, which is how a repo can point at a shared or generated env file.
+
+Only keys declared by a `[flags.*] env` are taken from the file. Undeclared keys stay out of the parsed map and are never copied into a returned JSON document. Parse-derived keys — the command path, per-command markers, positionals, unknown options, and parse errors — are never read from `.env` or the environment either, so neither can forge what argv actually contained.
+
+A `.env` value that does not fit its declared type is reported through `[parse] errors_env` and skipped, leaving the value below it in the order. A live environment value that does not fit is skipped silently: the ambient environment is not the parser's to validate, and a stray `DEBUG=verbose` in someone's shell should not turn into a parse error.
+
+### Letting `.env` win
+
+Some values belong to the repo rather than to whatever the shell happens to export. Declare that per flag:
+
+```toml
+[flags.token]
+env = "API_TOKEN"
+type = "string"
+dotenv_override = true
+```
+
+or for every key in the config:
+
+```toml
+[env]
+override = true
+```
+
+Either way argv still wins; only the middle two ranks swap. Turn file loading off entirely with `[env] load = false`, or per process with `FLAGS2ENV_DOTENV=0`.
+
+Callers that merge channels by hand instead of using the resolved map get the split they need from `parseStructured()`: `dotenv` holds the values that lose to the environment and `dotenvOverrides` the ones that win it, so per-flag `dotenv_override` survives a flat merge:
+
+```ts
+const s = f2e.parseStructured(process.argv);
+const config = { ...s.dotenv, ...process.env, ...s.dotenvOverrides, ...s.providedFlags };
+```
+
 ## Shell Completion
 
 Generate static bash or zsh completions for an end-product CLI:
