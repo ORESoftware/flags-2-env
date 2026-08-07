@@ -451,12 +451,14 @@ Turn file loading off entirely with `[env] load = false`, or per process with `F
 
 Because `./.env` comes from the ambient working directory, long-running or privileged consumers should declare `[env] load = false` for the same reason they do not discover `.cli-flags.toml` from the CWD — see [consumer compliance](docs/consumer-compliance.md#trusted-contract-discovery). That declaration is authoritative: `FLAGS2ENV_DOTENV` can only switch loading off, never back on.
 
-Callers that merge channels by hand instead of using the resolved map get the split they need from `parseStructured()`: `dotenv` holds the values that lose to the environment and `dotenvOverrides` the ones that win it, so per-flag `dotenv_override` survives a flat merge:
+Callers that merge channels by hand instead of using the resolved map get the split they need from `parseStructured()`: `dotenv` holds the values that lose to the environment and `dotenvOverrides` the ones that win it, so a re-ranked `.env` survives a flat merge:
 
 ```ts
 const s = f2e.parseStructured(process.argv);
 const config = { ...s.dotenv, ...process.env, ...s.dotenvOverrides, ...s.providedFlags };
 ```
+
+That reproduces `flags` while `flags` still outranks both env sources. `s.sourceOrder` reports the resolved order for every key that deviates from the default; if any of them ranks `flags` below an env source, the spread above cannot express it and `s.flags` is the value to use.
 
 ## Shell Completion
 
