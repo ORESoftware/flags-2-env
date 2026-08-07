@@ -35,6 +35,11 @@ export F2E_FUZZ_DOTENV_CWD="$WORK_DIR/dotenv-cwd"
 export F2E_FUZZ_DOTENV_CONFIG="$WORK_DIR/dotenv-config.toml"
 mkdir -p "$F2E_FUZZ_DOTENV_CWD"
 cat > "$F2E_FUZZ_DOTENV_CONFIG" <<'TOML'
+[order-of-preference]
+F2E_FUZZ_STR = (env_file, env_shell, flags)
+F2E_FUZZ_INT = (env_shell, flags)
+F2E_FUZZ_JSON = [env_file, flags]
+
 [flags.str]
 env = "F2E_FUZZ_STR"
 aliases = ["str"]
