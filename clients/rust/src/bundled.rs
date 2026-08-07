@@ -258,6 +258,18 @@ fn json_string_map(value: Option<&serde_json::Value>) -> HashMap<String, String>
         .unwrap_or_default()
 }
 
+fn json_string_vec_map(value: Option<&serde_json::Value>) -> HashMap<String, Vec<String>> {
+    value
+        .and_then(|value| value.as_object())
+        .map(|object| {
+            object
+                .iter()
+                .map(|(key, item)| (key.clone(), json_string_vec(Some(item))))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn required_json_string_map(
     value: Option<&serde_json::Value>,
     error: &'static str,
