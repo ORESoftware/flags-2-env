@@ -406,6 +406,8 @@ impl Flags2Env {
                 report.get("providedFlags"),
                 "loaded flags2env library does not support argv-only overrides",
             )?,
+            dotenv: json_string_map(report.get("dotenv")),
+            dotenv_overrides: json_string_map(report.get("dotenvOverrides")),
             command: report
                 .get("command")
                 .and_then(|value| value.as_str())
