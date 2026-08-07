@@ -55,6 +55,8 @@ For `server`, `mcp`, and `worker` consumers, use this precedence instead:
 
 Repository-local CLIs may intentionally use the current project directory as their policy boundary. That exception is represented by `kind: cli`; it must not be copied into daemons or protocol servers. Tests should prove that an attacker-controlled CWD contract is ignored, that the explicit override still works, and that the final release image contains the trusted package-relative contract.
 
+The same boundary covers `./.env`. Parsing reads it from the ambient working directory, so it is a second way a changed CWD can supply values for declared flags. `server`, `mcp`, and `worker` consumers should declare `[env] load = false` in their trusted contract and take deployment values from the real process environment instead. That declaration is authoritative: `FLAGS2ENV_DOTENV` can only switch loading off, never back on, so an ambient variable cannot undo it. Tests for these consumers should prove that an attacker-controlled `./.env` changes nothing.
+
 ## Central consumer-fleet verification
 
 `consumer-fleet.json` is the committed inventory of active contracts whose canonical help and completion surfaces must remain usable. Each entry names the repository, relative `.cli-flags.toml` path, command basename, and executable kind. Multiple contracts in one monorepo are separate entries, so adding one passing root contract cannot hide a broken nested server or worker.
