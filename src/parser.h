@@ -30,21 +30,34 @@ extern "C" {
 const char *f2e_version(void);
 
 /*
- * Value resolution, highest precedence first:
- *   1. argv flags
- *   2. the live process environment
- *   3. ./.env in the process working directory
- *   4. the [flags.*] default declared in .cli-flags.toml
- * Steps 2 and 3 swap for a key that declares [flags.*] dotenv_override = true,
- * or for every key when the config sets [env] override = true.
+ * A value can come from three sources, ranked highest first by default:
+ *   flags      argv
+ *   env_shell  the live process environment
+ *   env_file   ./.env in the process working directory
+ * Below all three sits the [flags.*] default declared in .cli-flags.toml.
+ *
+ * .cli-flags.toml can re-rank the sources per env key, including ranking argv
+ * last so a checked-in value cannot be overridden from the command line:
+ *
+ *   [order-of-preference]
+ *   MY_ENV_1 = (env_file, env_shell, flags)
+ *   MY_ENV_2 = (env_shell, flags)
+ *
+ * Brackets work as well as parentheses, and entries may be bare or quoted. A
+ * list that names only some sources is completed by appending the rest in
+ * default order, so (env_shell, flags) means env_shell > flags > env_file.
+ * Keys the table omits keep the default order. [env] order = (...) sets a
+ * config-wide default, and [flags.*] dotenv_override = true / [env] override
+ * = true remain as shorthands for lifting env_file over env_shell.
  *
  * Only ./.env is read: no upward walk, and no lookup next to an explicitly
- * passed config path. A ./.env symlink is followed. Only [flags.*] env keys
- * are taken from it. Parse-derived keys -- the command path, per-command
- * markers, positionals, unknown options, and parse errors -- are never read
- * from .env or the environment, so neither can forge them. Set
- * FLAGS2ENV_DOTENV=0 or [env] load = false to skip .env entirely; the config
- * declaration wins, because FLAGS2ENV_DOTENV can only switch loading off.
+ * passed config path. A ./.env symlink is followed, but only when it resolves
+ * to a regular file. Only [flags.*] env keys are taken from it. Parse-derived
+ * keys -- the command path, per-command markers, positionals, unknown options,
+ * and parse errors -- are never read from .env or the environment, so neither
+ * can forge them. Set FLAGS2ENV_DOTENV=0 or [env] load = false to skip .env
+ * entirely; the config declaration wins, because FLAGS2ENV_DOTENV can only
+ * switch loading off.
  */
 
 /*
