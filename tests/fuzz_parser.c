@@ -76,7 +76,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   memcpy(text, data, size);
   text[size] = '\0';
 
-  switch (data[0] % 4) {
+  switch (data[0] % 5) {
     case 0:
       consume_owned(f2e_parse_json_argv_from_file(fixture, text));
       consume_owned(f2e_parse_structured_json_argv_from_file(fixture, text));
