@@ -9,6 +9,8 @@ export interface StructuredParse {
    */
   dotenv: Record<string, string>;
   dotenvOverrides: Record<string, string>;
+  /** Resolved source order for each key that deviates from the default. */
+  sourceOrder: Record<string, string[]>;
   command: string;
   subcommands: string[];
   extras: string[];

@@ -202,6 +202,104 @@ int main(void) {
     }
   }
 
+  /* [order-of-preference] re-ranks the sources per key, including ranking
+     argv last so a checked-in value cannot be overridden from the CLI */
+  {
+    static const char *const ORDER_CONFIG =
+        "[order-of-preference]\n"
+        "API_HOST = (env_file, env_shell, flags)\n"
+        "API_TOKEN = (env_shell, flags)\n"
+        "API_PORT = [env_file, flags]\n"
+        "\n"
+        "[flags.host]\n"
+        "env = \"API_HOST\"\n"
+        "aliases = [\"host\"]\n"
+        "type = \"string\"\n"
+        "\n"
+        "[flags.token]\n"
+        "env = \"API_TOKEN\"\n"
+        "aliases = [\"token\"]\n"
+        "type = \"string\"\n"
+        "\n"
+        "[flags.port]\n"
+        "env = \"API_PORT\"\n"
+        "aliases = [\"port\"]\n"
+        "type = \"integer\"\n"
+        "default = 3000\n";
+    static const char *const ORDER_DOTENV =
+        "API_HOST=from-dotenv\n"
+        "API_TOKEN=from-dotenv\n"
+        "API_PORT=8080\n";
+
+    if (write_file(".cli-flags.toml", ORDER_CONFIG) && write_file(".env", ORDER_DOTENV)) {
+      setenv("API_HOST", "from-live", 1);
+      setenv("API_TOKEN", "from-live", 1);
+      setenv("API_PORT", "7777", 1);
+
+      const char *argv_all[] = {"app", "--host", "from-flag", "--token", "from-flag", "--port", "9999"};
+      char *ranked = f2e_parse(7, argv_all);
+      /* env_file first, so neither the shell nor argv displaces it */
+      check_contains(ranked, "\"API_HOST\":\"from-dotenv\"", "env_file ranked first beats argv");
+      /* env_shell > flags > env_file */
+      check_contains(ranked, "\"API_TOKEN\":\"from-live\"", "env_shell ranked first beats argv");
+      /* env_file > flags, with env_shell appended last */
+      check_contains(ranked, "\"API_PORT\":\"8080\"", "a two-entry list ranks env_file over argv");
+      f2e_free(ranked);
+
+      /* with the file gone, each key falls to the next rank in its own list */
+      unlink(".env");
+      char *fallen = f2e_parse(7, argv_all);
+      check_contains(fallen, "\"API_HOST\":\"from-live\"", "env_file absent falls to env_shell");
+      check_contains(fallen, "\"API_TOKEN\":\"from-live\"", "env_shell still wins");
+      /* API_PORT completed to env_file > flags > env_shell, so argv wins here */
+      check_contains(fallen, "\"API_PORT\":\"9999\"", "completion puts the omitted source last");
+      f2e_free(fallen);
+
+      char *report = f2e_parse_structured(7, argv_all);
+      if (report) {
+        check_contains(report, "\"sourceOrder\":{", "sourceOrder channel is present");
+        check_contains(report, "[\"env_file\",\"env_shell\",\"flags\"]", "a full list is reported verbatim");
+        check_contains(report, "[\"env_shell\",\"flags\",\"env_file\"]", "a partial list is reported completed");
+        f2e_free(report);
+      }
+
+      unsetenv("API_HOST");
+      unsetenv("API_TOKEN");
+      unsetenv("API_PORT");
+    }
+  }
+
+  /* a key with no entry keeps the default order */
+  {
+    static const char *const MIXED_CONFIG =
+        "[order-of-preference]\n"
+        "API_HOST = (env_file, flags)\n"
+        "\n"
+        "[flags.host]\n"
+        "env = \"API_HOST\"\n"
+        "aliases = [\"host\"]\n"
+        "type = \"string\"\n"
+        "\n"
+        "[flags.token]\n"
+        "env = \"API_TOKEN\"\n"
+        "aliases = [\"token\"]\n"
+        "type = \"string\"\n";
+    if (write_file(".cli-flags.toml", MIXED_CONFIG) &&
+        write_file(".env", "API_HOST=from-dotenv\nAPI_TOKEN=from-dotenv\n")) {
+      const char *argv_both[] = {"app", "--host", "from-flag", "--token", "from-flag"};
+      char *mixed = f2e_parse(5, argv_both);
+      check_contains(mixed, "\"API_HOST\":\"from-dotenv\"", "listed key uses its order");
+      check_contains(mixed, "\"API_TOKEN\":\"from-flag\"", "unlisted key keeps the default order");
+      f2e_free(mixed);
+
+      char *mixed_report = f2e_parse_structured(5, argv_both);
+      if (mixed_report) {
+        check_absent(mixed_report, "\"API_TOKEN\":[", "sourceOrder omits default-order keys");
+        f2e_free(mixed_report);
+      }
+    }
+  }
+
   unlink(".env");
   unlink(".cli-flags.toml");
   if (chdir("/") == 0) {
