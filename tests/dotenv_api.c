@@ -154,7 +154,21 @@ int main(void) {
       check(strstr(above, "API_TOKEN") != NULL,
             "an overriding key is in the above-env channel", above);
     }
-    check_contains(structured, "\"providedFlags\":{}", "providedFlags stays argv-only");
+    /* providedFlags carries argv values and command markers only, never a
+       value the file or the environment supplied */
+    const char *provided = strstr(structured, "\"providedFlags\":{");
+    const char *provided_end = provided ? strchr(provided, '}') : NULL;
+    if (provided && provided_end) {
+      size_t provided_len = (size_t)(provided_end - provided);
+      char *provided_copy = (char *)malloc(provided_len + 1);
+      if (provided_copy) {
+        memcpy(provided_copy, provided, provided_len);
+        provided_copy[provided_len] = '\0';
+        check(strstr(provided_copy, "from-dotenv") == NULL && strstr(provided_copy, "from-live") == NULL,
+              "providedFlags stays argv-only", provided_copy);
+        free(provided_copy);
+      }
+    }
     check_absent(structured, "forged", ".env cannot forge structured channels");
     f2e_free(structured);
   }
