@@ -2,7 +2,8 @@
 set -eu
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-CLI="$ROOT_DIR/build/flags2env"
+# F2E_TEST_CLI points the suite at an alternate build, e.g. a sanitizer one
+CLI="${F2E_TEST_CLI:-$ROOT_DIR/build/flags2env}"
 FIXTURE_DIR="$ROOT_DIR/tests/fixtures"
 TMP_TEST_DIR="${TMPDIR:-/tmp}/flags2env-tests-$$"
 rm -rf "$TMP_TEST_DIR"
