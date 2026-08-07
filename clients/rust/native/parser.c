@@ -69,6 +69,30 @@ typedef enum {
   F2E_TYPE_MAP = 6
 } F2EValueType;
 
+/*
+ * Where a value can come from. Adding a source means adding it here, giving it
+ * a name, and placing it in F2E_DEFAULT_SOURCE_ORDER; everything else -- list
+ * completion, auditing, and resolution -- is driven off this enum.
+ */
+typedef enum {
+  F2E_SOURCE_FLAGS = 0,     /* argv */
+  F2E_SOURCE_ENV_SHELL = 1, /* the live process environment */
+  F2E_SOURCE_ENV_FILE = 2   /* ./.env */
+} F2ESource;
+
+#define F2E_SOURCE_COUNT 3
+
+/* highest precedence first */
+typedef struct {
+  unsigned char sources[F2E_SOURCE_COUNT];
+  size_t count;
+} F2ESourceOrder;
+
+typedef struct {
+  char env[F2E_MAX_ENV];
+  F2ESourceOrder order;
+} F2EEnvOrder;
+
 typedef struct {
   char name[F2E_MAX_NAME];
   char env[F2E_MAX_ENV];
@@ -121,6 +145,14 @@ typedef struct {
   int invalid_env_audit_ignore;
   int dotenv_enabled;  /* read ./.env at parse time; default on */
   int dotenv_override; /* default for flags that do not declare dotenv_override */
+  F2EEnvOrder env_orders[F2E_MAX_FLAGS]; /* [order-of-preference] entries */
+  size_t env_order_count;
+  F2ESourceOrder default_order; /* [env] order, applied to unlisted keys */
+  int default_order_set;
+  char invalid_order_key[F2E_MAX_ENV];   /* first [order-of-preference] problem */
+  char invalid_order_value[F2E_MAX_VALUE];
+  int invalid_order_reason; /* F2EOrderProblem */
+  int too_many_env_orders;
   char help_url[F2E_MAX_VALUE];
   unsigned help_columns;
   int help_columns_configured;
@@ -155,8 +187,18 @@ typedef enum {
   F2E_SECTION_FLAG = 2,
   F2E_SECTION_HELP = 3,
   F2E_SECTION_ENV_AUDIT = 4,
-  F2E_SECTION_COMMAND = 5
+  F2E_SECTION_COMMAND = 5,
+  F2E_SECTION_ORDER = 6
 } F2EConfigSection;
+
+typedef enum {
+  F2E_ORDER_OK = 0,
+  F2E_ORDER_NOT_A_LIST = 1,
+  F2E_ORDER_UNKNOWN_SOURCE = 2,
+  F2E_ORDER_DUPLICATE_SOURCE = 3,
+  F2E_ORDER_TOO_SHORT = 4,
+  F2E_ORDER_UNDECLARED_KEY = 5
+} F2EOrderProblem;
 
 typedef struct {
   int commands[F2E_MAX_COMMAND_DEPTH];
@@ -330,7 +372,14 @@ static void f2e_strip_comment(char *line) {
 
 static int f2e_array_value_is_complete(const char *value) {
   const char *cursor = f2e_trim_left((char *)value);
-  if (*cursor != '[') {
+  char opening = *cursor;
+  char closing;
+  if (opening == '[') {
+    closing = ']';
+  } else if (opening == '(') {
+    /* preference lists accept parentheses as well as brackets */
+    closing = ')';
+  } else {
     return 1;
   }
 
@@ -353,9 +402,9 @@ static int f2e_array_value_is_complete(const char *value) {
     if (in_quote) {
       continue;
     }
-    if (*cursor == '[') {
+    if (*cursor == opening) {
       depth++;
-    } else if (*cursor == ']') {
+    } else if (*cursor == closing) {
       depth--;
       if (depth <= 0) {
         return 1;
@@ -708,6 +757,191 @@ static int f2e_parse_alias_list(char aliases[][F2E_MAX_NAME], size_t *alias_coun
 
 static int f2e_parse_aliases(F2EFlag *flag, const char *value) {
   return f2e_parse_alias_list(flag->aliases, &flag->alias_count, value);
+}
+
+/* highest precedence first; also the order unlisted sources are appended in */
+static const unsigned char F2E_DEFAULT_SOURCE_ORDER[F2E_SOURCE_COUNT] = {
+    F2E_SOURCE_FLAGS, F2E_SOURCE_ENV_SHELL, F2E_SOURCE_ENV_FILE};
+
+static const char *f2e_source_name(F2ESource source) {
+  switch (source) {
+    case F2E_SOURCE_FLAGS:
+      return "flags";
+    case F2E_SOURCE_ENV_SHELL:
+      return "env_shell";
+    case F2E_SOURCE_ENV_FILE:
+      return "env_file";
+    default:
+      return "unknown";
+  }
+}
+
+/* "env" reads as the process environment the way it does everywhere else */
+static int f2e_source_from_name(const char *name, F2ESource *out) {
+  static const struct {
+    const char *name;
+    F2ESource source;
+  } names[] = {
+      {"flags", F2E_SOURCE_FLAGS},         {"flag", F2E_SOURCE_FLAGS},
+      {"argv", F2E_SOURCE_FLAGS},          {"cli", F2E_SOURCE_FLAGS},
+      {"env_shell", F2E_SOURCE_ENV_SHELL}, {"env-shell", F2E_SOURCE_ENV_SHELL},
+      {"shell", F2E_SOURCE_ENV_SHELL},     {"env", F2E_SOURCE_ENV_SHELL},
+      {"environment", F2E_SOURCE_ENV_SHELL},
+      {"process_env", F2E_SOURCE_ENV_SHELL},
+      {"live_env", F2E_SOURCE_ENV_SHELL},
+      {"env_file", F2E_SOURCE_ENV_FILE},   {"env-file", F2E_SOURCE_ENV_FILE},
+      {"dotenv", F2E_SOURCE_ENV_FILE},     {"file", F2E_SOURCE_ENV_FILE},
+      {".env", F2E_SOURCE_ENV_FILE},
+  };
+  for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+    if (f2e_streq(names[i].name, name)) {
+      *out = names[i].source;
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static void f2e_source_order_default(F2ESourceOrder *order) {
+  for (size_t i = 0; i < F2E_SOURCE_COUNT; i++) {
+    order->sources[i] = F2E_DEFAULT_SOURCE_ORDER[i];
+  }
+  order->count = F2E_SOURCE_COUNT;
+}
+
+/* swaps the two env sources, leaving argv wherever it already sits */
+static void f2e_source_order_env_file_first(F2ESourceOrder *order) {
+  order->sources[0] = F2E_SOURCE_FLAGS;
+  order->sources[1] = F2E_SOURCE_ENV_FILE;
+  order->sources[2] = F2E_SOURCE_ENV_SHELL;
+  order->count = F2E_SOURCE_COUNT;
+}
+
+static int f2e_source_order_contains(const F2ESourceOrder *order, F2ESource source) {
+  for (size_t i = 0; i < order->count; i++) {
+    if (order->sources[i] == (unsigned char)source) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+/*
+ * Parses a preference list such as [env_file, env_shell, flags] or the same in
+ * parentheses. Elements may be bare or quoted. A list that names only some
+ * sources is completed by appending the rest in default order, so
+ * (env_shell, flags) resolves to env_shell > flags > env_file.
+ */
+static F2EOrderProblem f2e_parse_source_order(const char *value, F2ESourceOrder *out) {
+  memset(out, 0, sizeof(*out));
+
+  const char *cursor = f2e_trim_left((char *)value);
+  char closing;
+  if (*cursor == '[') {
+    closing = ']';
+  } else if (*cursor == '(') {
+    closing = ')';
+  } else {
+    return F2E_ORDER_NOT_A_LIST;
+  }
+  cursor++;
+
+  int closed = 0;
+  while (*cursor) {
+    cursor = f2e_trim_left((char *)cursor);
+    if (*cursor == closing) {
+      closed = 1;
+      break;
+    }
+
+    char word[F2E_MAX_NAME];
+    size_t len = 0;
+    if (*cursor == '"' || *cursor == '\'') {
+      char quote = *cursor++;
+      while (*cursor && *cursor != quote) {
+        if (len + 1 < sizeof(word)) {
+          word[len++] = *cursor;
+        }
+        cursor++;
+      }
+      if (*cursor != quote) {
+        return F2E_ORDER_NOT_A_LIST;
+      }
+      cursor++;
+    } else {
+      while (*cursor && *cursor != ',' && *cursor != closing && !isspace((unsigned char)*cursor)) {
+        if (len + 1 < sizeof(word)) {
+          word[len++] = *cursor;
+        }
+        cursor++;
+      }
+    }
+    word[len] = '\0';
+    if (len == 0) {
+      return F2E_ORDER_NOT_A_LIST;
+    }
+
+    F2ESource source;
+    if (!f2e_source_from_name(word, &source)) {
+      return F2E_ORDER_UNKNOWN_SOURCE;
+    }
+    if (f2e_source_order_contains(out, source)) {
+      return F2E_ORDER_DUPLICATE_SOURCE;
+    }
+    if (out->count >= F2E_SOURCE_COUNT) {
+      return F2E_ORDER_DUPLICATE_SOURCE;
+    }
+    out->sources[out->count++] = (unsigned char)source;
+
+    cursor = f2e_trim_left((char *)cursor);
+    if (*cursor == ',') {
+      cursor++;
+    }
+  }
+
+  if (!closed) {
+    return F2E_ORDER_NOT_A_LIST;
+  }
+  /* a single entry says nothing about precedence */
+  if (out->count < 2) {
+    return F2E_ORDER_TOO_SHORT;
+  }
+
+  for (size_t i = 0; i < F2E_SOURCE_COUNT; i++) {
+    F2ESource source = (F2ESource)F2E_DEFAULT_SOURCE_ORDER[i];
+    if (!f2e_source_order_contains(out, source)) {
+      out->sources[out->count++] = (unsigned char)source;
+    }
+  }
+  return F2E_ORDER_OK;
+}
+
+static void f2e_record_order_problem(F2EConfig *config,
+                                     F2EOrderProblem problem,
+                                     const char *key,
+                                     const char *value) {
+  if (config->invalid_order_reason != F2E_ORDER_OK) {
+    return;
+  }
+  config->invalid_order_reason = (int)problem;
+  f2e_strlcpy(config->invalid_order_key, key ? key : "", sizeof(config->invalid_order_key));
+  f2e_strlcpy(config->invalid_order_value, value ? value : "", sizeof(config->invalid_order_value));
+}
+
+static void f2e_set_env_order(F2EConfig *config, const char *env, const F2ESourceOrder *order) {
+  for (size_t i = 0; i < config->env_order_count; i++) {
+    if (f2e_streq(config->env_orders[i].env, env)) {
+      config->env_orders[i].order = *order;
+      return;
+    }
+  }
+  if (config->env_order_count >= F2E_MAX_FLAGS) {
+    config->too_many_env_orders = 1;
+    return;
+  }
+  F2EEnvOrder *entry = &config->env_orders[config->env_order_count++];
+  f2e_strlcpy(entry->env, env, sizeof(entry->env));
+  entry->order = *order;
 }
 
 static int f2e_add_env_key_to_list(char keys[][F2E_MAX_ENV], size_t *key_count, const char *key) {
@@ -1245,7 +1479,8 @@ static int f2e_load_config(const char *config_path, F2EConfig *config) {
     char *logical_eq = strchr(logical_line, '=');
     if (logical_eq) {
       char *logical_value = f2e_trim(logical_eq + 1);
-      while (*logical_value == '[' && !f2e_array_value_is_complete(logical_value)) {
+      while ((*logical_value == '[' || *logical_value == '(') &&
+             !f2e_array_value_is_complete(logical_value)) {
         if (!fgets(line, sizeof(line), file)) {
           break;
         }
@@ -1302,6 +1537,14 @@ static int f2e_load_config(const char *config_path, F2EConfig *config) {
                  f2e_streq(table, "dotenv")) {
         current = NULL;
         section = F2E_SECTION_ENV_AUDIT;
+      } else if (f2e_streq(table, "order-of-preference") ||
+                 f2e_streq(table, "order_of_preference") ||
+                 f2e_streq(table, "order-of-precedence") ||
+                 f2e_streq(table, "order_of_precedence") ||
+                 f2e_streq(table, "precedence") ||
+                 f2e_streq(table, "preference")) {
+        current = NULL;
+        section = F2E_SECTION_ORDER;
       } else {
         current = NULL;
         section = F2E_SECTION_NONE;
@@ -1459,6 +1702,33 @@ static int f2e_load_config(const char *config_path, F2EConfig *config) {
         if (f2e_parse_config_bool(value, &parsed)) {
           config->dotenv_override = parsed;
         }
+      } else if (f2e_streq(key, "order") ||
+                 f2e_streq(key, "order_of_preference") ||
+                 f2e_streq(key, "preference") ||
+                 f2e_streq(key, "precedence")) {
+        /* the config-wide default for keys [order-of-preference] omits */
+        F2ESourceOrder order;
+        F2EOrderProblem problem = f2e_parse_source_order(value, &order);
+        if (problem != F2E_ORDER_OK) {
+          f2e_record_order_problem(config, problem, "env.order", value);
+        } else {
+          config->default_order = order;
+          config->default_order_set = 1;
+        }
+      }
+      continue;
+    }
+
+    if (section == F2E_SECTION_ORDER) {
+      /* every key here is an env var name mapped to its preference list */
+      F2ESourceOrder order;
+      F2EOrderProblem problem = f2e_parse_source_order(value, &order);
+      if (!f2e_env_name_is_valid(key)) {
+        f2e_record_order_problem(config, F2E_ORDER_UNDECLARED_KEY, key, value);
+      } else if (problem != F2E_ORDER_OK) {
+        f2e_record_order_problem(config, problem, key, value);
+      } else {
+        f2e_set_env_order(config, key, &order);
       }
       continue;
     }
@@ -2418,12 +2688,24 @@ static void f2e_apply_long_arg(F2EConfig *config, int scope, F2EPair *pairs, siz
   int negated = 0;
 
   const char *raw = token + 2;
-  f2e_strlcpy(name, raw, sizeof(name));
-  char *eq = strchr(name, '=');
+  /* Split on '=' in the raw token, not in a copy of it. Copying the whole
+     "name=value" token into `name` first bounded the *value* by F2E_MAX_NAME,
+     so a long inline value (a path, a URL, a JSON payload) was silently
+     truncated to fit the name buffer even though `inline_value` is
+     F2E_MAX_VALUE. Silent truncation is worse than an error: the caller gets a
+     plausible-looking wrong value. */
+  const char *eq = strchr(raw, '=');
   if (eq) {
-    *eq = '\0';
+    size_t name_length = (size_t)(eq - raw);
+    if (name_length >= sizeof(name)) {
+      name_length = sizeof(name) - 1;
+    }
+    memcpy(name, raw, name_length);
+    name[name_length] = '\0';
     f2e_strlcpy(inline_value, eq + 1, sizeof(inline_value));
     has_inline_value = 1;
+  } else {
+    f2e_strlcpy(name, raw, sizeof(name));
   }
 
   F2EFlag *flag = f2e_find_flag_by_alias(config, scope, name);
@@ -2778,6 +3060,52 @@ static void f2e_audit_config_semantics(const F2EConfig *config, F2EAudit *audit)
     if (!f2e_env_name_is_valid(config->env_audit_ignored_keys[i])) {
       f2e_audit_add(audit, 1, "env.ignore contains invalid env var name \"%s\"",
                     config->env_audit_ignored_keys[i]);
+    }
+  }
+
+  if (config->invalid_order_reason != F2E_ORDER_OK) {
+    const char *where = config->invalid_order_key;
+    switch ((F2EOrderProblem)config->invalid_order_reason) {
+      case F2E_ORDER_NOT_A_LIST:
+        f2e_audit_add(audit, 1,
+                      "order-of-preference.%s must be a list such as (env_file, env_shell, flags)",
+                      where);
+        break;
+      case F2E_ORDER_UNKNOWN_SOURCE:
+        f2e_audit_add(audit, 1,
+                      "order-of-preference.%s names an unknown source; use flags, env_shell, or env_file",
+                      where);
+        break;
+      case F2E_ORDER_DUPLICATE_SOURCE:
+        f2e_audit_add(audit, 1, "order-of-preference.%s repeats a source", where);
+        break;
+      case F2E_ORDER_TOO_SHORT:
+        f2e_audit_add(audit, 1,
+                      "order-of-preference.%s needs at least two sources to express a preference",
+                      where);
+        break;
+      case F2E_ORDER_UNDECLARED_KEY:
+        f2e_audit_add(audit, 1, "order-of-preference key \"%s\" is not a valid env var name", where);
+        break;
+      case F2E_ORDER_OK:
+      default:
+        break;
+    }
+  }
+  if (config->too_many_env_orders) {
+    f2e_audit_add(audit, 1, "order-of-preference declares too many env keys");
+  }
+  /* an order for a key no flag declares is a typo that would silently do
+     nothing, so it is worth failing the audit over */
+  for (size_t i = 0; i < config->env_order_count; i++) {
+    int declared = 0;
+    for (size_t j = 0; j < config->flag_count && !declared; j++) {
+      declared = f2e_streq(config->flags[j].env, config->env_orders[i].env);
+    }
+    if (!declared) {
+      f2e_audit_add(audit, 1,
+                    "order-of-preference.%s is not declared as an env by any [flags.*] table",
+                    config->env_orders[i].env);
     }
   }
 
@@ -3516,34 +3844,83 @@ static void f2e_report_invalid_dotenv_value(F2EJsonList *errors, const F2EFlag *
 }
 
 /*
- * Overlays ./.env and the live environment between the schema defaults and
- * argv, so the resolved precedence is argv > live env > .env > default. A flag
- * with dotenv_override (or a config-wide [env] override) swaps the middle two
- * for that key only.
+ * Resolves the preference order for one env key, most specific declaration
+ * first: an [order-of-preference] entry, then the flag's own dotenv_override,
+ * then [env] order, then [env] override, then the built-in default.
+ */
+static void f2e_resolve_source_order(const F2EConfig *config,
+                                     const F2EFlag *flag,
+                                     F2ESourceOrder *out) {
+  for (size_t i = 0; i < config->env_order_count; i++) {
+    if (f2e_streq(config->env_orders[i].env, flag->env)) {
+      *out = config->env_orders[i].order;
+      return;
+    }
+  }
+  if (flag->dotenv_override_set) {
+    if (flag->dotenv_override) {
+      f2e_source_order_env_file_first(out);
+    } else {
+      f2e_source_order_default(out);
+    }
+    return;
+  }
+  if (config->default_order_set) {
+    *out = config->default_order;
+    return;
+  }
+  if (config->dotenv_override) {
+    f2e_source_order_env_file_first(out);
+    return;
+  }
+  f2e_source_order_default(out);
+}
+
+static int f2e_source_order_is_default(const F2ESourceOrder *order) {
+  for (size_t i = 0; i < F2E_SOURCE_COUNT; i++) {
+    if (order->sources[i] != F2E_DEFAULT_SOURCE_ORDER[i]) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+/*
+ * Ranks every declared source for each in-scope flag and writes the winner.
  *
- * Only [flags.*] env keys are overlaid. Parse-derived keys -- the command
- * path, per-command markers, positionals, unknown options, and parse errors --
+ * The default order is argv > live env > .env > the schema default, but
+ * [order-of-preference] can place any source anywhere, including ranking argv
+ * last so a checked-in value cannot be overridden from the command line. That
+ * is why argv arrives here as a map rather than being applied afterwards: it
+ * is a source like the others, and the caller has already scanned it.
+ *
+ * Only [flags.*] env keys are ranked. Parse-derived keys -- the command path,
+ * per-command markers, positionals, unknown options, and parse errors --
  * report what argv actually contained, so an ambient variable or a checked-in
  * .env must never be able to forge them.
  *
  * A .env value that does not fit its declared type is reported through the
- * errors channel and skipped: the file is project-owned input that env-audit
- * already holds to the schema. A live environment value that does not fit is
- * skipped silently, because the ambient environment is not this parser's to
- * validate and a stray DEBUG=verbose must not turn into a parse error.
+ * errors channel and skipped, leaving whatever ranked below it: the file is
+ * project-owned input that env-audit already holds to the schema. A live
+ * environment value that does not fit is skipped silently, because the ambient
+ * environment is not this parser's to validate and a stray DEBUG=verbose must
+ * not turn into a parse error.
  *
- * `dotenv_below` and `dotenv_above` are optional. They collect the .env values
- * that a caller merging channels by hand should apply under and over its own
- * environment snapshot, which is how per-flag override survives a spread.
+ * `dotenv_below` and `dotenv_above` are optional and split the .env values by
+ * their rank relative to the live environment, which is what lets a caller
+ * merging channels by hand reproduce per-key ordering with a flat spread.
  */
-static void f2e_apply_env_sources(F2EConfig *config,
-                                  F2EPair *pairs,
-                                  size_t pair_count,
-                                  const F2ECommandPath *path,
-                                  const F2EDotEnv *dotenv,
-                                  F2EPair *dotenv_below,
-                                  F2EPair *dotenv_above,
-                                  F2EJsonList *errors) {
+static void f2e_apply_value_sources(F2EConfig *config,
+                                    F2EPair *pairs,
+                                    size_t pair_count,
+                                    const F2ECommandPath *path,
+                                    const F2EDotEnv *dotenv,
+                                    const F2EPair *argv_pairs,
+                                    F2EPair *dotenv_below,
+                                    F2EPair *dotenv_above,
+                                    F2EJsonList *errors,
+                                    F2EBuffer *order_report,
+                                    size_t *order_report_count) {
   for (size_t i = 0; i < config->flag_count; i++) {
     const F2EFlag *flag = &config->flags[i];
     if (flag->env[0] == '\0') {
@@ -3553,33 +3930,60 @@ static void f2e_apply_env_sources(F2EConfig *config,
       continue;
     }
 
-    const char *from_file = f2e_dotenv_lookup(dotenv, flag->env);
-    const char *from_live = getenv(flag->env);
-    if (!from_file && !from_live) {
+    const F2EPair *from_argv =
+        argv_pairs ? f2e_find_pair((F2EPair *)argv_pairs, pair_count, flag->env) : NULL;
+    const char *values[F2E_SOURCE_COUNT];
+    values[F2E_SOURCE_FLAGS] = from_argv ? from_argv->value : NULL;
+    values[F2E_SOURCE_ENV_SHELL] = getenv(flag->env);
+    values[F2E_SOURCE_ENV_FILE] = f2e_dotenv_lookup(dotenv, flag->env);
+
+    F2ESourceOrder order;
+    f2e_resolve_source_order(config, flag, &order);
+
+    if (order_report && order_report_count && !f2e_source_order_is_default(&order)) {
+      int ok = (*order_report_count == 0 || f2e_buffer_append_char(order_report, ',')) &&
+               f2e_buffer_append_json_string(order_report, flag->env) &&
+               f2e_buffer_append(order_report, ":[");
+      for (size_t slot = 0; ok && slot < order.count; slot++) {
+        ok = (slot == 0 || f2e_buffer_append_char(order_report, ',')) &&
+             f2e_buffer_append_json_string(order_report, f2e_source_name((F2ESource)order.sources[slot]));
+      }
+      if (ok && f2e_buffer_append_char(order_report, ']')) {
+        (*order_report_count)++;
+      }
+    }
+
+    if (!values[F2E_SOURCE_FLAGS] && !values[F2E_SOURCE_ENV_SHELL] && !values[F2E_SOURCE_ENV_FILE]) {
       continue;
     }
 
-    int file_wins = flag->dotenv_override_set ? flag->dotenv_override : config->dotenv_override;
-    /* applied low precedence first, so a rejected value leaves the one below */
-    const char *ordered[2];
-    ordered[0] = file_wins ? from_live : from_file;
-    ordered[1] = file_wins ? from_file : from_live;
-
-    for (int slot = 0; slot < 2; slot++) {
-      const char *value = ordered[slot];
+    /* lowest precedence first, so a rejected value leaves the one beneath it */
+    for (size_t slot = order.count; slot > 0; slot--) {
+      F2ESource source = (F2ESource)order.sources[slot - 1];
+      const char *value = values[source];
       if (!value) {
         continue;
       }
       char normalized[F2E_MAX_VALUE];
       if (!f2e_normalize_flag_value(flag, value, normalized, sizeof(normalized))) {
-        if (value == from_file) {
+        if (source == F2E_SOURCE_ENV_FILE) {
           f2e_report_invalid_dotenv_value(errors, flag, value);
         }
         continue;
       }
       f2e_set_pair(pairs, pair_count, flag->env, normalized);
-      if (value == from_file) {
-        F2EPair *channel = file_wins ? dotenv_above : dotenv_below;
+      if (source == F2E_SOURCE_ENV_FILE) {
+        /* rank the file against the shell to decide which channel it belongs in */
+        size_t file_rank = order.count;
+        size_t shell_rank = order.count;
+        for (size_t r = 0; r < order.count; r++) {
+          if (order.sources[r] == F2E_SOURCE_ENV_FILE) {
+            file_rank = r;
+          } else if (order.sources[r] == F2E_SOURCE_ENV_SHELL) {
+            shell_rank = r;
+          }
+        }
+        F2EPair *channel = file_rank < shell_rank ? dotenv_above : dotenv_below;
         if (channel) {
           f2e_set_pair(channel, pair_count, flag->env, normalized);
         }
@@ -6494,17 +6898,6 @@ char *f2e_parse_from_file(const char *config_path, int argc, const char *const a
     f2e_apply_defaults(config, pairs, F2E_MAX_PAIRS);
   }
 
-  F2EDotEnv *dotenv = f2e_dotenv_open(config);
-  f2e_apply_env_sources(config,
-                        pairs,
-                        F2E_MAX_PAIRS,
-                        &path,
-                        dotenv,
-                        NULL,
-                        NULL,
-                        track_errors ? &errors : NULL);
-  free(dotenv);
-
   f2e_scan_argv(config,
                 pairs,
                 F2E_MAX_PAIRS,
@@ -6519,6 +6912,45 @@ char *f2e_parse_from_file(const char *config_path, int argc, const char *const a
                 allow_unknown_forced,
                 lenient,
                 NULL);
+
+  /*
+   * argv is one ranked source, not an unconditional last word, so it is
+   * scanned again on its own and then placed by the resolved order. The pass
+   * above stays because it is what collects positionals, unknown options, and
+   * parse errors.
+   */
+  F2EPair *argv_pairs = (F2EPair *)calloc(F2E_MAX_PAIRS, sizeof(F2EPair));
+  if (argv_pairs) {
+    f2e_scan_argv(config,
+                  argv_pairs,
+                  F2E_MAX_PAIRS,
+                  argc,
+                  argv,
+                  NULL,
+                  NULL,
+                  NULL,
+                  NULL,
+                  0,
+                  allow_unknown,
+                  allow_unknown_forced,
+                  lenient,
+                  NULL);
+  }
+
+  F2EDotEnv *dotenv = f2e_dotenv_open(config);
+  f2e_apply_value_sources(config,
+                          pairs,
+                          F2E_MAX_PAIRS,
+                          &path,
+                          dotenv,
+                          argv_pairs,
+                          NULL,
+                          NULL,
+                          track_errors ? &errors : NULL,
+                          NULL,
+                          NULL);
+  free(dotenv);
+  free(argv_pairs);
 
   if (track_positionals && positionals.count > 0) {
     char value[F2E_MAX_VALUE];
@@ -6655,17 +7087,6 @@ char *f2e_parse_structured_from_file(const char *config_path, int argc, const ch
     f2e_apply_defaults(config, pairs, F2E_MAX_PAIRS);
   }
 
-  F2EDotEnv *dotenv = f2e_dotenv_open(config);
-  f2e_apply_env_sources(config,
-                        pairs,
-                        F2E_MAX_PAIRS,
-                        &path,
-                        dotenv,
-                        dotenv_below_pairs,
-                        dotenv_above_pairs,
-                        lists_ok ? &errors : NULL);
-  free(dotenv);
-
   f2e_scan_argv(config,
                 pairs,
                 F2E_MAX_PAIRS,
@@ -6683,9 +7104,9 @@ char *f2e_parse_structured_from_file(const char *config_path, int argc, const ch
 
   /*
    * Scan the same argv without seeded defaults. Diagnostics and operands were
-   * already collected above; this pass only captures normalized CLI
-   * overrides for callers that merge them over a real environment before
-   * coercion.
+   * already collected above; this pass captures normalized CLI overrides for
+   * callers that merge them over a real environment before coercion, and it
+   * is also what lets argv be ranked as one source among several below.
    */
   f2e_scan_argv(config,
                 provided_pairs,
@@ -6701,6 +7122,23 @@ char *f2e_parse_structured_from_file(const char *config_path, int argc, const ch
                 allow_unknown_forced,
                 lenient,
                 NULL);
+
+  F2EDotEnv *dotenv = f2e_dotenv_open(config);
+  F2EBuffer order_report = {0};
+  size_t order_report_count = 0;
+  int order_report_ok = f2e_buffer_init(&order_report);
+  f2e_apply_value_sources(config,
+                          pairs,
+                          F2E_MAX_PAIRS,
+                          &path,
+                          dotenv,
+                          provided_pairs,
+                          dotenv_below_pairs,
+                          dotenv_above_pairs,
+                          lists_ok ? &errors : NULL,
+                          order_report_ok ? &order_report : NULL,
+                          order_report_ok ? &order_report_count : NULL);
+  free(dotenv);
 
   if (track_positionals && positionals.count > 0) {
     char value[F2E_MAX_VALUE];
@@ -6759,6 +7197,10 @@ char *f2e_parse_structured_from_file(const char *config_path, int argc, const ch
                f2e_buffer_append(&out, dotenv_below_json) &&
                f2e_buffer_append(&out, ",\"dotenvOverrides\":") &&
                f2e_buffer_append(&out, dotenv_above_json) &&
+               /* only keys whose order deviates from the default appear here */
+               f2e_buffer_append(&out, ",\"sourceOrder\":{") &&
+               f2e_buffer_append(&out, order_report_count > 0 ? order_report.data : "") &&
+               f2e_buffer_append(&out, "}") &&
                f2e_buffer_append(&out, ",\"command\":") &&
                f2e_buffer_append_json_string(&out, label) &&
                f2e_buffer_append(&out, ",\"subcommands\":") &&
@@ -6782,6 +7224,7 @@ char *f2e_parse_structured_from_file(const char *config_path, int argc, const ch
   f2e_free(provided_flags_json);
   f2e_free(dotenv_below_json);
   f2e_free(dotenv_above_json);
+  free(order_report.data);
   f2e_json_list_discard(&positionals);
   f2e_json_list_discard(&unknown_options);
   f2e_json_list_discard(&errors);

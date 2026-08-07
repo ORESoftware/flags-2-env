@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-#define F2E_VERSION "0.1.0"
+#define F2E_VERSION "0.2.0"
 
 #if defined(__clang__) || defined(__GNUC__)
 #define F2E_WARN_UNUSED_RESULT __attribute__((warn_unused_result))
