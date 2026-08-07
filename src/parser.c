@@ -1702,6 +1702,19 @@ static int f2e_load_config(const char *config_path, F2EConfig *config) {
         if (f2e_parse_config_bool(value, &parsed)) {
           config->dotenv_override = parsed;
         }
+      } else if (f2e_streq(key, "order") ||
+                 f2e_streq(key, "order_of_preference") ||
+                 f2e_streq(key, "preference") ||
+                 f2e_streq(key, "precedence")) {
+        /* the config-wide default for keys [order-of-preference] omits */
+        F2ESourceOrder order;
+        F2EOrderProblem problem = f2e_parse_source_order(value, &order);
+        if (problem != F2E_ORDER_OK) {
+          f2e_record_order_problem(config, problem, "env.order", value);
+        } else {
+          config->default_order = order;
+          config->default_order_set = 1;
+        }
       }
       continue;
     }
