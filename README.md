@@ -429,6 +429,8 @@ override = true
 
 Either way argv still wins; only the middle two ranks swap. Turn file loading off entirely with `[env] load = false`, or per process with `FLAGS2ENV_DOTENV=0`.
 
+Because `./.env` comes from the ambient working directory, long-running or privileged consumers should declare `[env] load = false` for the same reason they do not discover `.cli-flags.toml` from the CWD — see [consumer compliance](docs/consumer-compliance.md#trusted-contract-discovery). That declaration is authoritative: `FLAGS2ENV_DOTENV` can only switch loading off, never back on.
+
 Callers that merge channels by hand instead of using the resolved map get the split they need from `parseStructured()`: `dotenv` holds the values that lose to the environment and `dotenvOverrides` the ones that win it, so per-flag `dotenv_override` survives a flat merge:
 
 ```ts
