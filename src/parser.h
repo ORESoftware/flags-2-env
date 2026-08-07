@@ -107,17 +107,20 @@ int f2e_is_help_requested_json_argv(const char *argv_json) F2E_WARN_UNUSED_RESUL
  * Structured parse: every channel is returned separately instead of packed
  * into env keys, so nothing can be shadowed by real environment variables:
  *   {"flags":{...},"providedFlags":{...},"dotenv":{...},
- *    "dotenvOverrides":{...},"command":"remote add",
+ *    "dotenvOverrides":{...},"sourceOrder":{...},"command":"remote add",
  *    "subcommands":["remote","add"],"extras":["abc"],
  *    "unknownOptions":[],"errors":[]}
- * "flags" is the same fully-resolved env map f2e_parse returns.
+ * "flags" is the same fully-resolved env map f2e_parse returns, and is always
+ * authoritative.
  * "providedFlags" contains only argv-derived values and command markers, so
  * callers can merge it over the process environment before schema coercion.
- * "dotenv" and "dotenvOverrides" split the ./.env values by where they belong
- * relative to the caller's own environment snapshot, which is what keeps
- * per-flag dotenv_override expressible as a flat merge:
+ * "dotenv" and "dotenvOverrides" split the ./.env values by their rank
+ * relative to the live environment, so a caller merging by hand can write
  *   {...dotenv, ...processEnv, ...dotenvOverrides, ...providedFlags}
- * reproduces "flags" for every key argv or a declared default touched.
+ * That reproduces "flags" while argv outranks both env sources, which is the
+ * default. "sourceOrder" lists the resolved order for every key whose order
+ * deviates from the default -- including any key that ranks argv below an env
+ * source, where the flat merge above no longer holds and "flags" must be used.
  * "extras" holds operand tokens: positionals after the last matched command
  * (including tokens after a bare --); with no command matched, every
  * positional except argv[0].
