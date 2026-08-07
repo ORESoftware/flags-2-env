@@ -752,6 +752,191 @@ static int f2e_parse_aliases(F2EFlag *flag, const char *value) {
   return f2e_parse_alias_list(flag->aliases, &flag->alias_count, value);
 }
 
+/* highest precedence first; also the order unlisted sources are appended in */
+static const unsigned char F2E_DEFAULT_SOURCE_ORDER[F2E_SOURCE_COUNT] = {
+    F2E_SOURCE_FLAGS, F2E_SOURCE_ENV_SHELL, F2E_SOURCE_ENV_FILE};
+
+static const char *f2e_source_name(F2ESource source) {
+  switch (source) {
+    case F2E_SOURCE_FLAGS:
+      return "flags";
+    case F2E_SOURCE_ENV_SHELL:
+      return "env_shell";
+    case F2E_SOURCE_ENV_FILE:
+      return "env_file";
+    default:
+      return "unknown";
+  }
+}
+
+/* "env" reads as the process environment the way it does everywhere else */
+static int f2e_source_from_name(const char *name, F2ESource *out) {
+  static const struct {
+    const char *name;
+    F2ESource source;
+  } names[] = {
+      {"flags", F2E_SOURCE_FLAGS},         {"flag", F2E_SOURCE_FLAGS},
+      {"argv", F2E_SOURCE_FLAGS},          {"cli", F2E_SOURCE_FLAGS},
+      {"env_shell", F2E_SOURCE_ENV_SHELL}, {"env-shell", F2E_SOURCE_ENV_SHELL},
+      {"shell", F2E_SOURCE_ENV_SHELL},     {"env", F2E_SOURCE_ENV_SHELL},
+      {"environment", F2E_SOURCE_ENV_SHELL},
+      {"process_env", F2E_SOURCE_ENV_SHELL},
+      {"live_env", F2E_SOURCE_ENV_SHELL},
+      {"env_file", F2E_SOURCE_ENV_FILE},   {"env-file", F2E_SOURCE_ENV_FILE},
+      {"dotenv", F2E_SOURCE_ENV_FILE},     {"file", F2E_SOURCE_ENV_FILE},
+      {".env", F2E_SOURCE_ENV_FILE},
+  };
+  for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+    if (f2e_streq(names[i].name, name)) {
+      *out = names[i].source;
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static void f2e_source_order_default(F2ESourceOrder *order) {
+  for (size_t i = 0; i < F2E_SOURCE_COUNT; i++) {
+    order->sources[i] = F2E_DEFAULT_SOURCE_ORDER[i];
+  }
+  order->count = F2E_SOURCE_COUNT;
+}
+
+/* swaps the two env sources, leaving argv wherever it already sits */
+static void f2e_source_order_env_file_first(F2ESourceOrder *order) {
+  order->sources[0] = F2E_SOURCE_FLAGS;
+  order->sources[1] = F2E_SOURCE_ENV_FILE;
+  order->sources[2] = F2E_SOURCE_ENV_SHELL;
+  order->count = F2E_SOURCE_COUNT;
+}
+
+static int f2e_source_order_contains(const F2ESourceOrder *order, F2ESource source) {
+  for (size_t i = 0; i < order->count; i++) {
+    if (order->sources[i] == (unsigned char)source) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+/*
+ * Parses a preference list such as [env_file, env_shell, flags] or the same in
+ * parentheses. Elements may be bare or quoted. A list that names only some
+ * sources is completed by appending the rest in default order, so
+ * (env_shell, flags) resolves to env_shell > flags > env_file.
+ */
+static F2EOrderProblem f2e_parse_source_order(const char *value, F2ESourceOrder *out) {
+  memset(out, 0, sizeof(*out));
+
+  const char *cursor = f2e_trim_left((char *)value);
+  char closing;
+  if (*cursor == '[') {
+    closing = ']';
+  } else if (*cursor == '(') {
+    closing = ')';
+  } else {
+    return F2E_ORDER_NOT_A_LIST;
+  }
+  cursor++;
+
+  int closed = 0;
+  while (*cursor) {
+    cursor = f2e_trim_left((char *)cursor);
+    if (*cursor == closing) {
+      closed = 1;
+      break;
+    }
+
+    char word[F2E_MAX_NAME];
+    size_t len = 0;
+    if (*cursor == '"' || *cursor == '\'') {
+      char quote = *cursor++;
+      while (*cursor && *cursor != quote) {
+        if (len + 1 < sizeof(word)) {
+          word[len++] = *cursor;
+        }
+        cursor++;
+      }
+      if (*cursor != quote) {
+        return F2E_ORDER_NOT_A_LIST;
+      }
+      cursor++;
+    } else {
+      while (*cursor && *cursor != ',' && *cursor != closing && !isspace((unsigned char)*cursor)) {
+        if (len + 1 < sizeof(word)) {
+          word[len++] = *cursor;
+        }
+        cursor++;
+      }
+    }
+    word[len] = '\0';
+    if (len == 0) {
+      return F2E_ORDER_NOT_A_LIST;
+    }
+
+    F2ESource source;
+    if (!f2e_source_from_name(word, &source)) {
+      return F2E_ORDER_UNKNOWN_SOURCE;
+    }
+    if (f2e_source_order_contains(out, source)) {
+      return F2E_ORDER_DUPLICATE_SOURCE;
+    }
+    if (out->count >= F2E_SOURCE_COUNT) {
+      return F2E_ORDER_DUPLICATE_SOURCE;
+    }
+    out->sources[out->count++] = (unsigned char)source;
+
+    cursor = f2e_trim_left((char *)cursor);
+    if (*cursor == ',') {
+      cursor++;
+    }
+  }
+
+  if (!closed) {
+    return F2E_ORDER_NOT_A_LIST;
+  }
+  /* a single entry says nothing about precedence */
+  if (out->count < 2) {
+    return F2E_ORDER_TOO_SHORT;
+  }
+
+  for (size_t i = 0; i < F2E_SOURCE_COUNT; i++) {
+    F2ESource source = (F2ESource)F2E_DEFAULT_SOURCE_ORDER[i];
+    if (!f2e_source_order_contains(out, source)) {
+      out->sources[out->count++] = (unsigned char)source;
+    }
+  }
+  return F2E_ORDER_OK;
+}
+
+static void f2e_record_order_problem(F2EConfig *config,
+                                     F2EOrderProblem problem,
+                                     const char *key,
+                                     const char *value) {
+  if (config->invalid_order_reason != F2E_ORDER_OK) {
+    return;
+  }
+  config->invalid_order_reason = (int)problem;
+  f2e_strlcpy(config->invalid_order_key, key ? key : "", sizeof(config->invalid_order_key));
+  f2e_strlcpy(config->invalid_order_value, value ? value : "", sizeof(config->invalid_order_value));
+}
+
+static void f2e_set_env_order(F2EConfig *config, const char *env, const F2ESourceOrder *order) {
+  for (size_t i = 0; i < config->env_order_count; i++) {
+    if (f2e_streq(config->env_orders[i].env, env)) {
+      config->env_orders[i].order = *order;
+      return;
+    }
+  }
+  if (config->env_order_count >= F2E_MAX_FLAGS) {
+    config->too_many_env_orders = 1;
+    return;
+  }
+  F2EEnvOrder *entry = &config->env_orders[config->env_order_count++];
+  f2e_strlcpy(entry->env, env, sizeof(entry->env));
+  entry->order = *order;
+}
+
 static int f2e_add_env_key_to_list(char keys[][F2E_MAX_ENV], size_t *key_count, const char *key) {
   if (!keys || !key_count || !key) {
     return 0;
