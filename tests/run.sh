@@ -1072,4 +1072,95 @@ if [ "$dotenv_big_len" -ne 1023 ]; then
   exit 1
 fi
 
+# --- [order-of-preference] ----------------------------------------------
+#
+# Each key in the fixture declares a different ranking. Every case supplies all
+# three sources at once, so the winner names the rank that actually applied.
+
+DOTENV_ORDER_DIR="$ROOT_DIR/tests/dotenv-order"
+DOTENV_ORDER_CLEAN="env -u F2E_ORDER_FILE_FIRST -u F2E_ORDER_SHELL_FIRST \
+  -u F2E_ORDER_FILE_OVER_FLAGS -u F2E_ORDER_BRACKETS -u F2E_ORDER_QUOTED \
+  -u F2E_ORDER_DEFAULT -u FLAGS2ENV_DOTENV"
+DOTENV_ORDER_SHELL="F2E_ORDER_FILE_FIRST=shell F2E_ORDER_SHELL_FIRST=shell \
+  F2E_ORDER_FILE_OVER_FLAGS=shell F2E_ORDER_BRACKETS=shell F2E_ORDER_QUOTED=shell \
+  F2E_ORDER_DEFAULT=shell"
+DOTENV_ORDER_FLAGS="--file-first flag --shell-first flag --file-over-flags flag \
+  --brackets flag --quoted flag --default-order flag"
+
+order_audit="$("$CLI" audit "$DOTENV_ORDER_DIR/.cli-flags.toml")"
+expect_dotenv 'Expected a clean order-of-preference audit' \
+  '{"ok":true,"errorCount":0,"warningCount":0,"errors":[],"warnings":[]}' \
+  "$order_audit"
+
+# shellcheck disable=SC2086
+expect_dotenv 'Expected each key to resolve by its own declared order' \
+  '{"F2E_ORDER_FILE_FIRST":"file","F2E_ORDER_SHELL_FIRST":"shell","F2E_ORDER_FILE_OVER_FLAGS":"file","F2E_ORDER_BRACKETS":"file","F2E_ORDER_QUOTED":"file","F2E_ORDER_DEFAULT":"flag"}' \
+  "$(cd "$DOTENV_ORDER_DIR" && $DOTENV_ORDER_CLEAN $DOTENV_ORDER_SHELL "$CLI" app $DOTENV_ORDER_FLAGS)"
+
+# with the file out of the way each key falls to the next rank in its own list;
+# the completed lists put the omitted source last, so
+# (env_shell, flags) -> flags and (env_file, flags) -> flags
+DOTENV_ORDER_NOFILE="$TMP_TEST_DIR/dotenv-order-nofile"
+mkdir -p "$DOTENV_ORDER_NOFILE"
+cp "$DOTENV_ORDER_DIR/.cli-flags.toml" "$DOTENV_ORDER_NOFILE/.cli-flags.toml"
+# shellcheck disable=SC2086
+expect_dotenv 'Expected each key to fall to the next rank when .env is absent' \
+  '{"F2E_ORDER_FILE_FIRST":"shell","F2E_ORDER_SHELL_FIRST":"shell","F2E_ORDER_FILE_OVER_FLAGS":"flag","F2E_ORDER_BRACKETS":"shell","F2E_ORDER_QUOTED":"flag","F2E_ORDER_DEFAULT":"flag"}' \
+  "$(cd "$DOTENV_ORDER_NOFILE" && $DOTENV_ORDER_CLEAN $DOTENV_ORDER_SHELL "$CLI" app $DOTENV_ORDER_FLAGS)"
+
+# [env] order sets the config-wide default for keys the table omits
+DOTENV_ORDER_GLOBAL="$TMP_TEST_DIR/dotenv-order-global"
+mkdir -p "$DOTENV_ORDER_GLOBAL"
+{
+  printf '[env]\norder = (env_file, env_shell, flags)\n\n'
+  printf '[flags.host]\nenv = "F2E_ORDER_DEFAULT"\naliases = ["default-order"]\ntype = "string"\n'
+} > "$DOTENV_ORDER_GLOBAL/.cli-flags.toml"
+printf 'F2E_ORDER_DEFAULT=file\n' > "$DOTENV_ORDER_GLOBAL/.env"
+expect_dotenv 'Expected [env] order to set the config-wide default' \
+  '{"F2E_ORDER_DEFAULT":"file"}' \
+  "$(cd "$DOTENV_ORDER_GLOBAL" && $DOTENV_ORDER_CLEAN F2E_ORDER_DEFAULT=shell "$CLI" app --default-order flag)"
+
+# malformed preference lists fail the audit rather than resolving to something
+expect_order_audit_error() {
+  order_dir="$TMP_TEST_DIR/dotenv-order-bad"
+  rm -rf "$order_dir"
+  mkdir -p "$order_dir"
+  {
+    printf '[order-of-preference]\n%s\n\n' "$2"
+    printf '[flags.host]\nenv = "F2E_ORDER_DEFAULT"\naliases = ["default-order"]\ntype = "string"\n'
+  } > "$order_dir/.cli-flags.toml"
+  set +e
+  order_actual="$("$CLI" audit "$order_dir/.cli-flags.toml")"
+  order_status=$?
+  set -e
+  if [ "$order_status" -eq 0 ]; then
+    printf '%s: expected a failing audit, got: %s\n' "$1" "$order_actual" >&2
+    exit 1
+  fi
+  case "$order_actual" in
+    *"$3"*)
+      ;;
+    *)
+      printf '%s\nExpected message containing: %s\nActual: %s\n' "$1" "$3" "$order_actual" >&2
+      exit 1
+      ;;
+  esac
+}
+
+expect_order_audit_error 'Expected an unknown source to fail the audit' \
+  'F2E_ORDER_DEFAULT = (env_file, nonsense)' \
+  'names an unknown source'
+expect_order_audit_error 'Expected a repeated source to fail the audit' \
+  'F2E_ORDER_DEFAULT = (env_file, env_file)' \
+  'repeats a source'
+expect_order_audit_error 'Expected a single-entry list to fail the audit' \
+  'F2E_ORDER_DEFAULT = (env_file)' \
+  'needs at least two sources'
+expect_order_audit_error 'Expected a non-list value to fail the audit' \
+  'F2E_ORDER_DEFAULT = env_file' \
+  'must be a list'
+expect_order_audit_error 'Expected an undeclared env key to fail the audit' \
+  'F2E_ORDER_NOT_DECLARED = (env_file, flags)' \
+  'is not declared as an env by any [flags.*] table'
+
 printf 'flags2env tests passed\n'
