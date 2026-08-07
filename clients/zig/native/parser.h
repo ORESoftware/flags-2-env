@@ -30,6 +30,23 @@ extern "C" {
 const char *f2e_version(void);
 
 /*
+ * Value resolution, highest precedence first:
+ *   1. argv flags
+ *   2. the live process environment
+ *   3. ./.env in the process working directory
+ *   4. the [flags.*] default declared in .cli-flags.toml
+ * Steps 2 and 3 swap for a key that declares [flags.*] dotenv_override = true,
+ * or for every key when the config sets [env] override = true.
+ *
+ * Only ./.env is read: no upward walk, and no lookup next to an explicitly
+ * passed config path. A ./.env symlink is followed. Only [flags.*] env keys
+ * are taken from it. Parse-derived keys -- the command path, per-command
+ * markers, positionals, unknown options, and parse errors -- are never read
+ * from .env or the environment, so neither can forge them. Set
+ * FLAGS2ENV_DOTENV=0 or [env] load = false to skip .env entirely.
+ */
+
+/*
  * Parses argv using the nearest .cli-flags.toml found by walking upward from
  * the current working directory. Refuses to use $HOME/.cli-flags.toml. Returns
  * a heap-allocated JSON object string. Call f2e_free() with the returned pointer.
@@ -75,12 +92,18 @@ int f2e_is_help_requested_json_argv(const char *argv_json) F2E_WARN_UNUSED_RESUL
 /*
  * Structured parse: every channel is returned separately instead of packed
  * into env keys, so nothing can be shadowed by real environment variables:
- *   {"flags":{...},"providedFlags":{...},"command":"remote add",
+ *   {"flags":{...},"providedFlags":{...},"dotenv":{...},
+ *    "dotenvOverrides":{...},"command":"remote add",
  *    "subcommands":["remote","add"],"extras":["abc"],
  *    "unknownOptions":[],"errors":[]}
- * "flags" is the same default-bearing env map f2e_parse returns.
+ * "flags" is the same fully-resolved env map f2e_parse returns.
  * "providedFlags" contains only argv-derived values and command markers, so
  * callers can merge it over the process environment before schema coercion.
+ * "dotenv" and "dotenvOverrides" split the ./.env values by where they belong
+ * relative to the caller's own environment snapshot, which is what keeps
+ * per-flag dotenv_override expressible as a flat merge:
+ *   {...dotenv, ...processEnv, ...dotenvOverrides, ...providedFlags}
+ * reproduces "flags" for every key argv or a declared default touched.
  * "extras" holds operand tokens: positionals after the last matched command
  * (including tokens after a bare --); with no command matched, every
  * positional except argv[0].
