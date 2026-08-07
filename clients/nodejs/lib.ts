@@ -195,9 +195,12 @@ export function parseFromArgs(argv: readonly unknown[] = process.argv, options: 
  * (dashdash-style), so nothing is packed into — or shadowed by — env keys.
  * `flags` is the same fully-resolved map parse() returns; `providedFlags`
  * contains only argv-derived values and command markers. `dotenv` and
- * `dotenvOverrides` split the ./.env values by where they belong relative to
- * process.env, so per-flag dotenv_override survives a flat merge:
+ * `dotenvOverrides` split the ./.env values by their rank relative to
+ * process.env, so a re-ranked .env survives a flat merge:
  * {...dotenv, ...process.env, ...dotenvOverrides, ...providedFlags}.
+ * That holds while `flags` outranks both env sources, which is the default.
+ * `sourceOrder` reports the resolved order for each key that deviates; if one
+ * ranks `flags` below an env source, use `flags` rather than the spread.
  */
 export function parseStructured(
   argv: readonly unknown[] = process.argv,
