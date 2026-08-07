@@ -3051,6 +3051,52 @@ static void f2e_audit_config_semantics(const F2EConfig *config, F2EAudit *audit)
     }
   }
 
+  if (config->invalid_order_reason != F2E_ORDER_OK) {
+    const char *where = config->invalid_order_key;
+    switch ((F2EOrderProblem)config->invalid_order_reason) {
+      case F2E_ORDER_NOT_A_LIST:
+        f2e_audit_add(audit, 1,
+                      "order-of-preference.%s must be a list such as (env_file, env_shell, flags)",
+                      where);
+        break;
+      case F2E_ORDER_UNKNOWN_SOURCE:
+        f2e_audit_add(audit, 1,
+                      "order-of-preference.%s names an unknown source; use flags, env_shell, or env_file",
+                      where);
+        break;
+      case F2E_ORDER_DUPLICATE_SOURCE:
+        f2e_audit_add(audit, 1, "order-of-preference.%s repeats a source", where);
+        break;
+      case F2E_ORDER_TOO_SHORT:
+        f2e_audit_add(audit, 1,
+                      "order-of-preference.%s needs at least two sources to express a preference",
+                      where);
+        break;
+      case F2E_ORDER_UNDECLARED_KEY:
+        f2e_audit_add(audit, 1, "order-of-preference key \"%s\" is not a valid env var name", where);
+        break;
+      case F2E_ORDER_OK:
+      default:
+        break;
+    }
+  }
+  if (config->too_many_env_orders) {
+    f2e_audit_add(audit, 1, "order-of-preference declares too many env keys");
+  }
+  /* an order for a key no flag declares is a typo that would silently do
+     nothing, so it is worth failing the audit over */
+  for (size_t i = 0; i < config->env_order_count; i++) {
+    int declared = 0;
+    for (size_t j = 0; j < config->flag_count && !declared; j++) {
+      declared = f2e_streq(config->flags[j].env, config->env_orders[i].env);
+    }
+    if (!declared) {
+      f2e_audit_add(audit, 1,
+                    "order-of-preference.%s is not declared as an env by any [flags.*] table",
+                    config->env_orders[i].env);
+    }
+  }
+
   if (config->positionals_env[0] != '\0' &&
       config->unknown_options_env[0] != '\0' &&
       f2e_streq(config->positionals_env, config->unknown_options_env)) {
