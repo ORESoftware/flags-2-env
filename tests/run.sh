@@ -937,7 +937,7 @@ expect_dotenv_format 'Expected an invalid key to be skipped' \
 expect_dotenv_format 'Expected double quotes to be stripped' \
   'F2E_DOTENV_HOST="double quoted"\n' 'double quoted'
 expect_dotenv_format 'Expected single quotes to be literal' \
-  "F2E_DOTENV_HOST='raw\\\\tvalue'\n" 'raw\\\\tvalue'
+  'F2E_DOTENV_HOST=\047raw\\tvalue\047\n' 'raw\\tvalue'
 expect_dotenv_format 'Expected an unterminated quote to keep what it read' \
   'F2E_DOTENV_HOST="unterminated\n' 'unterminated'
 expect_dotenv_format 'Expected a comment after a closing quote to be dropped' \
