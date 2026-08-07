@@ -22,6 +22,9 @@ exclude = [
   "clients/**/_build/**",
   "clients/**/build/**",
   "clients/**/target/**",
+  # generated client lockfiles: resolved locally, never a release input
+  "clients/dart/pubspec.lock",
+  "clients/rust/Cargo.lock",
 ]
 
 [build]
