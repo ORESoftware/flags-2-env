@@ -93,11 +93,14 @@ export function parseFromArgs(argv = process.argv, options = {}) {
 }
 
 /**
- * Structured parse: {flags, providedFlags, command, subcommands, extras,
- * unknownOptions, errors} as separate channels (dashdash-style), so nothing
- * is packed into — or shadowed by — env keys. `flags` is the same
- * default-bearing map parse() returns; `providedFlags` contains only
- * argv-derived values and command markers.
+ * Structured parse: {flags, providedFlags, dotenv, dotenvOverrides, command,
+ * subcommands, extras, unknownOptions, errors} as separate channels
+ * (dashdash-style), so nothing is packed into — or shadowed by — env keys.
+ * `flags` is the same fully-resolved map parse() returns; `providedFlags`
+ * contains only argv-derived values and command markers. `dotenv` and
+ * `dotenvOverrides` split the ./.env values by where they belong relative to
+ * process.env, so per-flag dotenv_override survives a flat merge:
+ * {...dotenv, ...process.env, ...dotenvOverrides, ...providedFlags}.
  */
 export function parseStructured(argv = process.argv, options = {}) {
   if (!Array.isArray(argv)) {

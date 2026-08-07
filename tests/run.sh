@@ -2,7 +2,8 @@
 set -eu
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-CLI="$ROOT_DIR/build/flags2env"
+# F2E_TEST_CLI points the suite at an alternate build, e.g. a sanitizer one
+CLI="${F2E_TEST_CLI:-$ROOT_DIR/build/flags2env}"
 FIXTURE_DIR="$ROOT_DIR/tests/fixtures"
 TMP_TEST_DIR="${TMPDIR:-/tmp}/flags2env-tests-$$"
 rm -rf "$TMP_TEST_DIR"
@@ -785,6 +786,289 @@ set -e
 expected='{"ok":false,"errorCount":1,"warningCount":0,"errors":["help.columns must be a list of supported table column names"],"warnings":[]}'
 if [ "$status" -eq 0 ] || [ "$actual" != "$expected" ]; then
   printf 'Expected unclosed multiline array audit failure:\n%s\nActual status: %s\nActual: %s\n' "$expected" "$status" "$actual" >&2
+  exit 1
+fi
+
+# --- ./.env loading -----------------------------------------------------
+#
+# Resolution is argv > live env > ./.env > default, and only ./.env in the
+# process working directory is read. The fixture uses F2E_DOTENV_* keys so an
+# ambient variable cannot decide the outcome, and every case still clears them
+# explicitly.
+
+DOTENV_DIR="$ROOT_DIR/tests/dotenv"
+DOTENV_OVERRIDE_DIR="$ROOT_DIR/tests/dotenv-global-override"
+DOTENV_CLEAN="env -u F2E_DOTENV_PORT -u F2E_DOTENV_HOST -u F2E_DOTENV_TOKEN -u F2E_DOTENV_DEBUG -u FLAGS2ENV_DOTENV"
+
+expect_dotenv() {
+  label="$1"
+  expected="$2"
+  actual="$3"
+  if [ "$actual" != "$expected" ]; then
+    printf '%s\nExpected: %s\nActual:   %s\n' "$label" "$expected" "$actual" >&2
+    exit 1
+  fi
+}
+
+# .env supplies every declared key it names; the undeclared key stays out
+expect_dotenv 'Expected .env values' \
+  '{"F2E_DOTENV_PORT":"8080","F2E_DOTENV_DEBUG":"true","F2E_DOTENV_HOST":"db.internal","F2E_DOTENV_TOKEN":"from-dotenv"}' \
+  "$(cd "$DOTENV_DIR" && $DOTENV_CLEAN "$CLI" app)"
+
+# argv beats .env
+expect_dotenv 'Expected argv to beat .env' \
+  '{"F2E_DOTENV_PORT":"9999","F2E_DOTENV_DEBUG":"true","F2E_DOTENV_HOST":"db.internal","F2E_DOTENV_TOKEN":"from-dotenv"}' \
+  "$(cd "$DOTENV_DIR" && $DOTENV_CLEAN "$CLI" app --port 9999)"
+
+# the live environment beats .env for a key that did not opt into override,
+# while the opted-in token still takes its .env value
+expect_dotenv 'Expected live env to beat .env except for the override key' \
+  '{"F2E_DOTENV_PORT":"7777","F2E_DOTENV_DEBUG":"true","F2E_DOTENV_HOST":"db.internal","F2E_DOTENV_TOKEN":"from-dotenv"}' \
+  "$(cd "$DOTENV_DIR" && $DOTENV_CLEAN F2E_DOTENV_PORT=7777 F2E_DOTENV_TOKEN=from-live "$CLI" app)"
+
+# argv still outranks the live environment
+expect_dotenv 'Expected argv to beat the live environment' \
+  '{"F2E_DOTENV_PORT":"9999","F2E_DOTENV_DEBUG":"true","F2E_DOTENV_HOST":"db.internal","F2E_DOTENV_TOKEN":"from-dotenv"}' \
+  "$(cd "$DOTENV_DIR" && $DOTENV_CLEAN F2E_DOTENV_PORT=7777 "$CLI" app --port 9999)"
+
+# [env] override = true flips .env above the live environment for every key
+expect_dotenv 'Expected [env] override to lift .env over the live environment' \
+  '{"F2E_DOTENV_PORT":"8080","F2E_DOTENV_DEBUG":"true","F2E_DOTENV_HOST":"db.internal","F2E_DOTENV_TOKEN":"from-dotenv"}' \
+  "$(cd "$DOTENV_OVERRIDE_DIR" && $DOTENV_CLEAN F2E_DOTENV_PORT=7777 "$CLI" app)"
+
+expect_dotenv 'Expected argv to beat an overriding .env' \
+  '{"F2E_DOTENV_PORT":"9999","F2E_DOTENV_DEBUG":"true","F2E_DOTENV_HOST":"db.internal","F2E_DOTENV_TOKEN":"from-dotenv"}' \
+  "$(cd "$DOTENV_OVERRIDE_DIR" && $DOTENV_CLEAN F2E_DOTENV_PORT=7777 "$CLI" app --port 9999)"
+
+# FLAGS2ENV_DOTENV=0 skips the file without touching the config
+expect_dotenv 'Expected FLAGS2ENV_DOTENV=0 to skip .env' \
+  '{"F2E_DOTENV_PORT":"3000","F2E_DOTENV_DEBUG":"false"}' \
+  "$(cd "$DOTENV_DIR" && $DOTENV_CLEAN FLAGS2ENV_DOTENV=0 "$CLI" app)"
+
+# [env] load = false is how a daemon refuses to take values from an ambient
+# working directory, so an ambient variable must not be able to undo it
+DOTENV_NO_LOAD_DIR="$TMP_TEST_DIR/dotenv-no-load"
+mkdir -p "$DOTENV_NO_LOAD_DIR"
+{
+  printf '[env]\nload = false\n'
+  cat "$DOTENV_DIR/.cli-flags.toml"
+} > "$DOTENV_NO_LOAD_DIR/.cli-flags.toml"
+cp "$DOTENV_DIR/.env" "$DOTENV_NO_LOAD_DIR/.env"
+expect_dotenv 'Expected FLAGS2ENV_DOTENV=1 not to defeat [env] load = false' \
+  '{"F2E_DOTENV_PORT":"3000","F2E_DOTENV_DEBUG":"false"}' \
+  "$(cd "$DOTENV_NO_LOAD_DIR" && $DOTENV_CLEAN FLAGS2ENV_DOTENV=1 "$CLI" app)"
+
+# a ./.env symlink is followed like a regular file
+DOTENV_LINK_DIR="$TMP_TEST_DIR/dotenv-symlink"
+mkdir -p "$DOTENV_LINK_DIR/shared"
+cp "$DOTENV_DIR/.cli-flags.toml" "$DOTENV_LINK_DIR/.cli-flags.toml"
+cp "$DOTENV_DIR/.env" "$DOTENV_LINK_DIR/shared/team.env"
+ln -s shared/team.env "$DOTENV_LINK_DIR/.env"
+expect_dotenv 'Expected a symlinked ./.env to be followed' \
+  '{"F2E_DOTENV_PORT":"8080","F2E_DOTENV_DEBUG":"true","F2E_DOTENV_HOST":"db.internal","F2E_DOTENV_TOKEN":"from-dotenv"}' \
+  "$(cd "$DOTENV_LINK_DIR" && $DOTENV_CLEAN "$CLI" app)"
+
+# only the working directory is searched. Config discovery still walks upward,
+# so running from a subdirectory finds the parent's .cli-flags.toml and must
+# not pick up the .env sitting beside it.
+DOTENV_NESTED_ROOT="$TMP_TEST_DIR/dotenv-nested"
+mkdir -p "$DOTENV_NESTED_ROOT/child"
+cp "$DOTENV_DIR/.cli-flags.toml" "$DOTENV_NESTED_ROOT/.cli-flags.toml"
+cp "$DOTENV_DIR/.env" "$DOTENV_NESTED_ROOT/.env"
+expect_dotenv 'Expected .env lookup not to walk upward with config discovery' \
+  '{"F2E_DOTENV_PORT":"3000","F2E_DOTENV_DEBUG":"false"}' \
+  "$(cd "$DOTENV_NESTED_ROOT/child" && $DOTENV_CLEAN "$CLI" app)"
+
+# a .env value that does not fit its declared type is a reported parse error
+# rather than a silent substitution
+DOTENV_BAD_DIR="$TMP_TEST_DIR/dotenv-bad"
+mkdir -p "$DOTENV_BAD_DIR"
+{
+  cat "$DOTENV_DIR/.cli-flags.toml"
+  printf '\n[parse]\nerrors_env = "F2E_DOTENV_ERRORS"\n'
+} > "$DOTENV_BAD_DIR/.cli-flags.toml"
+printf 'F2E_DOTENV_PORT=not-a-number\n' > "$DOTENV_BAD_DIR/.env"
+expect_dotenv 'Expected an invalid .env value to be reported and skipped' \
+  '{"F2E_DOTENV_PORT":"3000","F2E_DOTENV_DEBUG":"false","F2E_DOTENV_ERRORS":"[\".env F2E_DOTENV_PORT value \\\"not-a-number\\\" is not a valid integer for flags.port\"]"}' \
+  "$(cd "$DOTENV_BAD_DIR" && $DOTENV_CLEAN "$CLI" app)"
+
+# the ambient environment is not this parser's to police: a live value that
+# does not fit its declared type is skipped without becoming a parse error
+DOTENV_NO_FILE_DIR="$TMP_TEST_DIR/dotenv-no-file"
+mkdir -p "$DOTENV_NO_FILE_DIR"
+cp "$DOTENV_BAD_DIR/.cli-flags.toml" "$DOTENV_NO_FILE_DIR/.cli-flags.toml"
+expect_dotenv 'Expected an invalid live env value to be skipped silently' \
+  '{"F2E_DOTENV_PORT":"3000","F2E_DOTENV_DEBUG":"false"}' \
+  "$(cd "$DOTENV_NO_FILE_DIR" && $DOTENV_CLEAN F2E_DOTENV_PORT=not-a-number "$CLI" app)"
+
+# --- .env file format ---------------------------------------------------
+#
+# Each case writes one ./.env into a scratch directory and reads back the
+# resolved map. Only F2E_DOTENV_HOST (string) and F2E_DOTENV_PORT (integer)
+# vary, so the expectation stays readable.
+
+DOTENV_FMT_DIR="$TMP_TEST_DIR/dotenv-format"
+mkdir -p "$DOTENV_FMT_DIR"
+cp "$DOTENV_DIR/.cli-flags.toml" "$DOTENV_FMT_DIR/.cli-flags.toml"
+
+# expect_dotenv_format <label> <printf format for .env> <expected host value>
+expect_dotenv_format() {
+  printf "$2" > "$DOTENV_FMT_DIR/.env"
+  expect_dotenv "$1" \
+    "{\"F2E_DOTENV_PORT\":\"3000\",\"F2E_DOTENV_DEBUG\":\"false\",\"F2E_DOTENV_HOST\":\"$3\"}" \
+    "$(cd "$DOTENV_FMT_DIR" && $DOTENV_CLEAN "$CLI" app)"
+}
+
+expect_dotenv_format 'Expected a value with no trailing newline' \
+  'F2E_DOTENV_HOST=tail' 'tail'
+expect_dotenv_format 'Expected CRLF line endings to be handled' \
+  'F2E_DOTENV_HOST=crlf\r\n' 'crlf'
+expect_dotenv_format 'Expected whitespace around the key and = to be trimmed' \
+  '   F2E_DOTENV_HOST   =   spaced   \n' 'spaced'
+expect_dotenv_format 'Expected an = inside the value to be kept' \
+  'F2E_DOTENV_HOST=a=b=c\n' 'a=b=c'
+expect_dotenv_format 'Expected an export prefix to be accepted' \
+  'export F2E_DOTENV_HOST=exported\n' 'exported'
+expect_dotenv_format 'Expected the last assignment of a repeated key to win' \
+  'F2E_DOTENV_HOST=first\nF2E_DOTENV_HOST=second\n' 'second'
+expect_dotenv_format 'Expected a malformed line to be skipped, not to end the file' \
+  'no-equals-here\nF2E_DOTENV_HOST=survives\n' 'survives'
+expect_dotenv_format 'Expected an invalid key to be skipped' \
+  '9BAD=x\nF2E_DOTENV_HOST=survives\n' 'survives'
+expect_dotenv_format 'Expected double quotes to be stripped' \
+  'F2E_DOTENV_HOST="double quoted"\n' 'double quoted'
+expect_dotenv_format 'Expected single quotes to be literal' \
+  'F2E_DOTENV_HOST=\047raw\\tvalue\047\n' 'raw\\tvalue'
+expect_dotenv_format 'Expected an unterminated quote to keep what it read' \
+  'F2E_DOTENV_HOST="unterminated\n' 'unterminated'
+expect_dotenv_format 'Expected a comment after a closing quote to be dropped' \
+  'F2E_DOTENV_HOST="quoted"   # trailing\n' 'quoted'
+expect_dotenv_format 'Expected a comment after an unquoted value to be dropped' \
+  'F2E_DOTENV_HOST=bare # trailing\n' 'bare'
+expect_dotenv_format 'Expected a leading # to stay part of the value' \
+  'F2E_DOTENV_HOST=#fff\n' '#fff'
+expect_dotenv_format 'Expected a # with no leading space to stay in the value' \
+  'F2E_DOTENV_HOST=a#b\n' 'a#b'
+expect_dotenv_format 'Expected no variable expansion' \
+  'F2E_DOTENV_HOST=$HOME\n' '$HOME'
+expect_dotenv_format 'Expected a UTF-8 BOM before the first key to be skipped' \
+  '\357\273\277F2E_DOTENV_HOST=bom\n' 'bom'
+
+printf 'F2E_DOTENV_HOST=\n' > "$DOTENV_FMT_DIR/.env"
+expect_dotenv 'Expected an empty .env value to set an empty string' \
+  '{"F2E_DOTENV_PORT":"3000","F2E_DOTENV_DEBUG":"false","F2E_DOTENV_HOST":""}' \
+  "$(cd "$DOTENV_FMT_DIR" && $DOTENV_CLEAN "$CLI" app)"
+
+printf '\n\n#only comments\n\n   \n' > "$DOTENV_FMT_DIR/.env"
+expect_dotenv 'Expected a comment-only .env to change nothing' \
+  '{"F2E_DOTENV_PORT":"3000","F2E_DOTENV_DEBUG":"false"}' \
+  "$(cd "$DOTENV_FMT_DIR" && $DOTENV_CLEAN "$CLI" app)"
+
+: > "$DOTENV_FMT_DIR/.env"
+expect_dotenv 'Expected an empty .env to change nothing' \
+  '{"F2E_DOTENV_PORT":"3000","F2E_DOTENV_DEBUG":"false"}' \
+  "$(cd "$DOTENV_FMT_DIR" && $DOTENV_CLEAN "$CLI" app)"
+
+# --- .env file kinds ----------------------------------------------------
+#
+# ./.env comes from an ambient working directory, so anything that is not a
+# regular file must be declined rather than trusted or waited on.
+
+DOTENV_KIND_DIR="$TMP_TEST_DIR/dotenv-kinds"
+mkdir -p "$DOTENV_KIND_DIR"
+cp "$DOTENV_DIR/.cli-flags.toml" "$DOTENV_KIND_DIR/.cli-flags.toml"
+DOTENV_KIND_DEFAULTS='{"F2E_DOTENV_PORT":"3000","F2E_DOTENV_DEBUG":"false"}'
+
+mkdir "$DOTENV_KIND_DIR/.env"
+expect_dotenv 'Expected a .env directory to be declined' \
+  "$DOTENV_KIND_DEFAULTS" \
+  "$(cd "$DOTENV_KIND_DIR" && $DOTENV_CLEAN "$CLI" app)"
+rmdir "$DOTENV_KIND_DIR/.env"
+
+ln -s "$DOTENV_KIND_DIR/nothing-here" "$DOTENV_KIND_DIR/.env"
+expect_dotenv 'Expected a broken .env symlink to be declined' \
+  "$DOTENV_KIND_DEFAULTS" \
+  "$(cd "$DOTENV_KIND_DIR" && $DOTENV_CLEAN "$CLI" app)"
+rm -f "$DOTENV_KIND_DIR/.env"
+
+# a symlink chain still resolves, because only the final target's kind matters
+mkdir -p "$DOTENV_KIND_DIR/shared"
+printf 'F2E_DOTENV_HOST=via-two-hops\n' > "$DOTENV_KIND_DIR/shared/real.env"
+ln -s shared/real.env "$DOTENV_KIND_DIR/hop.env"
+ln -s hop.env "$DOTENV_KIND_DIR/.env"
+expect_dotenv 'Expected a .env symlink chain to resolve' \
+  '{"F2E_DOTENV_PORT":"3000","F2E_DOTENV_DEBUG":"false","F2E_DOTENV_HOST":"via-two-hops"}' \
+  "$(cd "$DOTENV_KIND_DIR" && $DOTENV_CLEAN "$CLI" app)"
+rm -f "$DOTENV_KIND_DIR/.env" "$DOTENV_KIND_DIR/hop.env"
+
+# a fifo would park a blocking open() until some writer appeared; the command
+# must decline it and finish instead of hanging
+if command -v mkfifo >/dev/null 2>&1 && mkfifo "$DOTENV_KIND_DIR/.env" 2>/dev/null; then
+  expect_dotenv 'Expected a .env fifo to be declined rather than waited on' \
+    "$DOTENV_KIND_DEFAULTS" \
+    "$(cd "$DOTENV_KIND_DIR" && $DOTENV_CLEAN "$CLI" app)"
+  rm -f "$DOTENV_KIND_DIR/.env"
+fi
+
+# an unreadable .env is not fatal
+printf 'F2E_DOTENV_HOST=unreadable\n' > "$DOTENV_KIND_DIR/.env"
+chmod 000 "$DOTENV_KIND_DIR/.env"
+if [ "$(id -u)" != "0" ]; then
+  expect_dotenv 'Expected an unreadable .env not to be fatal' \
+    "$DOTENV_KIND_DEFAULTS" \
+    "$(cd "$DOTENV_KIND_DIR" && $DOTENV_CLEAN "$CLI" app)"
+fi
+chmod 644 "$DOTENV_KIND_DIR/.env"
+rm -f "$DOTENV_KIND_DIR/.env"
+
+# oversized input is bounded rather than truncating the rest of the file away
+DOTENV_BIG_DIR="$TMP_TEST_DIR/dotenv-big"
+mkdir -p "$DOTENV_BIG_DIR"
+cp "$DOTENV_DIR/.cli-flags.toml" "$DOTENV_BIG_DIR/.cli-flags.toml"
+{
+  i=0
+  while [ "$i" -lt 600 ]; do
+    printf 'F2E_DOTENV_PAD%s=v\n' "$i"
+    i=$((i + 1))
+  done
+  printf 'F2E_DOTENV_HOST=after-600-undeclared-keys\n'
+} > "$DOTENV_BIG_DIR/.env"
+expect_dotenv 'Expected declared keys to survive many undeclared ones' \
+  '{"F2E_DOTENV_PORT":"3000","F2E_DOTENV_DEBUG":"false","F2E_DOTENV_HOST":"after-600-undeclared-keys"}' \
+  "$(cd "$DOTENV_BIG_DIR" && $DOTENV_CLEAN "$CLI" app)"
+
+# One logical line longer than the read buffer arrives in several chunks. The
+# chunks after the first are the tail of that value, so a value ending in
+# something that looks like an assignment must not set that key, and the next
+# real line must still be read.
+{
+  printf 'F2E_DOTENV_HOST='
+  i=0
+  while [ "$i" -lt 600 ]; do
+    printf '0123456789012345'
+    i=$((i + 1))
+  done
+  printf 'F2E_DOTENV_PORT=9999\n'
+  printf 'F2E_DOTENV_TOKEN=next-real-line\n'
+} > "$DOTENV_BIG_DIR/.env"
+dotenv_big="$(cd "$DOTENV_BIG_DIR" && $DOTENV_CLEAN "$CLI" app)"
+case "$dotenv_big" in
+  *'"F2E_DOTENV_PORT":"9999"'*)
+    printf 'The tail of an over-long .env line must not set another key:\n%s\n' "$dotenv_big" >&2
+    exit 1
+    ;;
+esac
+case "$dotenv_big" in
+  *'"F2E_DOTENV_TOKEN":"next-real-line"'*)
+    ;;
+  *)
+    printf 'The line after an over-long .env line must still be read:\n%s\n' "$dotenv_big" >&2
+    exit 1
+    ;;
+esac
+dotenv_big_len="$(printf '%s' "$dotenv_big" | sed -e 's/.*"F2E_DOTENV_HOST":"//' -e 's/".*//' | awk '{print length($0)}')"
+if [ "$dotenv_big_len" -ne 1023 ]; then
+  printf 'Expected an oversized .env value to be bounded at 1023 bytes; got %s\n' "$dotenv_big_len" >&2
   exit 1
 fi
 

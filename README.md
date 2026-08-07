@@ -343,7 +343,7 @@ const config = { ...process.env, ...overrides };
 const typedConfig: CliStuff = f2e.coerce(config);
 ```
 
-`parseOverridesFromArgs()` remains string-valued, omits schema defaults, and throws a value-redacted `TypeError` when argv contains unknown options or invalid values. Use `parseStructured()` when the caller needs the detailed diagnostic channels. The older `parseFromArgs()` retains its default-bearing behavior for compatibility and should not be spread over `process.env` when defaults are declared. `coerce()` reads the same `.cli-flags.toml` used by generation, keeps only declared env keys, applies schema defaults, converts integers, doubles, booleans, JSON, arrays, and maps, and throws `CoercionError` with all invalid keys when conversion fails. Each conversion error identifies the env key, its `[flags.*]` table, the declared type, the received JSON kind, and how to repair either the value or declaration.
+`parseOverridesFromArgs()` remains string-valued, omits schema defaults, and throws a value-redacted `TypeError` when argv contains unknown options or invalid values. It is argv-only, so the merge above sees no `./.env`; use `parseStructured()` and its `dotenv` / `dotenvOverrides` channels when the project keeps one, as shown in [Env Files](#env-files). Use `parseStructured()` too when the caller needs the detailed diagnostic channels. The older `parseFromArgs()` retains its default-bearing behavior for compatibility and should not be spread over `process.env` when defaults are declared. `coerce()` reads the same `.cli-flags.toml` used by generation, keeps only declared env keys, applies schema defaults, converts integers, doubles, booleans, JSON, arrays, and maps, and throws `CoercionError` with all invalid keys when conversion fails. Each conversion error identifies the env key, its `[flags.*]` table, the declared type, the received JSON kind, and how to repair either the value or declaration.
 
 The generated TypeScript interface is erased at runtime; it does not tell `coerce()` what to do. The TOML `type` field is the runtime source of truth. When `type` is omitted, flags2env deterministically treats the value as a string, even if a default such as `123` looks numeric. It never guesses independently from each process value, because that could make generated types disagree with runtime values. Errors already collected in the configured `[parse] errors_env` are carried into the same exception. Pass `{ configPath: "path/to/.cli-flags.toml" }` as the second argument when config discovery is not appropriate.
 
@@ -378,6 +378,65 @@ build/flags2env env-audit .cli-flags.toml .env
 ```
 
 When the `.env` path is omitted, `flags2env` checks the `.env` file next to the selected `.cli-flags.toml`. Unknown `.env` keys are errors unless they are listed in `[env] ignore`; non-ignored TOML-declared env keys missing from `.env` are warnings because they may be optional, defaulted, or supplied by deployment infrastructure.
+
+## Env Files
+
+Parsing reads `./.env` from the process working directory. Values resolve in this order, highest first:
+
+1. argv flags
+2. the live process environment
+3. `./.env`
+4. the `[flags.*] default` declared in `.cli-flags.toml`
+
+```sh
+$ cat .env
+PORT=8080
+HOST="db.internal"
+
+$ mycli serve
+{"PORT":"8080","HOST":"db.internal","DEBUG":"false"}
+
+$ PORT=7777 mycli serve            # a live variable outranks the file
+{"PORT":"7777","HOST":"db.internal","DEBUG":"false"}
+
+$ PORT=7777 mycli serve --port 9999  # argv outranks both
+{"PORT":"9999","HOST":"db.internal","DEBUG":"false"}
+```
+
+Only `./.env` is read. There is no upward walk the way config discovery has one, and no lookup next to an explicitly passed config path, so a `--config` pointing into another tree never drags that tree's `.env` along. A `./.env` symlink is followed like a regular file, which is how a repo can point at a shared or generated env file.
+
+Only keys declared by a `[flags.*] env` are taken from the file. Undeclared keys stay out of the parsed map and are never copied into a returned JSON document. Parse-derived keys — the command path, per-command markers, positionals, unknown options, and parse errors — are never read from `.env` or the environment either, so neither can forge what argv actually contained.
+
+A `.env` value that does not fit its declared type is reported through `[parse] errors_env` and skipped, leaving the value below it in the order. A live environment value that does not fit is skipped silently: the ambient environment is not the parser's to validate, and a stray `DEBUG=verbose` in someone's shell should not turn into a parse error.
+
+### Letting `.env` win
+
+Some values belong to the repo rather than to whatever the shell happens to export. Declare that per flag:
+
+```toml
+[flags.token]
+env = "API_TOKEN"
+type = "string"
+dotenv_override = true
+```
+
+or for every key in the config:
+
+```toml
+[env]
+override = true
+```
+
+Either way argv still wins; only the middle two ranks swap. Turn file loading off entirely with `[env] load = false`, or per process with `FLAGS2ENV_DOTENV=0`.
+
+Because `./.env` comes from the ambient working directory, long-running or privileged consumers should declare `[env] load = false` for the same reason they do not discover `.cli-flags.toml` from the CWD — see [consumer compliance](docs/consumer-compliance.md#trusted-contract-discovery). That declaration is authoritative: `FLAGS2ENV_DOTENV` can only switch loading off, never back on.
+
+Callers that merge channels by hand instead of using the resolved map get the split they need from `parseStructured()`: `dotenv` holds the values that lose to the environment and `dotenvOverrides` the ones that win it, so per-flag `dotenv_override` survives a flat merge:
+
+```ts
+const s = f2e.parseStructured(process.argv);
+const config = { ...s.dotenv, ...process.env, ...s.dotenvOverrides, ...s.providedFlags };
+```
 
 ## Shell Completion
 
@@ -1290,7 +1349,7 @@ let appEnv = try loadAppEnv()
 
 The C parser owns config discovery. By default, it walks upward from the current working directory to find the nearest `.cli-flags.toml`, but refuses to use `$HOME/.cli-flags.toml` because that is likely accidental. Runtime clients should not reimplement this lookup; they should pass an explicit `configPath` only when the user asks for one.
 
-Unknown flags and positional tokens are ignored unless `[parse]` declares `unknown_options_env` or `positionals_env`; `allow_unknown` suppresses unknown-option collection when downstream flags are expected. Defaults from `.cli-flags.toml` are included in the parsed map, so they also override environment values when merged.
+Unknown flags and positional tokens are ignored unless `[parse]` declares `unknown_options_env` or `positionals_env`; `allow_unknown` suppresses unknown-option collection when downstream flags are expected. The parsed map is fully resolved: defaults from `.cli-flags.toml` sit at the bottom of the order described in [Env Files](#env-files), under `./.env`, the live environment, and argv. Merge it as-is rather than spreading it over an environment snapshot, which would re-apply values the parser already ranked.
 
 When `[commands.*]` tables are declared, the parser resolves the subcommand path in a dry-run pass before applying defaults, so defaults are only emitted for global flags and the selected commands, and flag lookups always prefer the innermost command scope. The resolved path is reported under `parse.command_env` (default `FLAGS2ENV_COMMAND`, emitted as an empty string when no command is selected), and matched command tokens are consumed rather than recorded as positionals. While no command has matched yet, leading positionals such as the program name are skipped and do not trigger `stop_at_first_positional`.
 

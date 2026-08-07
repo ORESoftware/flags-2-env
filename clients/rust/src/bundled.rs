@@ -128,6 +128,8 @@ impl BundledFlags2Env {
                 report.get("providedFlags"),
                 "bundled flags2env parser did not return argv-only overrides",
             )?,
+            dotenv: json_string_map(report.get("dotenv")),
+            dotenv_overrides: json_string_map(report.get("dotenvOverrides")),
             command: report
                 .get("command")
                 .and_then(serde_json::Value::as_str)

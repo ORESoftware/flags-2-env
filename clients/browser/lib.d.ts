@@ -1,6 +1,14 @@
 export interface StructuredParse {
   flags: Record<string, string>;
   providedFlags: Record<string, string>;
+  /**
+   * `./.env` values that lose to the caller's environment, and the ones that
+   * win it, split so per-flag `dotenv_override` survives a flat merge:
+   * `{...dotenv, ...env, ...dotenvOverrides, ...providedFlags}`. Both are
+   * empty in the browser, which has no working directory to read `.env` from.
+   */
+  dotenv: Record<string, string>;
+  dotenvOverrides: Record<string, string>;
   command: string;
   subcommands: string[];
   extras: string[];

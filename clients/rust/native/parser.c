@@ -14,11 +14,15 @@
 #include <string.h>
 
 #if defined(__APPLE__)
+#include <fcntl.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <sys/sysctl.h>
 #include <unistd.h>
 #elif defined(__unix__)
+#include <fcntl.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #elif defined(_WIN32)
 #include <windows.h>
@@ -81,6 +85,8 @@ typedef struct {
   int has_default;
   char default_value[F2E_MAX_VALUE];
   char help[F2E_MAX_VALUE];
+  int dotenv_override;     /* this key's .env value outranks the live environment */
+  int dotenv_override_set; /* the flag declared it, so [env] override does not apply */
   int command; /* index into F2EConfig.commands; F2E_SCOPE_ROOT for global flags */
 } F2EFlag;
 
@@ -113,6 +119,8 @@ typedef struct {
   char env_audit_ignored_keys[F2E_MAX_ENV_FILE_KEYS][F2E_MAX_ENV];
   size_t env_audit_ignored_count;
   int invalid_env_audit_ignore;
+  int dotenv_enabled;  /* read ./.env at parse time; default on */
+  int dotenv_override; /* default for flags that do not declare dotenv_override */
   char help_url[F2E_MAX_VALUE];
   unsigned help_columns;
   int help_columns_configured;
@@ -1213,6 +1221,7 @@ static int f2e_load_commands_table(F2EConfig *config,
 static int f2e_load_config(const char *config_path, F2EConfig *config) {
   memset(config, 0, sizeof(*config));
   config->allow_separated_values = 1;
+  config->dotenv_enabled = 1;
   config->help_columns = F2E_HELP_COL_DEFAULTS;
 
   FILE *file = fopen(config_path, "r");
@@ -1371,6 +1380,18 @@ static int f2e_load_config(const char *config_path, F2EConfig *config) {
                                     value)) {
           config->invalid_env_audit_ignore = 1;
         }
+      } else if (f2e_streq(key, "load_dotenv") || f2e_streq(key, "dotenv")) {
+        int parsed = 0;
+        if (f2e_parse_config_bool(value, &parsed)) {
+          config->dotenv_enabled = parsed;
+        }
+      } else if (f2e_streq(key, "dotenv_override") ||
+                 f2e_streq(key, "env_file_override") ||
+                 f2e_streq(key, "env_file_wins")) {
+        int parsed = 0;
+        if (f2e_parse_config_bool(value, &parsed)) {
+          config->dotenv_override = parsed;
+        }
       }
       continue;
     }
@@ -1420,6 +1441,23 @@ static int f2e_load_config(const char *config_path, F2EConfig *config) {
                                     &config->env_audit_ignored_count,
                                     value)) {
           config->invalid_env_audit_ignore = 1;
+        }
+      } else if (f2e_streq(key, "load") ||
+                 f2e_streq(key, "load_dotenv") ||
+                 f2e_streq(key, "dotenv") ||
+                 f2e_streq(key, "enabled")) {
+        int parsed = 0;
+        if (f2e_parse_config_bool(value, &parsed)) {
+          config->dotenv_enabled = parsed;
+        }
+      } else if (f2e_streq(key, "override") ||
+                 f2e_streq(key, "override_env") ||
+                 f2e_streq(key, "dotenv_override") ||
+                 f2e_streq(key, "env_file_override") ||
+                 f2e_streq(key, "env_file_wins")) {
+        int parsed = 0;
+        if (f2e_parse_config_bool(value, &parsed)) {
+          config->dotenv_override = parsed;
         }
       }
       continue;
@@ -1489,6 +1527,14 @@ static int f2e_load_config(const char *config_path, F2EConfig *config) {
       if (f2e_parse_bare_value(value, parsed, sizeof(parsed))) {
         current->has_default = 1;
         f2e_strlcpy(current->default_value, parsed, sizeof(current->default_value));
+      }
+    } else if (f2e_streq(key, "dotenv_override") ||
+               f2e_streq(key, "env_file_override") ||
+               f2e_streq(key, "env_file_wins")) {
+      int parsed = 0;
+      if (f2e_parse_config_bool(value, &parsed)) {
+        current->dotenv_override = parsed;
+        current->dotenv_override_set = 1;
       }
     } else if (f2e_streq(key, "help") || f2e_streq(key, "description") || f2e_streq(key, "example")) {
       char parsed[F2E_MAX_VALUE];
@@ -3158,6 +3204,388 @@ int f2e_audit_env_file_status(void) {
   free(report);
   free(path);
   return status;
+}
+
+/*
+ * .env loading.
+ *
+ * Only ./.env in the process working directory is read: there is no upward
+ * walk and no lookup next to the selected .cli-flags.toml, so an explicit
+ * --config never drags in a .env from another tree. fopen() resolves symlinks,
+ * so a ./.env symlinked at a shared or generated file is followed like any
+ * regular file; nothing here stats the path or rejects non-regular files.
+ *
+ * Only keys declared by a [flags.*] env are retained. Undeclared keys stay out
+ * of the parsed map exactly as they always have, and unrelated secrets in the
+ * file are never copied into a returned JSON document.
+ */
+
+#define F2E_MAX_DOTENV_KEYS F2E_MAX_FLAGS
+
+typedef struct {
+  char keys[F2E_MAX_DOTENV_KEYS][F2E_MAX_ENV];
+  char values[F2E_MAX_DOTENV_KEYS][F2E_MAX_VALUE];
+  size_t count;
+} F2EDotEnv;
+
+static char *f2e_cwd_path(const char *file_name) {
+  char dir[PATH_MAX];
+  const char *pwd = getenv("PWD");
+
+#if defined(_WIN32)
+  if (GetCurrentDirectoryA(sizeof(dir), dir) == 0) {
+    f2e_strlcpy(dir, pwd && pwd[0] != '\0' ? pwd : ".", sizeof(dir));
+  }
+#elif defined(__unix__) || defined(__APPLE__)
+  if (!getcwd(dir, sizeof(dir))) {
+    f2e_strlcpy(dir, pwd && pwd[0] != '\0' ? pwd : ".", sizeof(dir));
+  }
+#else
+  f2e_strlcpy(dir, pwd && pwd[0] != '\0' ? pwd : ".", sizeof(dir));
+#endif
+
+  size_t dir_len = strlen(dir);
+  while (dir_len > 1 && (dir[dir_len - 1] == '/' || dir[dir_len - 1] == '\\')) {
+    dir[--dir_len] = '\0';
+  }
+
+  size_t name_len = strlen(file_name);
+  size_t separator = dir_len > 0 && dir[dir_len - 1] != '/' && dir[dir_len - 1] != '\\' ? 1 : 0;
+  if (dir_len > SIZE_MAX - separator - name_len - 1) {
+    return NULL;
+  }
+  char *path = (char *)malloc(dir_len + separator + name_len + 1);
+  if (!path) {
+    return NULL;
+  }
+  memcpy(path, dir, dir_len);
+  size_t offset = dir_len;
+  if (separator) {
+    path[offset++] = '/';
+  }
+  memcpy(path + offset, file_name, name_len + 1);
+  return path;
+}
+
+static const F2EFlag *f2e_flag_declaring_env(const F2EConfig *config, const char *key) {
+  if (!config || !key || key[0] == '\0') {
+    return NULL;
+  }
+  for (size_t i = 0; i < config->flag_count; i++) {
+    if (config->flags[i].env[0] != '\0' && f2e_streq(config->flags[i].env, key)) {
+      return &config->flags[i];
+    }
+  }
+  return NULL;
+}
+
+static const char *f2e_dotenv_lookup(const F2EDotEnv *dotenv, const char *key) {
+  if (!dotenv || !key) {
+    return NULL;
+  }
+  for (size_t i = 0; i < dotenv->count; i++) {
+    if (f2e_streq(dotenv->keys[i], key)) {
+      return dotenv->values[i];
+    }
+  }
+  return NULL;
+}
+
+/* A repeated key takes its last assignment, matching how a shell sourcing the
+   same file would end up. `flags2env env-audit` still reports the duplicate. */
+static void f2e_dotenv_store(F2EDotEnv *dotenv, const char *key, const char *value) {
+  for (size_t i = 0; i < dotenv->count; i++) {
+    if (f2e_streq(dotenv->keys[i], key)) {
+      f2e_strlcpy(dotenv->values[i], value, sizeof(dotenv->values[i]));
+      return;
+    }
+  }
+  if (dotenv->count >= F2E_MAX_DOTENV_KEYS) {
+    return;
+  }
+  f2e_strlcpy(dotenv->keys[dotenv->count], key, sizeof(dotenv->keys[0]));
+  f2e_strlcpy(dotenv->values[dotenv->count], value, sizeof(dotenv->values[0]));
+  dotenv->count++;
+}
+
+/*
+ * Applies .env value semantics in place to the text right of the first '='.
+ * Double quotes take escapes, single quotes are literal, and text after the
+ * closing quote is a comment. An unquoted value keeps a leading '#' so colors
+ * and fragments survive, and ends at the first '#' that follows whitespace.
+ */
+static void f2e_dotenv_unquote(char *value) {
+  if (value[0] != '"' && value[0] != '\'') {
+    for (char *cursor = value; *cursor; cursor++) {
+      if (*cursor == '#' && cursor > value && isspace((unsigned char)cursor[-1])) {
+        *cursor = '\0';
+        break;
+      }
+    }
+    f2e_trim_right(value);
+    return;
+  }
+
+  char out[F2E_MAX_VALUE];
+  size_t len = 0;
+  char quote = value[0];
+  const char *cursor = value + 1;
+  while (*cursor && *cursor != quote) {
+    char ch = *cursor++;
+    if (quote == '"' && ch == '\\' && *cursor) {
+      char escaped = *cursor++;
+      switch (escaped) {
+        case 'n':
+          ch = '\n';
+          break;
+        case 'r':
+          ch = '\r';
+          break;
+        case 't':
+          ch = '\t';
+          break;
+        case '\\':
+        case '"':
+        case '\'':
+          ch = escaped;
+          break;
+        default:
+          /* an unrecognized escape stays verbatim, backslash included */
+          if (len + 1 < sizeof(out)) {
+            out[len++] = '\\';
+          }
+          ch = escaped;
+          break;
+      }
+    }
+    if (len + 1 < sizeof(out)) {
+      out[len++] = ch;
+    }
+  }
+  out[len] = '\0';
+  memcpy(value, out, len + 1);
+}
+
+/*
+ * Opens ./.env for reading, or returns NULL.
+ *
+ * The path comes from an ambient working directory, so it is opened without
+ * blocking and accepted only if it resolves to a regular file. A fifo left at
+ * ./.env would otherwise park fopen() until a writer showed up and hang the
+ * command outright. Symlinks are still followed: open() follows them and
+ * fstat() reports the target, so a ./.env pointing at a shared regular file
+ * works and one pointing at a fifo or device does not.
+ */
+static FILE *f2e_dotenv_fopen(const char *path) {
+/* the same platform triplet the rest of this file uses to decide whether the
+   POSIX headers above were included */
+#if !defined(__APPLE__) && !defined(__unix__)
+  return fopen(path, "r");
+#else
+  int flags = O_RDONLY | O_NONBLOCK;
+#ifdef O_CLOEXEC
+  flags |= O_CLOEXEC;
+#endif
+  int fd = open(path, flags);
+  if (fd < 0) {
+    return NULL;
+  }
+  struct stat info;
+  if (fstat(fd, &info) != 0 || !S_ISREG(info.st_mode)) {
+    close(fd);
+    return NULL;
+  }
+  /* O_NONBLOCK has no effect on regular-file reads, so it can stay set */
+  FILE *file = fdopen(fd, "r");
+  if (!file) {
+    close(fd);
+    return NULL;
+  }
+  return file;
+#endif
+}
+
+/* Reads ./.env into `dotenv`. Returns 0 when there is no readable ./.env. */
+static int f2e_dotenv_load(F2EDotEnv *dotenv, const F2EConfig *config) {
+  memset(dotenv, 0, sizeof(*dotenv));
+
+  char *path = f2e_cwd_path(".env");
+  if (!path) {
+    return 0;
+  }
+  FILE *file = f2e_dotenv_fopen(path);
+  free(path);
+  if (!file) {
+    return 0;
+  }
+
+  char line[F2E_MAX_LINE];
+  int first_line = 1;
+  int continuing = 0;
+  while (fgets(line, sizeof(line), file)) {
+    /* A line longer than the read buffer arrives in several chunks. Only the
+       first is a line; the rest are the tail of its value and must not be read
+       as fresh assignments, or a long value ending in "OTHER_KEY=value" would
+       quietly set OTHER_KEY. A short read means the line ended at EOF. */
+    size_t chunk = strlen(line);
+    int completed = memchr(line, '\n', chunk) != NULL || chunk < sizeof(line) - 1;
+    if (continuing) {
+      continuing = !completed;
+      continue;
+    }
+    continuing = !completed;
+
+    char *raw = line;
+    if (first_line) {
+      first_line = 0;
+      /* editors that write a UTF-8 BOM would otherwise make the first key
+         unreadable, silently dropping it */
+      if ((unsigned char)raw[0] == 0xEF && (unsigned char)raw[1] == 0xBB &&
+          (unsigned char)raw[2] == 0xBF) {
+        raw += 3;
+      }
+    }
+    char *trimmed = f2e_trim(raw);
+    if (trimmed[0] == '\0' || trimmed[0] == '#') {
+      continue;
+    }
+    if (strncmp(trimmed, "export", 6) == 0 && isspace((unsigned char)trimmed[6])) {
+      trimmed = f2e_trim_left(trimmed + 6);
+    }
+
+    char *eq = strchr(trimmed, '=');
+    if (!eq) {
+      continue;
+    }
+    *eq = '\0';
+    char *key = f2e_trim(trimmed);
+    char *value = f2e_trim(eq + 1);
+    if (!f2e_env_key_is_valid(key) || !f2e_flag_declaring_env(config, key)) {
+      continue;
+    }
+    f2e_dotenv_unquote(value);
+    f2e_dotenv_store(dotenv, key, value);
+  }
+
+  fclose(file);
+  return 1;
+}
+
+/*
+ * FLAGS2ENV_DOTENV=0 turns loading off for one process without editing TOML.
+ * It can only switch loading off, never on: [env] load = false is how a daemon
+ * refuses to take policy from an attacker-controlled working directory, so an
+ * ambient variable must not be able to undo it.
+ */
+static int f2e_dotenv_is_enabled(const F2EConfig *config) {
+  int forced = 0;
+  if (f2e_runtime_bool_from_env("FLAGS2ENV_DOTENV", &forced) && !forced) {
+    return 0;
+  }
+  return config->dotenv_enabled;
+}
+
+static F2EDotEnv *f2e_dotenv_open(const F2EConfig *config) {
+  if (!f2e_dotenv_is_enabled(config)) {
+    return NULL;
+  }
+  F2EDotEnv *dotenv = (F2EDotEnv *)malloc(sizeof(F2EDotEnv));
+  if (!dotenv) {
+    return NULL;
+  }
+  if (!f2e_dotenv_load(dotenv, config)) {
+    free(dotenv);
+    return NULL;
+  }
+  return dotenv;
+}
+
+static void f2e_report_invalid_dotenv_value(F2EJsonList *errors, const F2EFlag *flag, const char *value) {
+  if (!errors || !errors->initialized || !flag) {
+    return;
+  }
+  char message[512];
+  snprintf(message,
+           sizeof(message),
+           ".env %s value \"%s\" is not a valid %s for flags.%s",
+           flag->env,
+           value ? value : "",
+           f2e_value_type_name(flag->type),
+           f2e_audit_flag_name(flag));
+  f2e_json_list_append(errors, message);
+}
+
+/*
+ * Overlays ./.env and the live environment between the schema defaults and
+ * argv, so the resolved precedence is argv > live env > .env > default. A flag
+ * with dotenv_override (or a config-wide [env] override) swaps the middle two
+ * for that key only.
+ *
+ * Only [flags.*] env keys are overlaid. Parse-derived keys -- the command
+ * path, per-command markers, positionals, unknown options, and parse errors --
+ * report what argv actually contained, so an ambient variable or a checked-in
+ * .env must never be able to forge them.
+ *
+ * A .env value that does not fit its declared type is reported through the
+ * errors channel and skipped: the file is project-owned input that env-audit
+ * already holds to the schema. A live environment value that does not fit is
+ * skipped silently, because the ambient environment is not this parser's to
+ * validate and a stray DEBUG=verbose must not turn into a parse error.
+ *
+ * `dotenv_below` and `dotenv_above` are optional. They collect the .env values
+ * that a caller merging channels by hand should apply under and over its own
+ * environment snapshot, which is how per-flag override survives a spread.
+ */
+static void f2e_apply_env_sources(F2EConfig *config,
+                                  F2EPair *pairs,
+                                  size_t pair_count,
+                                  const F2ECommandPath *path,
+                                  const F2EDotEnv *dotenv,
+                                  F2EPair *dotenv_below,
+                                  F2EPair *dotenv_above,
+                                  F2EJsonList *errors) {
+  for (size_t i = 0; i < config->flag_count; i++) {
+    const F2EFlag *flag = &config->flags[i];
+    if (flag->env[0] == '\0') {
+      continue;
+    }
+    if (flag->command != F2E_SCOPE_ROOT && !f2e_command_path_contains(path, flag->command)) {
+      continue;
+    }
+
+    const char *from_file = f2e_dotenv_lookup(dotenv, flag->env);
+    const char *from_live = getenv(flag->env);
+    if (!from_file && !from_live) {
+      continue;
+    }
+
+    int file_wins = flag->dotenv_override_set ? flag->dotenv_override : config->dotenv_override;
+    /* applied low precedence first, so a rejected value leaves the one below */
+    const char *ordered[2];
+    ordered[0] = file_wins ? from_live : from_file;
+    ordered[1] = file_wins ? from_file : from_live;
+
+    for (int slot = 0; slot < 2; slot++) {
+      const char *value = ordered[slot];
+      if (!value) {
+        continue;
+      }
+      char normalized[F2E_MAX_VALUE];
+      if (!f2e_normalize_flag_value(flag, value, normalized, sizeof(normalized))) {
+        if (value == from_file) {
+          f2e_report_invalid_dotenv_value(errors, flag, value);
+        }
+        continue;
+      }
+      f2e_set_pair(pairs, pair_count, flag->env, normalized);
+      if (value == from_file) {
+        F2EPair *channel = file_wins ? dotenv_above : dotenv_below;
+        if (channel) {
+          f2e_set_pair(channel, pair_count, flag->env, normalized);
+        }
+      }
+    }
+  }
 }
 
 static int f2e_completion_append_word(F2EBuffer *words, const char *word) {
@@ -6042,9 +6470,9 @@ char *f2e_parse_from_file(const char *config_path, int argc, const char *const a
   int allow_unknown = f2e_resolve_allow_unknown(config, argc, argv, &allow_unknown_forced);
 
   int lenient = 0;
+  F2ECommandPath path;
+  memset(&path, 0, sizeof(path));
   if (config->command_count > 0) {
-    F2ECommandPath path;
-    memset(&path, 0, sizeof(path));
     f2e_resolve_command_path(config, argc, argv, &path);
     /* a wrapper script may have consumed the subcommand before argv reached
        this parser; when nothing matched, fall back to lenient global
@@ -6065,6 +6493,17 @@ char *f2e_parse_from_file(const char *config_path, int argc, const char *const a
   } else {
     f2e_apply_defaults(config, pairs, F2E_MAX_PAIRS);
   }
+
+  F2EDotEnv *dotenv = f2e_dotenv_open(config);
+  f2e_apply_env_sources(config,
+                        pairs,
+                        F2E_MAX_PAIRS,
+                        &path,
+                        dotenv,
+                        NULL,
+                        NULL,
+                        track_errors ? &errors : NULL);
+  free(dotenv);
 
   f2e_scan_argv(config,
                 pairs,
@@ -6167,8 +6606,13 @@ char *f2e_parse_structured_from_file(const char *config_path, int argc, const ch
     return NULL;
   }
   F2EPair *provided_pairs = (F2EPair *)calloc(F2E_MAX_PAIRS, sizeof(F2EPair));
-  if (!provided_pairs) {
+  F2EPair *dotenv_below_pairs = (F2EPair *)calloc(F2E_MAX_PAIRS, sizeof(F2EPair));
+  F2EPair *dotenv_above_pairs = (F2EPair *)calloc(F2E_MAX_PAIRS, sizeof(F2EPair));
+  if (!provided_pairs || !dotenv_below_pairs || !dotenv_above_pairs) {
     free(pairs);
+    free(provided_pairs);
+    free(dotenv_below_pairs);
+    free(dotenv_above_pairs);
     free(config);
     return NULL;
   }
@@ -6210,6 +6654,17 @@ char *f2e_parse_structured_from_file(const char *config_path, int argc, const ch
   } else {
     f2e_apply_defaults(config, pairs, F2E_MAX_PAIRS);
   }
+
+  F2EDotEnv *dotenv = f2e_dotenv_open(config);
+  f2e_apply_env_sources(config,
+                        pairs,
+                        F2E_MAX_PAIRS,
+                        &path,
+                        dotenv,
+                        dotenv_below_pairs,
+                        dotenv_above_pairs,
+                        lists_ok ? &errors : NULL);
+  free(dotenv);
 
   f2e_scan_argv(config,
                 pairs,
@@ -6279,6 +6734,8 @@ char *f2e_parse_structured_from_file(const char *config_path, int argc, const ch
 
   char *flags_json = f2e_pairs_to_json(pairs, F2E_MAX_PAIRS);
   char *provided_flags_json = f2e_pairs_to_json(provided_pairs, F2E_MAX_PAIRS);
+  char *dotenv_below_json = f2e_pairs_to_json(dotenv_below_pairs, F2E_MAX_PAIRS);
+  char *dotenv_above_json = f2e_pairs_to_json(dotenv_above_pairs, F2E_MAX_PAIRS);
   char label[F2E_MAX_VALUE];
   label[0] = '\0';
   if (path.depth > 0 &&
@@ -6287,7 +6744,7 @@ char *f2e_parse_structured_from_file(const char *config_path, int argc, const ch
   }
 
   char *result = NULL;
-  if (flags_json && provided_flags_json && lists_ok &&
+  if (flags_json && provided_flags_json && dotenv_below_json && dotenv_above_json && lists_ok &&
       f2e_json_list_close(&subcommands) &&
       f2e_json_list_close(&extras) &&
       f2e_json_list_close(&unknown_options) &&
@@ -6298,6 +6755,10 @@ char *f2e_parse_structured_from_file(const char *config_path, int argc, const ch
                f2e_buffer_append(&out, flags_json) &&
                f2e_buffer_append(&out, ",\"providedFlags\":") &&
                f2e_buffer_append(&out, provided_flags_json) &&
+               f2e_buffer_append(&out, ",\"dotenv\":") &&
+               f2e_buffer_append(&out, dotenv_below_json) &&
+               f2e_buffer_append(&out, ",\"dotenvOverrides\":") &&
+               f2e_buffer_append(&out, dotenv_above_json) &&
                f2e_buffer_append(&out, ",\"command\":") &&
                f2e_buffer_append_json_string(&out, label) &&
                f2e_buffer_append(&out, ",\"subcommands\":") &&
@@ -6319,6 +6780,8 @@ char *f2e_parse_structured_from_file(const char *config_path, int argc, const ch
 
   f2e_free(flags_json);
   f2e_free(provided_flags_json);
+  f2e_free(dotenv_below_json);
+  f2e_free(dotenv_above_json);
   f2e_json_list_discard(&positionals);
   f2e_json_list_discard(&unknown_options);
   f2e_json_list_discard(&errors);
@@ -6326,6 +6789,8 @@ char *f2e_parse_structured_from_file(const char *config_path, int argc, const ch
   f2e_json_list_discard(&subcommands);
   free(pairs);
   free(provided_pairs);
+  free(dotenv_below_pairs);
+  free(dotenv_above_pairs);
   free(config);
   return result;
 }
