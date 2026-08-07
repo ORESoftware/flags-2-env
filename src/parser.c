@@ -3362,6 +3362,43 @@ static void f2e_dotenv_unquote(char *value) {
   memcpy(value, out, len + 1);
 }
 
+/*
+ * Opens ./.env for reading, or returns NULL.
+ *
+ * The path comes from an ambient working directory, so it is opened without
+ * blocking and accepted only if it resolves to a regular file. A fifo left at
+ * ./.env would otherwise park fopen() until a writer showed up and hang the
+ * command outright. Symlinks are still followed: open() follows them and
+ * fstat() reports the target, so a ./.env pointing at a shared regular file
+ * works and one pointing at a fifo or device does not.
+ */
+static FILE *f2e_dotenv_fopen(const char *path) {
+#if defined(_WIN32)
+  return fopen(path, "r");
+#else
+  int flags = O_RDONLY | O_NONBLOCK;
+#ifdef O_CLOEXEC
+  flags |= O_CLOEXEC;
+#endif
+  int fd = open(path, flags);
+  if (fd < 0) {
+    return NULL;
+  }
+  struct stat info;
+  if (fstat(fd, &info) != 0 || !S_ISREG(info.st_mode)) {
+    close(fd);
+    return NULL;
+  }
+  /* O_NONBLOCK has no effect on regular-file reads, so it can stay set */
+  FILE *file = fdopen(fd, "r");
+  if (!file) {
+    close(fd);
+    return NULL;
+  }
+  return file;
+#endif
+}
+
 /* Reads ./.env into `dotenv`. Returns 0 when there is no readable ./.env. */
 static int f2e_dotenv_load(F2EDotEnv *dotenv, const F2EConfig *config) {
   memset(dotenv, 0, sizeof(*dotenv));
@@ -3370,15 +3407,26 @@ static int f2e_dotenv_load(F2EDotEnv *dotenv, const F2EConfig *config) {
   if (!path) {
     return 0;
   }
-  FILE *file = fopen(path, "r");
+  FILE *file = f2e_dotenv_fopen(path);
   free(path);
   if (!file) {
     return 0;
   }
 
   char line[F2E_MAX_LINE];
+  int first_line = 1;
   while (fgets(line, sizeof(line), file)) {
-    char *trimmed = f2e_trim(line);
+    char *raw = line;
+    if (first_line) {
+      first_line = 0;
+      /* editors that write a UTF-8 BOM would otherwise make the first key
+         unreadable, silently dropping it */
+      if ((unsigned char)raw[0] == 0xEF && (unsigned char)raw[1] == 0xBB &&
+          (unsigned char)raw[2] == 0xBF) {
+        raw += 3;
+      }
+    }
+    char *trimmed = f2e_trim(raw);
     if (trimmed[0] == '\0' || trimmed[0] == '#') {
       continue;
     }
