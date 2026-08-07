@@ -1479,7 +1479,8 @@ static int f2e_load_config(const char *config_path, F2EConfig *config) {
     char *logical_eq = strchr(logical_line, '=');
     if (logical_eq) {
       char *logical_value = f2e_trim(logical_eq + 1);
-      while (*logical_value == '[' && !f2e_array_value_is_complete(logical_value)) {
+      while ((*logical_value == '[' || *logical_value == '(') &&
+             !f2e_array_value_is_complete(logical_value)) {
         if (!fgets(line, sizeof(line), file)) {
           break;
         }
