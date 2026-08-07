@@ -25,6 +25,8 @@ exclude = [
   # generated client lockfiles: resolved locally, never a release input
   "clients/dart/pubspec.lock",
   "clients/rust/Cargo.lock",
+  # zed's own local pack staging directory
+  ".zed/**",
 ]
 
 [build]

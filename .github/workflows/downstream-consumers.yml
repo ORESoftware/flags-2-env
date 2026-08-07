@@ -1,0 +1,219 @@
+name: Downstream consumer fixtures
+
+# The twelve repositories in github.com/flags-2-env-test are real consumers of
+# this library: each declares the dependency in .zpkg.toml, vendors this repo at
+# .vendor/.zed/oresoftware/flags-2-env, and asserts the same six parse results
+# from its own runtime. This workflow rebuilds each of them against the commit
+# under review rather than against the commit they have pinned, so a change to
+# src/parser.c that silently alters the environment map fails here before it
+# reaches a release.
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/downstream-consumers.yml"
+      - "Makefile"
+      - "clients/**"
+      - "src/**"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/downstream-consumers.yml"
+      - "Makefile"
+      - "clients/**"
+      - "src/**"
+  schedule:
+    - cron: "43 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    name: Pin the commit under review
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      tooling_ref: ${{ steps.source.outputs.tooling_ref }}
+    steps:
+      - name: Check out this repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Validate GitHub Actions syntax
+        uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+        with:
+          args: .github/workflows/downstream-consumers.yml
+
+      - name: Select the exact canonical commit under review
+        id: source
+        env:
+          SOURCE_REF: ${{ github.event.pull_request.head.sha || github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_REF" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "source is not an immutable full commit: $SOURCE_REF" >&2
+            exit 1
+          }
+          echo "tooling_ref=$SOURCE_REF" >> "$GITHUB_OUTPUT"
+
+  fixture:
+    name: ${{ matrix.repository }}
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        repository:
+          - bun-app
+          - cpp-app
+          - dart-app
+          - deno-app
+          - gleam-app
+          - golang-app
+          - java-app
+          - nodejs-app
+          - php-app
+          - python-app
+          - ruby-app
+          - rust-app
+    steps:
+      - name: Check out the consumer fixture without credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: flags-2-env-test/${{ matrix.repository }}
+          path: fixture
+          persist-credentials: false
+
+      - name: Check out the canonical library at the commit under review
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ORESoftware/flags-2-env
+          ref: ${{ needs.prepare.outputs.tooling_ref }}
+          path: library
+          persist-credentials: false
+
+      # The fixture's .zpkg.toml is the declaration of record. Deriving the
+      # vendor path from it -- rather than hardcoding it here -- is what makes
+      # this step able to catch the failure mode where a manifest names one
+      # directory and the build reads from another, which resolves fine and
+      # tests nothing.
+      - name: Derive the vendor path from the fixture manifest
+        id: manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import pathlib
+          import tomllib
+
+          zed = tomllib.loads(pathlib.Path("fixture/.zpkg.toml").read_text())
+
+          declared = list(zed["dependencies"])
+          if declared != ["oresoftware/flags-2-env"]:
+              raise SystemExit(f"unexpected dependency set: {declared}")
+
+          install_dir = zed["install"]["dir"]
+          vendor = pathlib.PurePosixPath(install_dir) / "oresoftware" / "flags-2-env"
+          print(f"vendor={vendor}")
+          print(f"install_dir={install_dir}")
+          PY
+
+      - name: Replace the pinned dependency with the commit under review
+        env:
+          VENDOR: ${{ steps.manifest.outputs.vendor }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="fixture/$VENDOR"
+          rm -rf "$target"
+          mkdir -p "$target"
+          # --exclude .git: the fixture pins this repo as a submodule, so the
+          # checkout carries a .git directory that must not land in the Docker
+          # build context.
+          rsync -a --exclude '.git' library/ "$target/"
+          test -f "$target/src/parser.c"
+          test -f "$target/Makefile"
+
+      - name: Build the fixture image
+        working-directory: fixture
+        shell: bash
+        run: docker build --tag "f2e-fixture-${{ matrix.repository }}" .
+
+      - name: Assert the shared contract
+        shell: bash
+        run: |
+          set -o pipefail
+          log="$RUNNER_TEMP/${{ matrix.repository }}.log"
+          docker run --rm "f2e-fixture-${{ matrix.repository }}" 2>&1 | tee "$log"
+
+      - name: Upload fixture output
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ${{ matrix.repository }}-output
+          path: ${{ runner.temp }}/${{ matrix.repository }}.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Record what was verified
+        if: ${{ always() }}
+        env:
+          TOOLING_REF: ${{ needs.prepare.outputs.tooling_ref }}
+          VENDOR: ${{ steps.manifest.outputs.vendor }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture_sha="$(git -C fixture rev-parse HEAD)"
+          {
+            echo "### flags-2-env-test/${{ matrix.repository }}"
+            echo
+            echo "- Fixture commit: \`$fixture_sha\`"
+            echo "- Library under review: \`$TOOLING_REF\`"
+            echo "- Vendored at: \`$VENDOR\` (from the fixture's own \`[install].dir\`)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Pushes to main tell each fixture to re-run against the new commit, so the
+  # downstream repositories carry their own green/red signal rather than only
+  # appearing in this repository's checks. Needs a PAT with `repo` scope on the
+  # flags-2-env-test organization; without the secret the job reports that it
+  # skipped rather than failing, because the fixtures above already ran.
+  notify:
+    name: Notify the fixtures
+    needs: [prepare, fixture]
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Dispatch upstream-changed to every fixture
+        env:
+          DISPATCH_TOKEN: ${{ secrets.FLAGS_2_ENV_TEST_DISPATCH_TOKEN }}
+          TOOLING_REF: ${{ needs.prepare.outputs.tooling_ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${DISPATCH_TOKEN:-}" ]; then
+            echo "FLAGS_2_ENV_TEST_DISPATCH_TOKEN is not set; skipping dispatch." \
+              >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          for repo in bun-app cpp-app dart-app deno-app gleam-app golang-app \
+                      java-app nodejs-app php-app python-app ruby-app rust-app; do
+            curl --fail-with-body --silent --show-error \
+              --request POST \
+              --header "Accept: application/vnd.github+json" \
+              --header "Authorization: Bearer $DISPATCH_TOKEN" \
+              --header "X-GitHub-Api-Version: 2022-11-28" \
+              --data "{\"event_type\":\"upstream-changed\",\"client_payload\":{\"sha\":\"$TOOLING_REF\"}}" \
+              "https://api.github.com/repos/flags-2-env-test/$repo/dispatches"
+            echo "dispatched $repo"
+          done
