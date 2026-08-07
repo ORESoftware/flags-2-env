@@ -14,11 +14,15 @@
 #include <string.h>
 
 #if defined(__APPLE__)
+#include <fcntl.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <sys/sysctl.h>
 #include <unistd.h>
 #elif defined(__unix__)
+#include <fcntl.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #elif defined(_WIN32)
 #include <windows.h>
@@ -3362,6 +3366,45 @@ static void f2e_dotenv_unquote(char *value) {
   memcpy(value, out, len + 1);
 }
 
+/*
+ * Opens ./.env for reading, or returns NULL.
+ *
+ * The path comes from an ambient working directory, so it is opened without
+ * blocking and accepted only if it resolves to a regular file. A fifo left at
+ * ./.env would otherwise park fopen() until a writer showed up and hang the
+ * command outright. Symlinks are still followed: open() follows them and
+ * fstat() reports the target, so a ./.env pointing at a shared regular file
+ * works and one pointing at a fifo or device does not.
+ */
+static FILE *f2e_dotenv_fopen(const char *path) {
+/* the same platform triplet the rest of this file uses to decide whether the
+   POSIX headers above were included */
+#if !defined(__APPLE__) && !defined(__unix__)
+  return fopen(path, "r");
+#else
+  int flags = O_RDONLY | O_NONBLOCK;
+#ifdef O_CLOEXEC
+  flags |= O_CLOEXEC;
+#endif
+  int fd = open(path, flags);
+  if (fd < 0) {
+    return NULL;
+  }
+  struct stat info;
+  if (fstat(fd, &info) != 0 || !S_ISREG(info.st_mode)) {
+    close(fd);
+    return NULL;
+  }
+  /* O_NONBLOCK has no effect on regular-file reads, so it can stay set */
+  FILE *file = fdopen(fd, "r");
+  if (!file) {
+    close(fd);
+    return NULL;
+  }
+  return file;
+#endif
+}
+
 /* Reads ./.env into `dotenv`. Returns 0 when there is no readable ./.env. */
 static int f2e_dotenv_load(F2EDotEnv *dotenv, const F2EConfig *config) {
   memset(dotenv, 0, sizeof(*dotenv));
@@ -3370,15 +3413,39 @@ static int f2e_dotenv_load(F2EDotEnv *dotenv, const F2EConfig *config) {
   if (!path) {
     return 0;
   }
-  FILE *file = fopen(path, "r");
+  FILE *file = f2e_dotenv_fopen(path);
   free(path);
   if (!file) {
     return 0;
   }
 
   char line[F2E_MAX_LINE];
+  int first_line = 1;
+  int continuing = 0;
   while (fgets(line, sizeof(line), file)) {
-    char *trimmed = f2e_trim(line);
+    /* A line longer than the read buffer arrives in several chunks. Only the
+       first is a line; the rest are the tail of its value and must not be read
+       as fresh assignments, or a long value ending in "OTHER_KEY=value" would
+       quietly set OTHER_KEY. A short read means the line ended at EOF. */
+    size_t chunk = strlen(line);
+    int completed = memchr(line, '\n', chunk) != NULL || chunk < sizeof(line) - 1;
+    if (continuing) {
+      continuing = !completed;
+      continue;
+    }
+    continuing = !completed;
+
+    char *raw = line;
+    if (first_line) {
+      first_line = 0;
+      /* editors that write a UTF-8 BOM would otherwise make the first key
+         unreadable, silently dropping it */
+      if ((unsigned char)raw[0] == 0xEF && (unsigned char)raw[1] == 0xBB &&
+          (unsigned char)raw[2] == 0xBF) {
+        raw += 3;
+      }
+    }
+    char *trimmed = f2e_trim(raw);
     if (trimmed[0] == '\0' || trimmed[0] == '#') {
       continue;
     }

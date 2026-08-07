@@ -69,6 +69,30 @@ typedef enum {
   F2E_TYPE_MAP = 6
 } F2EValueType;
 
+/*
+ * Where a value can come from. Adding a source means adding it here, giving it
+ * a name, and placing it in F2E_DEFAULT_SOURCE_ORDER; everything else -- list
+ * completion, auditing, and resolution -- is driven off this enum.
+ */
+typedef enum {
+  F2E_SOURCE_FLAGS = 0,     /* argv */
+  F2E_SOURCE_ENV_SHELL = 1, /* the live process environment */
+  F2E_SOURCE_ENV_FILE = 2   /* ./.env */
+} F2ESource;
+
+#define F2E_SOURCE_COUNT 3
+
+/* highest precedence first */
+typedef struct {
+  unsigned char sources[F2E_SOURCE_COUNT];
+  size_t count;
+} F2ESourceOrder;
+
+typedef struct {
+  char env[F2E_MAX_ENV];
+  F2ESourceOrder order;
+} F2EEnvOrder;
+
 typedef struct {
   char name[F2E_MAX_NAME];
   char env[F2E_MAX_ENV];
