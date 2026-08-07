@@ -72,6 +72,13 @@ type NativeModule = {
 export type StructuredParseResult = {
   flags: EnvMap;
   providedFlags: EnvMap;
+  /**
+   * `./.env` values that lose to `process.env`, and the ones that win it,
+   * split so per-flag `dotenv_override` survives a flat merge:
+   * `{...dotenv, ...process.env, ...dotenvOverrides, ...providedFlags}`.
+   */
+  dotenv: EnvMap;
+  dotenvOverrides: EnvMap;
   command: string;
   subcommands: string[];
   extras: string[];
