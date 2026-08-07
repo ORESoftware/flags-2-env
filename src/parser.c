@@ -1537,6 +1537,14 @@ static int f2e_load_config(const char *config_path, F2EConfig *config) {
                  f2e_streq(table, "dotenv")) {
         current = NULL;
         section = F2E_SECTION_ENV_AUDIT;
+      } else if (f2e_streq(table, "order-of-preference") ||
+                 f2e_streq(table, "order_of_preference") ||
+                 f2e_streq(table, "order-of-precedence") ||
+                 f2e_streq(table, "order_of_precedence") ||
+                 f2e_streq(table, "precedence") ||
+                 f2e_streq(table, "preference")) {
+        current = NULL;
+        section = F2E_SECTION_ORDER;
       } else {
         current = NULL;
         section = F2E_SECTION_NONE;
