@@ -1036,6 +1036,10 @@ expect_dotenv 'Expected declared keys to survive many undeclared ones' \
   '{"F2E_DOTENV_PORT":"3000","F2E_DOTENV_DEBUG":"false","F2E_DOTENV_HOST":"after-600-undeclared-keys"}' \
   "$(cd "$DOTENV_BIG_DIR" && $DOTENV_CLEAN "$CLI" app)"
 
+# One logical line longer than the read buffer arrives in several chunks. The
+# chunks after the first are the tail of that value, so a value ending in
+# something that looks like an assignment must not set that key, and the next
+# real line must still be read.
 {
   printf 'F2E_DOTENV_HOST='
   i=0
@@ -1043,18 +1047,25 @@ expect_dotenv 'Expected declared keys to survive many undeclared ones' \
     printf '0123456789012345'
     i=$((i + 1))
   done
-  printf '\nF2E_DOTENV_PORT=4242\n'
+  printf 'F2E_DOTENV_PORT=9999\n'
+  printf 'F2E_DOTENV_TOKEN=next-real-line\n'
 } > "$DOTENV_BIG_DIR/.env"
-dotenv_big_host="$(cd "$DOTENV_BIG_DIR" && $DOTENV_CLEAN "$CLI" app)"
-case "$dotenv_big_host" in
-  *'"F2E_DOTENV_PORT":"3000"'*)
-    ;;
-  *)
-    printf 'A .env line past the read buffer should not let its remainder set other keys:\n%s\n' "$dotenv_big_host" >&2
+dotenv_big="$(cd "$DOTENV_BIG_DIR" && $DOTENV_CLEAN "$CLI" app)"
+case "$dotenv_big" in
+  *'"F2E_DOTENV_PORT":"9999"'*)
+    printf 'The tail of an over-long .env line must not set another key:\n%s\n' "$dotenv_big" >&2
     exit 1
     ;;
 esac
-dotenv_big_len="$(printf '%s' "$dotenv_big_host" | sed -e 's/.*"F2E_DOTENV_HOST":"//' -e 's/".*//' | awk '{print length($0)}')"
+case "$dotenv_big" in
+  *'"F2E_DOTENV_TOKEN":"next-real-line"'*)
+    ;;
+  *)
+    printf 'The line after an over-long .env line must still be read:\n%s\n' "$dotenv_big" >&2
+    exit 1
+    ;;
+esac
+dotenv_big_len="$(printf '%s' "$dotenv_big" | sed -e 's/.*"F2E_DOTENV_HOST":"//' -e 's/".*//' | awk '{print length($0)}')"
 if [ "$dotenv_big_len" -ne 1023 ]; then
   printf 'Expected an oversized .env value to be bounded at 1023 bytes; got %s\n' "$dotenv_big_len" >&2
   exit 1
