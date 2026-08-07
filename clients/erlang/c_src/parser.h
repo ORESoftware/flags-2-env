@@ -43,7 +43,8 @@ const char *f2e_version(void);
  * are taken from it. Parse-derived keys -- the command path, per-command
  * markers, positionals, unknown options, and parse errors -- are never read
  * from .env or the environment, so neither can forge them. Set
- * FLAGS2ENV_DOTENV=0 or [env] load = false to skip .env entirely.
+ * FLAGS2ENV_DOTENV=0 or [env] load = false to skip .env entirely; the config
+ * declaration wins, because FLAGS2ENV_DOTENV can only switch loading off.
  */
 
 /*

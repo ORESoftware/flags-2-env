@@ -844,6 +844,19 @@ expect_dotenv 'Expected FLAGS2ENV_DOTENV=0 to skip .env' \
   '{"F2E_DOTENV_PORT":"3000","F2E_DOTENV_DEBUG":"false"}' \
   "$(cd "$DOTENV_DIR" && $DOTENV_CLEAN FLAGS2ENV_DOTENV=0 "$CLI" app)"
 
+# [env] load = false is how a daemon refuses to take values from an ambient
+# working directory, so an ambient variable must not be able to undo it
+DOTENV_NO_LOAD_DIR="$TMP_TEST_DIR/dotenv-no-load"
+mkdir -p "$DOTENV_NO_LOAD_DIR"
+{
+  printf '[env]\nload = false\n'
+  cat "$DOTENV_DIR/.cli-flags.toml"
+} > "$DOTENV_NO_LOAD_DIR/.cli-flags.toml"
+cp "$DOTENV_DIR/.env" "$DOTENV_NO_LOAD_DIR/.env"
+expect_dotenv 'Expected FLAGS2ENV_DOTENV=1 not to defeat [env] load = false' \
+  '{"F2E_DOTENV_PORT":"3000","F2E_DOTENV_DEBUG":"false"}' \
+  "$(cd "$DOTENV_NO_LOAD_DIR" && $DOTENV_CLEAN FLAGS2ENV_DOTENV=1 "$CLI" app)"
+
 # a ./.env symlink is followed like a regular file
 DOTENV_LINK_DIR="$TMP_TEST_DIR/dotenv-symlink"
 mkdir -p "$DOTENV_LINK_DIR/shared"

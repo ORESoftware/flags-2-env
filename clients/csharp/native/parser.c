@@ -3404,11 +3404,16 @@ static int f2e_dotenv_load(F2EDotEnv *dotenv, const F2EConfig *config) {
   return 1;
 }
 
-/* FLAGS2ENV_DOTENV=0 turns loading off for one process without editing TOML. */
+/*
+ * FLAGS2ENV_DOTENV=0 turns loading off for one process without editing TOML.
+ * It can only switch loading off, never on: [env] load = false is how a daemon
+ * refuses to take policy from an attacker-controlled working directory, so an
+ * ambient variable must not be able to undo it.
+ */
 static int f2e_dotenv_is_enabled(const F2EConfig *config) {
   int forced = 0;
-  if (f2e_runtime_bool_from_env("FLAGS2ENV_DOTENV", &forced)) {
-    return forced;
+  if (f2e_runtime_bool_from_env("FLAGS2ENV_DOTENV", &forced) && !forced) {
+    return 0;
   }
   return config->dotenv_enabled;
 }
