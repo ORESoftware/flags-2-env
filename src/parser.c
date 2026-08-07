@@ -3377,7 +3377,9 @@ static void f2e_dotenv_unquote(char *value) {
  * works and one pointing at a fifo or device does not.
  */
 static FILE *f2e_dotenv_fopen(const char *path) {
-#if defined(_WIN32)
+/* the same platform triplet the rest of this file uses to decide whether the
+   POSIX headers above were included */
+#if !defined(__APPLE__) && !defined(__unix__)
   return fopen(path, "r");
 #else
   int flags = O_RDONLY | O_NONBLOCK;
