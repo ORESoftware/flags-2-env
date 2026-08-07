@@ -586,6 +586,8 @@ static const char *f2e_cli_help_command_name(int argc, const char *const argv[])
       !f2e_cli_streq(argv[1], "completion") &&
       !f2e_cli_streq(argv[1], "completions") &&
       !f2e_cli_streq(argv[1], "autocomplete") &&
+      !f2e_cli_streq(argv[1], "doctor") &&
+      !f2e_cli_streq(argv[1], "diagnose") &&
       !f2e_cli_streq(argv[1], "env-audit") &&
       !f2e_cli_streq(argv[1], "audit-env") &&
       !f2e_cli_streq(argv[1], "env-check") &&
@@ -603,6 +605,25 @@ static int f2e_cli_run_audit(const char *config_path) {
   int status = config_path ? f2e_audit_config_status_from_file(config_path) : f2e_audit_config_status();
   if (!report) {
     f2e_cli_stdout_line_locked("{\"ok\":false,\"errors\":[\"audit failed\"]}");
+    return 1;
+  }
+  int ok = f2e_cli_stdout_line_locked(report);
+  f2e_free(report);
+  return ok ? status : 1;
+}
+
+/*
+ * `flags2env doctor [config]` — diagnose the .env files the config reads.
+ *
+ * Exits non-zero on an error-level finding, so it works as a pre-commit or CI
+ * gate. Warnings (ambiguity, permissions) are reported without failing: they
+ * are worth seeing but not worth blocking a commit over.
+ */
+static int f2e_cli_run_doctor(const char *config_path) {
+  char *report = config_path ? f2e_doctor_from_file(config_path) : f2e_doctor();
+  int status = config_path ? f2e_doctor_status_from_file(config_path) : f2e_doctor_status();
+  if (!report) {
+    f2e_cli_stdout_line_locked("{\"ok\":false,\"errors\":[\"doctor failed\"]}");
     return 1;
   }
   int ok = f2e_cli_stdout_line_locked(report);
@@ -805,6 +826,12 @@ int main(int argc, const char *const argv[]) {
       return f2e_cli_run_audit(argc >= 4 ? argv[3] : NULL);
     }
     return f2e_cli_run_audit(argc >= 3 ? argv[2] : NULL);
+  }
+
+  if (argc >= 2 && (f2e_cli_streq(argv[1], "doctor") ||
+                    f2e_cli_streq(argv[1], "diagnose") ||
+                    f2e_cli_streq(argv[1], "--doctor"))) {
+    return f2e_cli_run_doctor(argc >= 3 ? argv[2] : NULL);
   }
 
   if (argc >= 2 && (f2e_cli_streq(argv[1], "env-audit") ||

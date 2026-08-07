@@ -1163,4 +1163,72 @@ expect_order_audit_error 'Expected an undeclared env key to fail the audit' \
   'F2E_ORDER_NOT_DECLARED = (env_file, flags)' \
   'is not declared as an env by any [flags.*] table'
 
+# [env] files: several .env files, read in order, later ones winning.
+FILES_DIR="$ROOT_DIR/tests/dotenv-files"
+files_output="$(cd "$FILES_DIR" && "$CLI" shell-env --config .cli-flags.toml -- prog)"
+case "$files_output" in
+  *"export F2E_FILES_PORT='3000'"*) ;;
+  *) printf 'env.files did not read the first file:\n%s\n' "$files_output" >&2; exit 1 ;;
+esac
+case "$files_output" in
+  *"export F2E_FILES_HOST='override'"*) ;;
+  *) printf 'env.files: the later file should win:\n%s\n' "$files_output" >&2; exit 1 ;;
+esac
+
+# A path that escapes the working directory is an audit error, not a silent
+# fallback to ./.env -- the contract is that only the cwd is read.
+UNSAFE_DIR="$(mktemp -d)"
+printf '[env]\nfiles = ["../.env"]\n\n[flags.a]\nenv = "F2E_UNSAFE_A"\naliases = ["a"]\ntype = "string"\n' \
+  > "$UNSAFE_DIR/.cli-flags.toml"
+set +e
+unsafe_report="$("$CLI" audit "$UNSAFE_DIR/.cli-flags.toml")"
+unsafe_status=$?
+set -e
+rm -rf "$UNSAFE_DIR"
+if [ "$unsafe_status" -eq 0 ]; then
+  printf 'env.files with a ".." segment should fail the audit:\n%s\n' "$unsafe_report" >&2
+  exit 1
+fi
+case "$unsafe_report" in
+  *"env.files must be a list of paths inside the working directory"*) ;;
+  *) printf 'unexpected env.files audit message:\n%s\n' "$unsafe_report" >&2; exit 1 ;;
+esac
+
+# doctor: malformed lines are errors, ambiguous ones are warnings, and a key
+# listed in [env] ignore is neither.
+DOCTOR_DIR="$ROOT_DIR/tests/doctor-findings"
+set +e
+doctor_report="$(cd "$DOCTOR_DIR" && "$CLI" doctor .cli-flags.toml)"
+doctor_status=$?
+set -e
+if [ "$doctor_status" -eq 0 ]; then
+  printf 'doctor should exit non-zero on malformed .env lines:\n%s\n' "$doctor_report" >&2
+  exit 1
+fi
+for expected in \
+  'has an unterminated quote' \
+  'no \"=\"' \
+  'is not a valid environment variable name' \
+  'was already assigned at line 2' \
+  'F2E_DOCTOR_UNDECLARED is not declared'; do
+  case "$doctor_report" in
+    *"$expected"*) ;;
+    *) printf 'doctor did not report %s:\n%s\n' "$expected" "$doctor_report" >&2; exit 1 ;;
+  esac
+done
+# An [env] ignore entry is deliberately not reported as undeclared.
+case "$doctor_report" in
+  *"F2E_DOCTOR_IGNORED is not declared"*)
+    printf 'doctor reported an env.ignore key as undeclared:\n%s\n' "$doctor_report" >&2
+    exit 1 ;;
+  *) ;;
+esac
+# Values never appear in the report: a .env holds secrets.
+case "$doctor_report" in
+  *second*|*nope*)
+    printf 'doctor echoed a .env value:\n%s\n' "$doctor_report" >&2
+    exit 1 ;;
+  *) ;;
+esac
+
 printf 'flags2env tests passed\n'
