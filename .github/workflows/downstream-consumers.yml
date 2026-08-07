@@ -64,6 +64,59 @@ jobs:
           }
           echo "tooling_ref=$SOURCE_REF" >> "$GITHUB_OUTPUT"
 
+  # Each fixture checks its own .cli-flags.toml against a digest it carries, so
+  # a single repository cannot drift unnoticed. That is not enough on its own:
+  # twelve repositories could be edited together and stay self-consistent while
+  # the constant they all agree on no longer describes anything. This job is the
+  # cross-repository half -- it fetches all twelve and proves they are one file.
+  conformance:
+    name: The twelve fixtures share one contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Fetch and compare every fixture contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$(mktemp -d)"
+          repos="bun-app cpp-app dart-app deno-app gleam-app golang-app
+                 java-app nodejs-app php-app python-app ruby-app rust-app"
+
+          for repo in $repos; do
+            for file in .cli-flags.toml EXPECTED.md; do
+              curl --fail-with-body --silent --show-error --location \
+                --output "$work/$repo--$file" \
+                "https://raw.githubusercontent.com/flags-2-env-test/$repo/main/$file"
+            done
+          done
+
+          fail=0
+          for file in .cli-flags.toml EXPECTED.md; do
+            echo "### $file"
+            digests="$(sha256sum "$work"/*--"$file" | awk '{print $1}' | sort -u)"
+            count="$(printf '%s\n' "$digests" | wc -l)"
+            if [ "$count" -ne 1 ]; then
+              echo "::error::$file differs across the fixtures; $count distinct versions" >&2
+              sha256sum "$work"/*--"$file" >&2
+              fail=1
+            else
+              echo "all twelve agree: $digests"
+            fi
+          done
+
+          # The contract each fixture asserts against locally must be the same
+          # file this repository's own consumers are held to.
+          canonical="$(sha256sum "$work/rust-app--.cli-flags.toml" | awk '{print $1}')"
+          echo "canonical_contract=$canonical"
+          {
+            echo "### Fixture contract conformance"
+            echo
+            echo "- Repositories compared: 12"
+            echo "- Shared \`.cli-flags.toml\`: \`$canonical\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          exit "$fail"
+
   fixture:
     name: ${{ matrix.repository }}
     needs: prepare
@@ -155,6 +208,27 @@ jobs:
           set -o pipefail
           log="$RUNNER_TEMP/${{ matrix.repository }}.log"
           docker run --rm "f2e-fixture-${{ matrix.repository }}" 2>&1 | tee "$log"
+
+      # A green fixture only means something if a red one is reachable. Mount a
+      # contract with one altered default over the real one and require the
+      # container to fail. If it still passes, the assertions are not reaching
+      # the parser and the step above proved nothing about this commit.
+      - name: Prove the fixture can still fail
+        shell: bash
+        run: |
+          set -euo pipefail
+          mutant="$(mktemp -d)/.cli-flags.toml"
+          sed 's/^default = 3000$/default = 3001/' fixture/.cli-flags.toml > "$mutant"
+          cmp -s fixture/.cli-flags.toml "$mutant" && {
+            echo "::error::mutation was a no-op; the vacuity check is itself broken" >&2
+            exit 1
+          }
+          if docker run --rm -v "$mutant:/app/.cli-flags.toml:ro" \
+               "f2e-fixture-${{ matrix.repository }}" >/dev/null 2>&1; then
+            echo "::error::${{ matrix.repository }} passes against a mutated contract" >&2
+            exit 1
+          fi
+          echo "${{ matrix.repository }} correctly rejects a mutated contract"
 
       - name: Upload fixture output
         if: ${{ always() }}
