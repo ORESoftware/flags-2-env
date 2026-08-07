@@ -7139,6 +7139,10 @@ char *f2e_parse_structured_from_file(const char *config_path, int argc, const ch
                f2e_buffer_append(&out, dotenv_below_json) &&
                f2e_buffer_append(&out, ",\"dotenvOverrides\":") &&
                f2e_buffer_append(&out, dotenv_above_json) &&
+               /* only keys whose order deviates from the default appear here */
+               f2e_buffer_append(&out, ",\"sourceOrder\":{") &&
+               f2e_buffer_append(&out, order_report_count > 0 ? order_report.data : "") &&
+               f2e_buffer_append(&out, "}") &&
                f2e_buffer_append(&out, ",\"command\":") &&
                f2e_buffer_append_json_string(&out, label) &&
                f2e_buffer_append(&out, ",\"subcommands\":") &&
