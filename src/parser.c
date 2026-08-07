@@ -372,7 +372,14 @@ static void f2e_strip_comment(char *line) {
 
 static int f2e_array_value_is_complete(const char *value) {
   const char *cursor = f2e_trim_left((char *)value);
-  if (*cursor != '[') {
+  char opening = *cursor;
+  char closing;
+  if (opening == '[') {
+    closing = ']';
+  } else if (opening == '(') {
+    /* preference lists accept parentheses as well as brackets */
+    closing = ')';
+  } else {
     return 1;
   }
 
