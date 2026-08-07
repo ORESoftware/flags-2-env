@@ -1706,6 +1706,20 @@ static int f2e_load_config(const char *config_path, F2EConfig *config) {
       continue;
     }
 
+    if (section == F2E_SECTION_ORDER) {
+      /* every key here is an env var name mapped to its preference list */
+      F2ESourceOrder order;
+      F2EOrderProblem problem = f2e_parse_source_order(value, &order);
+      if (!f2e_env_name_is_valid(key)) {
+        f2e_record_order_problem(config, F2E_ORDER_UNDECLARED_KEY, key, value);
+      } else if (problem != F2E_ORDER_OK) {
+        f2e_record_order_problem(config, problem, key, value);
+      } else {
+        f2e_set_env_order(config, key, &order);
+      }
+      continue;
+    }
+
     if (section == F2E_SECTION_COMMAND) {
       if (current_command < 0 || (size_t)current_command >= config->command_count) {
         continue;
