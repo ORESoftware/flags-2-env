@@ -3421,7 +3421,20 @@ static int f2e_dotenv_load(F2EDotEnv *dotenv, const F2EConfig *config) {
 
   char line[F2E_MAX_LINE];
   int first_line = 1;
+  int continuing = 0;
   while (fgets(line, sizeof(line), file)) {
+    /* A line longer than the read buffer arrives in several chunks. Only the
+       first is a line; the rest are the tail of its value and must not be read
+       as fresh assignments, or a long value ending in "OTHER_KEY=value" would
+       quietly set OTHER_KEY. A short read means the line ended at EOF. */
+    size_t chunk = strlen(line);
+    int completed = memchr(line, '\n', chunk) != NULL || chunk < sizeof(line) - 1;
+    if (continuing) {
+      continuing = !completed;
+      continue;
+    }
+    continuing = !completed;
+
     char *raw = line;
     if (first_line) {
       first_line = 0;
