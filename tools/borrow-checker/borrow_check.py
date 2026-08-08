@@ -659,10 +659,14 @@ class Analyzer(object):
     def takes_map(self):
         if self._takes_map is None:
             takes = dict(self.contracts.takes)
+            may_take = {}
             for summary in self.summaries.values():
                 for idx in summary.takes_params:
                     takes.setdefault(summary.name, idx)
+                if summary.may_take_params:
+                    may_take[summary.name] = summary.may_take_params
             self._takes_map = takes
+            self._may_take_map = may_take
         return self._takes_map
 
     def eval_call(self, call, frame, loc):
