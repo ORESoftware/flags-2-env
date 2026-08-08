@@ -14,6 +14,12 @@ name: Notify consumer fixtures
 on:
   push:
     branches: [main]
+  # Validate on PRs too, but WITHOUT dispatching: a pull request must not fan
+  # work out to 13 live repositories. The resolve step still runs, so the YAML
+  # and the enumeration logic get exercised; the dispatch step is skipped.
+  pull_request:
+    paths:
+      - ".github/workflows/notify-consumer-fixtures.yml"
   workflow_dispatch:
     inputs:
       sha:
@@ -54,6 +60,7 @@ jobs:
           sed 's/^/  /' /tmp/targets.txt
 
       - name: Dispatch
+        if: github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.CONSUMER_DISPATCH_TOKEN }}
           SHA: ${{ inputs.sha || github.sha }}
