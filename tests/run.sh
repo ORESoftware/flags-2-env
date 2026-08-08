@@ -8,7 +8,32 @@ FIXTURE_DIR="$ROOT_DIR/tests/fixtures"
 TMP_TEST_DIR="${TMPDIR:-/tmp}/flags2env-tests-$$"
 rm -rf "$TMP_TEST_DIR"
 mkdir -p "$TMP_TEST_DIR"
-trap 'rm -rf "$TMP_TEST_DIR"' EXIT
+
+MATERIALIZED_DOTENV_DIRS="
+tests/dotenv
+tests/env-audit
+tests/dotenv-order
+tests/env-audit-drift
+tests/env-audit-clean
+tests/env-audit-ignore
+tests/dotenv-global-override
+"
+
+cleanup_test_state() {
+  rm -rf "$TMP_TEST_DIR"
+  for fixture_dir in $MATERIALIZED_DOTENV_DIRS; do
+    rm -f "$ROOT_DIR/$fixture_dir/.env"
+  done
+}
+trap cleanup_test_state EXIT
+trap 'cleanup_test_state; exit 130' HUP INT TERM
+
+# The repository never tracks plaintext .env files. Tests that exercise
+# implicit ./.env discovery materialize synthetic fixtures for the
+# duration of the suite and remove them on every normal/catchable exit.
+for fixture_dir in $MATERIALIZED_DOTENV_DIRS; do
+  cp "$ROOT_DIR/$fixture_dir/fixture.dotenv" "$ROOT_DIR/$fixture_dir/.env"
+done
 
 run_case() {
   expected="$1"

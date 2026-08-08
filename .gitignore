@@ -22,3 +22,14 @@ temp/worktrees
 
 # DEN-2846 prebuilt harness staging output (certified artifacts land via DEN-2848)
 /build/prebuilt-staging/
+
+# BEGIN ORESoftware plaintext dotenv boundary
+# Real plaintext dotenv state is local-only. Synthetic parser fixtures are
+# tracked as fixture.dotenv and may materialize .env only during test runtime.
+*.env
+*/*.env
+*/**/*.env
+.env.*
+*.env.*
+!.env.example
+# END ORESoftware plaintext dotenv boundary
