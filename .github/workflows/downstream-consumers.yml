@@ -163,6 +163,11 @@ jobs:
           - python-app
           - ruby-app
           - rust-app
+          # Not an argv fixture: feature-matrix covers value sources, ordering,
+          # subcommands, audits, codegen, and completion. It follows the same
+          # conventions as the twelve -- same vendor path, same self-asserting
+          # container -- so it runs through this matrix unchanged.
+          - feature-matrix
     steps:
       - name: Check out the consumer fixture without credentials
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
