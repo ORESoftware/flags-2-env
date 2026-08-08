@@ -677,6 +677,15 @@ class Analyzer(object):
                 continue
             state = frame.get(arg_name)
             takes_this = name in takes and takes[name] == idx
+            if name == "realloc" and idx == 0 and state != FREED:
+                # realloc consumes its argument only when it succeeds; the
+                # caller may legally free it on failure or overwrite it on
+                # success, so provenance blurs to unknown. The self-assign
+                # p = realloc(p, n) footgun is caught separately by the
+                # lost-realloc rule in assign().
+                if state in OWNING_STATES:
+                    frame.set(arg_name, UNKNOWN)
+                continue
             if state == FREED:
                 if takes_this:
                     self.report(loc, "double-free",
