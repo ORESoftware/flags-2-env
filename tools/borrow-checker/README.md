@@ -25,12 +25,21 @@ without annotation.
 1. `clang -Xclang -ast-dump=json -fsyntax-only` supplies the AST; the checker
    has no parser of its own and no third-party dependencies.
 2. Declared contracts are read textually from headers passed via
-   `--header-contract`; static-helper contracts (returns-owned,
-   takes-ownership) are inferred by iterating the analysis to a fixpoint.
+   `--header-contract`; static-helper contracts are inferred by iterating
+   the analysis to a fixpoint: returns-owned (returns an allocation),
+   takes-ownership (frees a parameter), and may-take (stores a parameter
+   into non-local memory — a conditional transfer, treated like realloc's
+   argument: the caller may legally free on the callee's failure path or
+   hand off on success).
 3. Each function body is abstractly interpreted over the ownership lattice
    `uninit / null / maybe-null / owned / borrowed / freed / moved / unknown`,
    with branch-state merging, loop widening (two-pass), switch arms restarted
    from the switch entry state, and `if (!p)`-style null-check refinement.
+4. A collection audit cross-checks the AST against a textual scan of the
+   `static` function definitions and hard-fails on any mismatch, so a
+   clang-version difference in location serialization can never silently
+   shrink the analyzed surface (Apple clang 21 and Ubuntu clang 18 disagreed
+   by 95 functions before this guard existed).
 
 The state machine is mirrored, transition for transition, by
 `formal/smt/ownership_lattice.smt2`; `scripts/formal-check.sh` has Z3 prove

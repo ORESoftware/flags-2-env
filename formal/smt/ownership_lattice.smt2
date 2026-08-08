@@ -14,6 +14,12 @@
 ;   assign-null    x = NULL                  -> null
 ;   move           return x / store x        -> moved
 ;   scope-end      x leaves scope            state unchanged (leak check)
+;
+; Conditional transfers (realloc's argument, may-take callees) blur the
+; variable to the untracked `unknown` state in the Python analyzer; from
+; that point it makes no claims, so `unknown` participates in joins here
+; but no trace event models it. The theorems quantify over tracked
+; variables, matching what the checker actually promises.
 
 ; States
 (define-fun st_uninit () Int 0)

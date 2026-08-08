@@ -169,18 +169,23 @@ def run_clang(clang, path, include_dirs, extra_args):
 def collect_functions(tu, main_path):
     """Yield FunctionDecl nodes with bodies that live in main_path.
 
-    clang only emits loc.file when the file changes, so track it statefully.
+    clang serializes locations differentially: loc.file appears only when
+    the file changes. Track exactly what the serializer tracks — the
+    expansion file (expansionLoc, or the plain loc) — and never the
+    spelling file: a macro spelled in a system header would otherwise
+    poison the tracker while clang's own state still says main file,
+    silently dropping every following function.
     """
     want = os.path.realpath(main_path)
     functions = []
     current_file = None
     for node in tu.get("inner", ()):
         loc = node.get("loc", {})
-        if "file" in loc:
+        expansion = loc.get("expansionLoc", {})
+        if "file" in expansion:
+            current_file = expansion["file"]
+        elif "file" in loc:
             current_file = loc["file"]
-        spelling = loc.get("spellingLoc", {})
-        if "file" in spelling:
-            current_file = spelling["file"]
         if node.get("kind") != "FunctionDecl":
             continue
         if current_file is None or os.path.realpath(current_file) != want:
@@ -189,6 +194,40 @@ def collect_functions(tu, main_path):
                for child in node.get("inner", ())):
             functions.append(node)
     return functions
+
+
+_STATIC_DEF_RE = re.compile(r"^static\s+[^;{}()]*?\b(\w+)\s*\(", re.M)
+
+
+def audit_collection(source_text, functions, path):
+    """Fail loudly if AST file tracking dropped a function.
+
+    Every `static <type> name(` definition found textually in the source
+    must appear in the collected set; a mismatch means the differential
+    location tracking desynced from this clang's serializer, which would
+    otherwise silently shrink the analyzed surface (observed: Apple clang
+    21 vs Ubuntu clang 18 disagreeing by 95 functions before this guard).
+    """
+    collected = set()
+    for fn in functions:
+        name = fn.get("name")
+        if name:
+            collected.add(name)
+    missing = []
+    for match in _STATIC_DEF_RE.finditer(source_text):
+        name = match.group(1)
+        rest = source_text[match.end():]
+        # a prototype reaches ';' before any '{'; a definition hits '{'
+        semi = rest.find(";")
+        brace = rest.find("{")
+        if brace == -1 or (semi != -1 and semi < brace):
+            continue
+        if name not in collected:
+            missing.append(name)
+    if missing:
+        raise RuntimeError(
+            "%s: AST location tracking dropped %d function(s): %s"
+            % (path, len(missing), ", ".join(sorted(set(missing))[:8])))
 
 
 def is_pointer_type(node):
@@ -243,6 +282,10 @@ class FunctionSummary(object):
         self.name = name
         self.returns_owned = False
         self.takes_params = set()
+        # params stored into non-local memory: transfer is conditional on
+        # the callee succeeding, so callers' arguments blur to unknown the
+        # way realloc's does.
+        self.may_take_params = set()
 
 
 class Frame(object):
@@ -298,9 +341,11 @@ class Analyzer(object):
         self.is_static = False
         self.returns_owned_seen = False
         self.takes_seen = set()
+        self.stores_seen = set()
         self.param_order = []
         self.current_loc = (0, 1)
         self._takes_map = None
+        self._may_take_map = {}
 
     # -- diagnostics --------------------------------------------------------
 
@@ -554,9 +599,14 @@ class Analyzer(object):
                 self.eval_expr(rhs, frame, loc)
                 self.eval_expr(lhs, frame, loc)
                 rhs_name = ref_name(rhs)
-                if rhs_name is not None and \
-                        frame.get(rhs_name) in OWNING_STATES:
-                    frame.set(rhs_name, MOVED)
+                if rhs_name is not None:
+                    if frame.get(rhs_name) in OWNING_STATES:
+                        frame.set(rhs_name, MOVED)
+                    if rhs_name in self.params:
+                        # a parameter stored into non-local memory: callers
+                        # conditionally transfer ownership at this callee
+                        self.stores_seen.add(
+                            self.param_order.index(rhs_name))
             return
 
         if kind == "CallExpr":
@@ -610,10 +660,14 @@ class Analyzer(object):
     def takes_map(self):
         if self._takes_map is None:
             takes = dict(self.contracts.takes)
+            may_take = {}
             for summary in self.summaries.values():
                 for idx in summary.takes_params:
                     takes.setdefault(summary.name, idx)
+                if summary.may_take_params:
+                    may_take[summary.name] = summary.may_take_params
             self._takes_map = takes
+            self._may_take_map = may_take
         return self._takes_map
 
     def eval_call(self, call, frame, loc):
@@ -638,6 +692,23 @@ class Analyzer(object):
                 continue
             state = frame.get(arg_name)
             takes_this = name in takes and takes[name] == idx
+            may_take = self._may_take_map.get(name)
+            if may_take is not None and idx in may_take and \
+                    state in OWNING_STATES:
+                # conditional transfer into a callee that stores this
+                # argument: the caller may legally free it on the callee's
+                # failure path or forget it on success
+                frame.set(arg_name, UNKNOWN)
+                continue
+            if name == "realloc" and idx == 0 and state != FREED:
+                # realloc consumes its argument only when it succeeds; the
+                # caller may legally free it on failure or overwrite it on
+                # success, so provenance blurs to unknown. The self-assign
+                # p = realloc(p, n) footgun is caught separately by the
+                # lost-realloc rule in assign().
+                if state in OWNING_STATES:
+                    frame.set(arg_name, UNKNOWN)
+                continue
             if state == FREED:
                 if takes_this:
                     self.report(loc, "double-free",
@@ -872,6 +943,10 @@ def infer_summaries(functions, path, source_lines, contracts):
             if new_takes:
                 summary.takes_params |= new_takes
                 changed = True
+            new_stores = analyzer.stores_seen - summary.may_take_params
+            if new_stores:
+                summary.may_take_params |= new_stores
+                changed = True
         if not changed:
             break
     return summaries
@@ -880,8 +955,10 @@ def infer_summaries(functions, path, source_lines, contracts):
 def check_file(path, clang, include_dirs, extra_args, contracts):
     tu = run_clang(clang, path, include_dirs, extra_args)
     with open(path, "r") as fh:
-        source_lines = fh.read().splitlines()
+        source_text = fh.read()
+    source_lines = source_text.splitlines()
     functions = collect_functions(tu, path)
+    audit_collection(source_text, functions, path)
     summaries = infer_summaries(functions, path, source_lines, contracts)
     diagnostics = []
     for fn in functions:
