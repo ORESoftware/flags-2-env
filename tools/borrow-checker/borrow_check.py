@@ -341,6 +341,7 @@ class Analyzer(object):
         self.is_static = False
         self.returns_owned_seen = False
         self.takes_seen = set()
+        self.stores_seen = set()
         self.param_order = []
         self.current_loc = (0, 1)
         self._takes_map = None
