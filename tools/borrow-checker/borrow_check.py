@@ -505,10 +505,7 @@ class Analyzer(object):
                     continue
                 frame = self.exec_stmt(child, frame)
                 if frame.terminated:
-                    # case bodies end in break/return; recover so the next
-                    # case label still gets analyzed from a live state
-                    frame = frame.copy()
-                    frame.terminated = False
+                    break  # the enclosing SwitchStmt restarts the next arm
             return frame
 
         if kind == "NullStmt":
