@@ -668,6 +668,35 @@ class Analyzer(object):
                 self.eval_expr(child, frame, loc)
             return
 
+        if kind == "BinaryOperator" and expr.get("opcode") in ("&&", "||"):
+            inner = [c for c in expr.get("inner", ()) if isinstance(c, dict)]
+            if len(inner) == 2:
+                lhs, rhs = inner
+                self.eval_expr(lhs, frame, loc)
+                # C short-circuits: the right operand is evaluated only when
+                # the left did not already decide the result, so it may
+                # assume the left's outcome. `p && p->x` and
+                # `!p || use(p)` are guarded, and must not be diagnosed.
+                assumed = expr.get("opcode") == "&&"
+                facts = self.null_facts(lhs, assumed)
+                before = dict((n, frame.get(n)) for n, _ in facts)
+                saved_nonnull = set(frame.nonnull)
+                self.apply_refinement(lhs, frame, assumed)
+                refined = dict((n, frame.get(n)) for n in before)
+                self.eval_expr(rhs, frame, loc)
+                # The assumption held only for the right operand; the
+                # enclosing statement re-derives facts for the whole
+                # condition. Undo it, but keep anything the right operand
+                # genuinely changed (a free or a transfer inside it).
+                for fname, prior in before.items():
+                    if frame.get(fname) == refined[fname]:
+                        if prior is None:
+                            frame.states.pop(fname, None)
+                        else:
+                            frame.set(fname, prior)
+                frame.nonnull = saved_nonnull
+                return
+
         if kind == "ConditionalOperator":
             inner = [c for c in expr.get("inner", ()) if isinstance(c, dict)]
             for child in inner:
