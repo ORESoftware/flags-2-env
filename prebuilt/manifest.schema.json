@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ORESoftware/flags-2-env/prebuilt/manifest.schema.json",
+  "title": "flags-2-env prebuilt artifact manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "package_version",
+    "abi_version",
+    "source_commit",
+    "source_input_sha256",
+    "artifacts"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "package_version": {"type": "string", "minLength": 1},
+    "abi_version": {"type": "integer", "minimum": 1},
+    "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "source_input_sha256": {"$ref": "#/$defs/sha256"},
+    "source_date_epoch": {"type": "integer", "minimum": 0},
+    "artifacts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/artifact"}
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "kind",
+        "path",
+        "size",
+        "sha256",
+        "exported_symbols_sha256",
+        "minimum_runtime",
+        "compiler",
+        "linker",
+        "archiver",
+        "compile_flags"
+      ],
+      "properties": {
+        "target": {"type": "string", "minLength": 1},
+        "kind": {"enum": ["static", "shared"]},
+        "path": {
+          "type": "string",
+          "pattern": "^prebuilt/[A-Za-z0-9._-]+/[^/]+$"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1048576
+        },
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "exported_symbols_sha256": {"$ref": "#/$defs/sha256"},
+        "minimum_runtime": {"type": "string", "minLength": 1},
+        "soname_or_install_name": {"type": ["string", "null"]},
+        "compiler": {"type": "string", "minLength": 1},
+        "linker": {"type": "string", "minLength": 1},
+        "archiver": {"type": "string", "minLength": 1},
+        "sdk_or_sysroot": {"type": ["string", "null"]},
+        "compile_flags": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "provenance": {"type": ["string", "null"]},
+        "signature": {"type": ["string", "null"]}
+      }
+    }
+  }
+}
