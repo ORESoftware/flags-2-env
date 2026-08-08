@@ -1,0 +1,96 @@
+name: One-shot explicit API audit fixture migration
+
+on:
+  push:
+    branches:
+      - agent/den-2902-flags-dotenv-fixtures
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout candidate branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Point explicit C audit tests at neutral fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path('tests/api_hardening.c')
+          text = path.read_text()
+
+          replacements = {
+              '#define ENV_AUDIT_ENV "tests/env-audit/.env"':
+                  '#define ENV_AUDIT_ENV "tests/env-audit/fixture.dotenv"',
+              '#define ENV_AUDIT_CLEAN_CONFIG "tests/env-audit-clean/.cli-flags.toml"':
+                  '#define ENV_AUDIT_CLEAN_CONFIG "tests/env-audit-clean/.cli-flags.toml"\n#define ENV_AUDIT_CLEAN_ENV "tests/env-audit-clean/fixture.dotenv"',
+              '#define ENV_AUDIT_IGNORE_CONFIG "tests/env-audit-ignore/.cli-flags.toml"':
+                  '#define ENV_AUDIT_IGNORE_CONFIG "tests/env-audit-ignore/.cli-flags.toml"\n#define ENV_AUDIT_IGNORE_ENV "tests/env-audit-ignore/fixture.dotenv"',
+              'f2e_audit_env_file_status_from_file(ENV_AUDIT_CLEAN_CONFIG, NULL)':
+                  'f2e_audit_env_file_status_from_file(ENV_AUDIT_CLEAN_CONFIG, ENV_AUDIT_CLEAN_ENV)',
+              'f2e_audit_env_file_from_file(ENV_AUDIT_CLEAN_CONFIG, NULL)':
+                  'f2e_audit_env_file_from_file(ENV_AUDIT_CLEAN_CONFIG, ENV_AUDIT_CLEAN_ENV)',
+              'f2e_audit_env_file_status_from_file(ENV_AUDIT_IGNORE_CONFIG, NULL)':
+                  'f2e_audit_env_file_status_from_file(ENV_AUDIT_IGNORE_CONFIG, ENV_AUDIT_IGNORE_ENV)',
+              'f2e_audit_env_file_from_file(ENV_AUDIT_IGNORE_CONFIG, NULL)':
+                  'f2e_audit_env_file_from_file(ENV_AUDIT_IGNORE_CONFIG, ENV_AUDIT_IGNORE_ENV)',
+          }
+
+          for old, new in replacements.items():
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected exactly one API fixture anchor for {old!r}, found {count}')
+              text = text.replace(old, new, 1)
+
+          path.write_text(text)
+          PY
+          git diff --check
+
+      - name: Verify API hardening under clang sanitizers
+        shell: bash
+        env:
+          CC: clang
+          CFLAGS: -std=c99 -Wall -Wextra -Wpedantic -Werror -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined
+          LDFLAGS: -fsanitize=address,undefined
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:strict_string_checks=1:check_initialization_order=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: |
+          set -euo pipefail
+          make clean build/api-hardening
+          ./build/api-hardening
+
+      - name: Verify API hardening under gcc sanitizers
+        shell: bash
+        env:
+          CC: gcc
+          CFLAGS: -std=c99 -Wall -Wextra -Wpedantic -Werror -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined
+          LDFLAGS: -fsanitize=address,undefined
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:strict_string_checks=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: |
+          set -euo pipefail
+          make clean build/api-hardening
+          ./build/api-hardening
+
+      - name: Commit verified fix and remove one-shot workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/agent-fix-api-audit-fixtures.yml
+          git config user.name 'ORESoftware'
+          git config user.email 'alex@oresoftware.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'Use neutral dotenv fixtures in API hardening tests'
+          git push origin HEAD:agent/den-2902-flags-dotenv-fixtures
