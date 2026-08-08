@@ -110,3 +110,17 @@ $(DOTENV_API_TEST): $(SRC) tests/dotenv_api.c $(HEADER) | $(BUILD_DIR)
 
 clean:
 	rm -rf $(BUILD_DIR)
+
+# DEN-2846: pinned prebuilt harness (staging output; artifacts commit in DEN-2848)
+PREBUILT_HARNESS := scripts/prebuilt/build.sh
+
+prebuilt-tier1:
+	$(PREBUILT_HARNESS) build tier1
+
+prebuilt-verify:
+	$(PREBUILT_HARNESS) verify tier1
+
+prebuilt-%:
+	$(PREBUILT_HARNESS) build $*
+
+.PHONY: prebuilt-tier1 prebuilt-verify

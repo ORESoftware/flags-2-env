@@ -19,3 +19,6 @@ temp
 tmp/worktrees
 temp/worktrees
 .zed/
+
+# DEN-2846 prebuilt harness staging output (certified artifacts land via DEN-2848)
+/build/prebuilt-staging/
