@@ -725,7 +725,7 @@ class Analyzer(object):
             return
         kind = bare.get("kind")
         if kind == "CallExpr":
-            if self.classify_call_owned(bare):
+            if rhs_call_name == "realloc" or self.classify_call_owned(bare):
                 frame.set(name, MAYBE_NULL)
             else:
                 frame.set(name, UNKNOWN)
