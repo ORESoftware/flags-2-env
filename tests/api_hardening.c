@@ -20,9 +20,11 @@
 #define INVALID_TYPED_CONFIG "tests/audit-invalid-typed/.cli-flags.toml"
 #define INVALID_TYPE_CONFIG "tests/audit-invalid-type/.cli-flags.toml"
 #define ENV_AUDIT_CONFIG "tests/env-audit/.cli-flags.toml"
-#define ENV_AUDIT_ENV "tests/env-audit/.env"
+#define ENV_AUDIT_ENV "tests/env-audit/fixture.dotenv"
 #define ENV_AUDIT_CLEAN_CONFIG "tests/env-audit-clean/.cli-flags.toml"
+#define ENV_AUDIT_CLEAN_ENV "tests/env-audit-clean/fixture.dotenv"
 #define ENV_AUDIT_IGNORE_CONFIG "tests/env-audit-ignore/.cli-flags.toml"
+#define ENV_AUDIT_IGNORE_ENV "tests/env-audit-ignore/fixture.dotenv"
 #define UNSAFE_SHELL_CONFIG "tests/audit-unsafe-shell/.cli-flags.toml"
 #define HELP_HARDENING_CONFIG "tests/help-hardening/.cli-flags.toml"
 #define TABLE_OPTIONS_CONFIG "tests/table-options/.cli-flags.toml"
@@ -565,14 +567,14 @@ int main(void) {
               f2e_audit_config_from_file(UNSAFE_SHELL_CONFIG),
               "{\"ok\":false,\"errorCount\":5,\"warningCount\":0,\"errors\":[\"flags.bad env \\\"BAD-NAME\\\" is not a valid env var name\",\"flags.bad alias \\\"bad alias\\\" contains unsafe option characters\",\"flags.bad has invalid short flag \\\";\\\"\",\"flags.bad true_aliases contains unsafe shell token \\\"bad value\\\"\",\"parse.positionals_env \\\"BAD-POSITIONALS\\\" is not a valid env var name\"],\"warnings\":[]}");
 
-  expect_status("clean env audit", f2e_audit_env_file_status_from_file(ENV_AUDIT_CLEAN_CONFIG, NULL), 0);
+  expect_status("clean env audit", f2e_audit_env_file_status_from_file(ENV_AUDIT_CLEAN_CONFIG, ENV_AUDIT_CLEAN_ENV), 0);
   expect_json("clean env audit report",
-              f2e_audit_env_file_from_file(ENV_AUDIT_CLEAN_CONFIG, NULL),
+              f2e_audit_env_file_from_file(ENV_AUDIT_CLEAN_CONFIG, ENV_AUDIT_CLEAN_ENV),
               "{\"ok\":true,\"errorCount\":0,\"warningCount\":0,\"errors\":[],\"warnings\":[]}");
 
-  expect_status("ignored env audit", f2e_audit_env_file_status_from_file(ENV_AUDIT_IGNORE_CONFIG, NULL), 0);
+  expect_status("ignored env audit", f2e_audit_env_file_status_from_file(ENV_AUDIT_IGNORE_CONFIG, ENV_AUDIT_IGNORE_ENV), 0);
   expect_json("ignored env audit report",
-              f2e_audit_env_file_from_file(ENV_AUDIT_IGNORE_CONFIG, NULL),
+              f2e_audit_env_file_from_file(ENV_AUDIT_IGNORE_CONFIG, ENV_AUDIT_IGNORE_ENV),
               "{\"ok\":true,\"errorCount\":0,\"warningCount\":0,\"errors\":[],\"warnings\":[]}");
 
   expect_status("invalid config env audit", f2e_audit_env_file_status_from_file(INVALID_ENV_ONLY_CONFIG, ENV_AUDIT_ENV), 1);
