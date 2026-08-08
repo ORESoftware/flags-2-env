@@ -475,13 +475,25 @@ class Analyzer(object):
 
         if kind == "SwitchStmt":
             inner = [c for c in stmt.get("inner", ()) if isinstance(c, dict)]
-            if inner:
-                self.eval_expr(inner[0], frame, loc)
-                body = inner[-1]
+            if not inner:
+                return frame
+            self.eval_expr(inner[0], frame, loc)
+            body = inner[-1]
+            exits = [frame.copy()]  # path where no case matches
+            if body.get("kind") == "CompoundStmt":
                 arm = frame.copy()
-                arm_out = self.exec_stmt(body, arm)
-                return merge_frames([frame.copy(), arm_out])
-            return frame
+                for child in body.get("inner", ()):
+                    arm = self.exec_stmt(child, arm)
+                    if arm.terminated:
+                        exits.append(arm)
+                        # the next case label starts fresh from switch entry
+                        arm = frame.copy()
+                exits.append(arm)
+            else:
+                exits.append(self.exec_stmt(body, frame.copy()))
+            merged = merge_frames(exits)
+            merged.terminated = False
+            return merged
 
         if kind in ("BreakStmt", "ContinueStmt", "GotoStmt"):
             frame.terminated = True
