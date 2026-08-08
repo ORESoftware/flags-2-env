@@ -1013,7 +1013,9 @@ def infer_summaries(functions, path, source_lines, comment_lines, contracts):
         name = fn.get("name")
         if name:
             summaries[name] = FunctionSummary(name)
-    for _ in range(4):
+    # Transitive non-null obligations need one iteration per call-chain
+    # hop, so allow more rounds than the purely local ownership facts did.
+    for _ in range(12):
         changed = False
         for fn in functions:
             name = fn.get("name")
