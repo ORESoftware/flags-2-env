@@ -639,8 +639,11 @@ class Analyzer(object):
                                 % (arg_name, name or "a call"))
                 continue
             if takes_this:
+                # Static helpers earn taker status by inference; the public
+                # ABI must declare the transfer in its header.
                 if state == BORROWED and arg_name in self.params and \
-                        not self.param_index_taken(arg_name):
+                        not self.is_static and \
+                        not self.param_index_declared_taken(arg_name):
                     self.report(loc, "free-borrowed",
                                 "parameter '%s' is borrowed by this "
                                 "function but freed via %s; declare the "
