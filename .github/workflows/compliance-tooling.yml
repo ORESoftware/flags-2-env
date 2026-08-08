@@ -7,6 +7,12 @@ on:
       - ".github/workflows/compliance-tooling.yml"
       - "scripts/verify-consumer-compliance.py"
       - "scripts/verify-vendored-parser.py"
+      - "scripts/verify-client-parser-sync.py"
+      - "tests/test_client_parser_sync.py"
+      - "src/parser.c"
+      - "src/parser.h"
+      - "clients/**/parser.c"
+      - "clients/**/parser.h"
       - "tests/compliance/**"
       - "tests/test_consumer_compliance_policy.py"
       - "tests/test_vendored_parser_identity.py"
@@ -19,6 +25,12 @@ on:
       - ".github/workflows/compliance-tooling.yml"
       - "scripts/verify-consumer-compliance.py"
       - "scripts/verify-vendored-parser.py"
+      - "scripts/verify-client-parser-sync.py"
+      - "tests/test_client_parser_sync.py"
+      - "src/parser.c"
+      - "src/parser.h"
+      - "clients/**/parser.c"
+      - "clients/**/parser.h"
       - "tests/compliance/**"
       - "tests/test_consumer_compliance_policy.py"
       - "tests/test_vendored_parser_identity.py"
@@ -44,11 +56,23 @@ jobs:
         run: |
           python3 -m py_compile \
             scripts/verify-consumer-compliance.py \
-            scripts/verify-vendored-parser.py
+            scripts/verify-vendored-parser.py \
+            scripts/verify-client-parser-sync.py
       - name: Run policy unit tests
         run: |
           python3 -m unittest \
             tests/test_consumer_compliance_policy.py \
-            tests/test_vendored_parser_identity.py
+            tests/test_vendored_parser_identity.py \
+            tests/test_client_parser_sync.py
       - name: Run end-to-end policy fixtures
         run: bash tests/compliance/run.sh
+
+      # verify-vendored-parser.py checks an external consumer against an
+      # immutable parser_ref. This is the same rule turned inward: the copies
+      # this repository ships to itself. clients/cpp, clients/golang and the
+      # rest compile their own committed parser.c rather than linking src/,
+      # so a src/ change that lands without refreshing them leaves two
+      # languages parsing by different rules while every argv-level test
+      # still passes.
+      - name: Verify in-repo vendored parser copies match src/
+        run: python3 scripts/verify-client-parser-sync.py --min-copies 20
