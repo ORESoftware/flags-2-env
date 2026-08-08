@@ -718,6 +718,29 @@ class Analyzer(object):
             self._may_take_map = may_take
         return self._takes_map
 
+    def eval_guarded(self, cond, truth, expr, frame, loc):
+        """Evaluate `expr` under the assumption that `cond` came out `truth`.
+
+        C's short-circuit operators and `?:` only reach the guarded operand
+        on one outcome of the condition, so that operand may rely on it.
+        The assumption is scoped to the operand: afterwards it is undone,
+        except where the operand genuinely changed the state itself (a free
+        or an ownership transfer inside it must survive).
+        """
+        facts = self.null_facts(cond, truth)
+        before = dict((name, frame.get(name)) for name, _ in facts)
+        saved_nonnull = set(frame.nonnull)
+        self.apply_refinement(cond, frame, truth)
+        refined = dict((name, frame.get(name)) for name in before)
+        self.eval_expr(expr, frame, loc)
+        for name, prior in before.items():
+            if frame.get(name) == refined[name]:
+                if prior is None:
+                    frame.states.pop(name, None)
+                else:
+                    frame.set(name, prior)
+        frame.nonnull = saved_nonnull
+
     def eval_call(self, call, frame, loc):
         name = callee_name(call)
         inner = [c for c in call.get("inner", ()) if isinstance(c, dict)]
