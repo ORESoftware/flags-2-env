@@ -168,12 +168,12 @@ jobs:
 
           git diff --check
 
-      - name: Build and run native test suite
+      - name: Build and run affected shell suite
         shell: bash
         run: |
           set -euo pipefail
           make clean all
-          make test
+          ./.nix/agent-check.sh shell-tests
 
       - name: Assert plaintext dotenv is no longer tracked
         shell: bash
