@@ -345,6 +345,7 @@ class Analyzer(object):
         self.param_order = []
         self.current_loc = (0, 1)
         self._takes_map = None
+        self._may_take_map = {}
 
     # -- diagnostics --------------------------------------------------------
 
