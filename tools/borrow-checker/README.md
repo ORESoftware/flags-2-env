@@ -35,6 +35,11 @@ without annotation.
    `uninit / null / maybe-null / owned / borrowed / freed / moved / unknown`,
    with branch-state merging, loop widening (two-pass), switch arms restarted
    from the switch entry state, and `if (!p)`-style null-check refinement.
+4. A collection audit cross-checks the AST against a textual scan of the
+   `static` function definitions and hard-fails on any mismatch, so a
+   clang-version difference in location serialization can never silently
+   shrink the analyzed surface (Apple clang 21 and Ubuntu clang 18 disagreed
+   by 95 functions before this guard existed).
 
 The state machine is mirrored, transition for transition, by
 `formal/smt/ownership_lattice.smt2`; `scripts/formal-check.sh` has Z3 prove
