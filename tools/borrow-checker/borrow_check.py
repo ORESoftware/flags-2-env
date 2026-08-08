@@ -782,6 +782,13 @@ class Analyzer(object):
         if name is None:
             return
         state = frame.get(name)
+        if name in self.params and name not in frame.nonnull:
+            # this function dereferences the parameter without proving it
+            # non-null first, so its callers must not pass a maybe-null
+            try:
+                self.nonnull_required.add(self.param_order.index(name))
+            except ValueError:
+                pass
         if state == FREED:
             self.report(loc, "use-after-free",
                         "%s '%s' after it was freed" % (verb, name))
