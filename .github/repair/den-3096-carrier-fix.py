@@ -1,48 +1,29 @@
 #!/usr/bin/env python3
-"""Align the one-shot carrier with the exact live waiver method signature."""
+"""Make the main carrier defer waiver parsing to the exact-source post-step."""
 
 from pathlib import Path
 
 path = Path(".github/repair/den-3096.py")
 text = path.read_text(encoding="utf-8")
-
-old = '''    """    def is_waived(self, rule, line):
-        needle = \\"borrow-check: allow(%s)\\" % rule
-        # line is 1-based; inspect flagged line and immediately preceding line
-        for idx in (line - 1, line - 2):
-            if 0 <= idx < len(self.source_lines):
-                text = self.source_lines[idx]
-                if needle in text:
-                    suffix = text[text.index(needle) + len(needle):]
-                    if \\"--\\" in suffix:
-                        return True
-        return False
-""",
+start_marker = '''text = replace_once(
+    text,
+    """    def is_waived'''
+end_marker = '''    "comment-only waiver parser",
+)
 '''
-new = '''    """    def is_waived(self, line, rule):
-        needle = \\"borrow-check: allow(%s)\\" % rule
-        for idx in (line - 1, line - 2):
-            if 0 <= idx < len(self.source_lines):
-                text = self.source_lines[idx]
-                if needle in text and \\"--\\" in text.split(needle, 1)[1]:
-                    return True
-        return False
-""",
-'''
-if text.count(old) != 1:
-    raise SystemExit(
-        "carrier fix expected exactly one stale waiver source block, found %d"
-        % text.count(old)
-    )
-text = text.replace(old, new, 1)
-
-old_signature = "r'''    def is_waived(self, rule, line):"
-new_signature = "r'''    def is_waived(self, line, rule):"
-if text.count(old_signature) != 1:
-    raise SystemExit(
-        "carrier fix expected exactly one stale waiver replacement signature, found %d"
-        % text.count(old_signature)
-    )
-text = text.replace(old_signature, new_signature, 1)
+start = text.find(start_marker)
+if start < 0:
+    raise SystemExit("carrier fix could not find the waiver replacement start")
+end = text.find(end_marker, start)
+if end < 0:
+    raise SystemExit("carrier fix could not find the waiver replacement end")
+end += len(end_marker)
+if text.find(start_marker, end) >= 0:
+    raise SystemExit("carrier fix found more than one waiver replacement block")
+text = (
+    text[:start]
+    + "# Waiver parsing is patched from the exact live source by den-3096-post.py.\n"
+    + text[end:]
+)
 path.write_text(text, encoding="utf-8")
-print("DEN-3096 carrier aligned to live waiver signature")
+print("DEN-3096 main carrier now defers waiver parsing to the post-step")
