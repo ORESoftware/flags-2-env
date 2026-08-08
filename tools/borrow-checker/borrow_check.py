@@ -282,6 +282,10 @@ class FunctionSummary(object):
         self.name = name
         self.returns_owned = False
         self.takes_params = set()
+        # params stored into non-local memory: transfer is conditional on
+        # the callee succeeding, so callers' arguments blur to unknown the
+        # way realloc's does.
+        self.may_take_params = set()
 
 
 class Frame(object):
