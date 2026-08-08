@@ -426,6 +426,13 @@ class Analyzer(object):
                         self.report(loc, "return-local-addr",
                                     "'%s' holds the address of a stack "
                                     "local" % ret_name)
+                    qual = bare.get("type", {}).get("qualType", "") \
+                        if bare is not None else ""
+                    if ret_name in self.locals_ and "[" in qual and \
+                            "*" not in qual:
+                        self.report(loc, "return-local-addr",
+                                    "returning stack array '%s' (decays to "
+                                    "a dangling pointer)" % ret_name)
                     if state in OWNING_STATES:
                         self.returns_owned_seen = True
                         frame.set(ret_name, MOVED)
