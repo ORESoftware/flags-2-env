@@ -173,7 +173,7 @@ jobs:
         run: |
           set -euo pipefail
           make clean all
-          ./.nix/agent-check.sh shell-tests
+          bash ./.nix/agent-check.sh shell-tests
 
       - name: Assert plaintext dotenv is no longer tracked
         shell: bash
