@@ -110,3 +110,32 @@ $(DOTENV_API_TEST): $(SRC) tests/dotenv_api.c $(HEADER) | $(BUILD_DIR)
 
 clean:
 	rm -rf $(BUILD_DIR)
+
+# DEN-2846: pinned prebuilt harness (staging output; artifacts commit in DEN-2848)
+PREBUILT_HARNESS := scripts/prebuilt/build.sh
+
+prebuilt-tier1:
+	$(PREBUILT_HARNESS) build tier1
+
+prebuilt-verify:
+	$(PREBUILT_HARNESS) verify tier1
+
+prebuilt-%:
+	$(PREBUILT_HARNESS) build $*
+
+.PHONY: prebuilt-tier1 prebuilt-verify
+
+# DEN-2847: manifest generation + deep verification (staging; artifacts commit in DEN-2848)
+PREBUILT_MANIFEST := scripts/prebuilt/manifest.py
+PREBUILT_STAGING := build/prebuilt-staging
+
+prebuilt-manifest: prebuilt-tier1
+	python3 $(PREBUILT_MANIFEST) generate --staging $(PREBUILT_STAGING) --out build/manifest.json
+
+prebuilt-manifest-verify: prebuilt-manifest
+	python3 $(PREBUILT_MANIFEST) verify --manifest build/manifest.json --artifact-root $(PREBUILT_STAGING)
+
+prebuilt-manifest-selftest: prebuilt-manifest
+	python3 $(PREBUILT_MANIFEST) self-test --manifest build/manifest.json --artifact-root $(PREBUILT_STAGING)
+
+.PHONY: prebuilt-manifest prebuilt-manifest-verify prebuilt-manifest-selftest
