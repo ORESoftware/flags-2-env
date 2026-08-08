@@ -928,8 +928,10 @@ def infer_summaries(functions, path, source_lines, contracts):
 def check_file(path, clang, include_dirs, extra_args, contracts):
     tu = run_clang(clang, path, include_dirs, extra_args)
     with open(path, "r") as fh:
-        source_lines = fh.read().splitlines()
+        source_text = fh.read()
+    source_lines = source_text.splitlines()
     functions = collect_functions(tu, path)
+    audit_collection(source_text, functions, path)
     summaries = infer_summaries(functions, path, source_lines, contracts)
     diagnostics = []
     for fn in functions:
