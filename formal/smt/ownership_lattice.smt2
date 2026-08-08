@@ -191,3 +191,20 @@
                  (flags t3 e4) (flags t4 e5) (flags t5 e6))))
 (check-sat)
 (pop)
+
+; --- Vacuity witness for the theorem above, kept inside the all-unsat
+; discipline: pin the concrete trace alloc; refine; free; use; use; move
+; and prove it both satisfies the use-after-free condition and is flagged.
+; If the condition (or the flagging) were unsatisfiable, this would be sat.
+(push)
+(assert (= e1 ev_alloc))
+(assert (= e2 ev_refine))
+(assert (= e3 ev_free))
+(assert (= e4 ev_use))
+(assert (= e5 ev_use))
+(assert (= e6 ev_move))
+(assert (not (and (uaf_pair e3 e4)
+                  (flags t3 e4)
+                  (= t3 st_freed))))
+(check-sat)
+(pop)
