@@ -440,6 +440,14 @@ class Analyzer(object):
                             self.report(loc, "return-local-addr",
                                         "returning the address of stack "
                                         "local '%s'" % target)
+                if ret_name is None and bare is not None and \
+                        bare.get("kind") == "DeclRefExpr":
+                    decayed = ref_name(bare)
+                    qual = bare.get("type", {}).get("qualType", "")
+                    if decayed in self.locals_ and "[" in qual:
+                        self.report(loc, "return-local-addr",
+                                    "returning stack array '%s' (decays to "
+                                    "a dangling pointer)" % decayed)
             self.check_leaks(frame, loc, "return", skip=ret_name)
             frame.terminated = True
             return frame
