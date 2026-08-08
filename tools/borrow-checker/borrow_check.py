@@ -791,8 +791,12 @@ class Analyzer(object):
                 if state == MAYBE_NULL:
                     frame.set(name, NULLPTR)
             else:
-                if state in (MAYBE_NULL, NULLPTR):
+                if state == MAYBE_NULL:
                     frame.set(name, OWNED)
+                elif state == NULLPTR:
+                    # certainty says this branch is dead; never fabricate
+                    # ownership out of a refinement
+                    frame.set(name, UNKNOWN)
 
     def null_facts(self, cond, truth):
         """Yield (var, is_null_in_this_branch) facts from a condition."""
