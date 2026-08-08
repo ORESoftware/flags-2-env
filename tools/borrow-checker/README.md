@@ -14,7 +14,7 @@ without annotation.
 | `double-free` | a freed pointer reaches `free`/`f2e_free`/a taking callee again |
 | `use-after-free` | a freed pointer is read, dereferenced, passed on, or returned |
 | `free-borrowed` | a public (non-`static`) function frees a parameter without declaring `F2E_TAKES_OWNED_ARG_1` |
-| `null-deref` | an unchecked allocation result (or definitely-NULL pointer) is dereferenced or handed to null-strict libc |
+| `null-deref` | an unchecked allocation result (or definitely-NULL pointer) is dereferenced, handed to null-strict libc, or passed to a local function that dereferences that parameter without guarding it |
 | `leak` | an owned pointer goes out of scope or crosses a `return` unreleased |
 | `overwrite-leak` | an owned pointer is overwritten while it still owns its block |
 | `return-local-addr` | the address of a stack local (or a decayed stack array) escapes via `return` |
