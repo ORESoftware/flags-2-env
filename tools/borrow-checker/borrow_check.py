@@ -721,14 +721,9 @@ class Analyzer(object):
             else:
                 frame.set(name, UNKNOWN)
             return
-        if kind in ("IntegerLiteral",):
+        if kind == "IntegerLiteral":
             value = bare.get("value")
             frame.set(name, NULLPTR if value in ("0", 0) else UNKNOWN)
-            return
-        if bare.get("kind") == "CXXNullPtrLiteralExpr" or \
-                bare.get("type", {}).get("qualType") == "void *" and \
-                bare.get("kind") == "IntegerLiteral":
-            frame.set(name, NULLPTR)
             return
         if kind == "StringLiteral":
             frame.set(name, BORROWED)
