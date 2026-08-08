@@ -1,0 +1,38 @@
+name: prebuilt-contract
+
+on:
+  pull_request:
+    paths:
+      - "prebuilt/**"
+      - "scripts/validate-prebuilt-contract.py"
+      - "docs/adr/0001-prebuilt-c-artifacts.md"
+      - ".github/workflows/prebuilt-contract.yml"
+  push:
+    branches: [main]
+    paths:
+      - "prebuilt/**"
+      - "scripts/validate-prebuilt-contract.py"
+      - "docs/adr/0001-prebuilt-c-artifacts.md"
+      - ".github/workflows/prebuilt-contract.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Validate target policy and manifest schema
+        run: python3 scripts/validate-prebuilt-contract.py
+      - name: Reject prematurely committed artifacts
+        run: |
+          if find prebuilt -mindepth 2 -type f -print -quit | grep -q .; then
+            echo "Artifact bytes require the pinned build harness, manifest, and runtime evidence." >&2
+            exit 1
+          fi
