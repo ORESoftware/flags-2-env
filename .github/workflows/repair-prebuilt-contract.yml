@@ -1,0 +1,55 @@
+name: repair deferred target grammar
+
+on:
+  push:
+    branches:
+      - alexanderdmills/den-2845-adr-canonical-target-tiers-prebuilt-layout-abi-policy
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: ${{ !contains(github.event.head_commit.message, '[grammar-repair]') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out exact PR branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: alexanderdmills/den-2845-adr-canonical-target-tiers-prebuilt-layout-abi-policy
+          persist-credentials: true
+          show-progress: false
+
+      - name: Separate active triple and deferred target-ID grammar
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("scripts/validate-prebuilt-contract.py")
+          source = path.read_text()
+          old_pattern = 'TRIPLE = re.compile(r"^[a-z0-9_]+(?:-[a-z0-9_]+){2,3}$")\nSHA256'
+          new_pattern = 'TRIPLE = re.compile(r"^[a-z0-9_]+(?:-[a-z0-9_]+){2,3}$")\nTARGET_ID = re.compile(r"^[a-z0-9_]+(?:-[a-z0-9_]+){1,3}$")\nSHA256'
+          old_use = 'isinstance(item, str) and TRIPLE.fullmatch(item) for item in deferred'
+          new_use = 'isinstance(item, str) and TARGET_ID.fullmatch(item) for item in deferred'
+          if old_pattern not in source or old_use not in source:
+              raise SystemExit("expected validator patterns were not found")
+          path.write_text(
+              source.replace(old_pattern, new_pattern, 1).replace(old_use, new_use, 1)
+          )
+
+      - name: Validate repaired contract
+        run: |
+          python3 -m py_compile scripts/validate-prebuilt-contract.py
+          python3 scripts/validate-prebuilt-contract.py
+
+      - name: Commit repair and remove bootstrap workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/repair-prebuilt-contract.yml
+          git config user.name "flags-2-env contract bot"
+          git config user.email "flags-2-env-contract-bot@users.noreply.github.com"
+          git add scripts/validate-prebuilt-contract.py .github/workflows/repair-prebuilt-contract.yml
+          git commit -m "fix deferred target identifier grammar [grammar-repair]"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
