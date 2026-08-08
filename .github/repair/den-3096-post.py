@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Compatibility correction for the one-shot DEN-3096 repair.
+"""Exact-source compatibility and waiver corrections for DEN-3096.
 
-Keep the established libc null-contract check byte-for-byte and layer inferred
-local-helper preconditions beside it.  Both carrier scripts are deleted before
-the resulting product commit is pushed.
+Keep the established libc null-contract check byte-for-byte, layer inferred
+local-helper preconditions beside it, and replace the live raw-source waiver
+scanner only after the main exact-blob repair has installed comment lexing.
+All carrier files are deleted before the resulting product commit is pushed.
 """
 
 from pathlib import Path
@@ -62,5 +63,33 @@ replacement = '''                elif state == UNKNOWN:
 if text.count(needle) != 1:
     raise SystemExit("expected exactly one call-contract insertion point")
 text = text.replace(needle, replacement, 1)
+
+old_waiver = '''    def is_waived(self, line, rule):
+        needle = "borrow-check: allow(%s)" % rule
+        for idx in (line - 1, line - 2):
+            if 0 <= idx < len(self.source_lines):
+                text = self.source_lines[idx]
+                if needle in text and "--" in text.split(needle, 1)[1]:
+                    return True
+        return False
+'''
+new_waiver = r'''    def is_waived(self, line, rule):
+        # Inspect the flagged line and immediately preceding line, but only
+        # inside lexed C comments. String literals and empty justifications are
+        # never waiver authority.
+        pattern = re.compile(
+            r"(?:^|\s)borrow-check:\s*allow\(\s*%s\s*\)\s*--\s*(\S(?:.*\S)?)\s*$"
+            % re.escape(rule))
+        for idx in (line - 1, line - 2):
+            if 0 <= idx < len(self.comment_lines):
+                match = pattern.search(self.comment_lines[idx])
+                if match is not None and match.group(1).strip():
+                    return True
+        return False
+'''
+if text.count(old_waiver) != 1:
+    raise SystemExit("expected exactly one live raw-source waiver method")
+text = text.replace(old_waiver, new_waiver, 1)
+
 path.write_text(text, encoding="utf-8")
-print("DEN-3096 libc null-contract compatibility preserved")
+print("DEN-3096 libc contracts and comment-only waivers preserved")
