@@ -35,7 +35,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(git rev-parse HEAD^)" = "19f88f62c57421fd0037e8cf4121735e0cab10b9"
+          test "$(git rev-parse HEAD^)" = "d780aee5d1f1bcb3445af791da9475882292b0b9"
           test "$(git hash-object tools/borrow-checker/borrow_check.py)" = \
             "e00047d734ffa1b43e5d3415e33d6d12425b4d06"
           test -f .github/repair/den-3096.py
