@@ -286,17 +286,28 @@ class FunctionSummary(object):
         # the callee succeeding, so callers' arguments blur to unknown the
         # way realloc's does.
         self.may_take_params = set()
+        # params this function dereferences on some path without first
+        # null-guarding them: passing a maybe-null pointer here is a
+        # caller-side defect. Guarded dereferences never land here.
+        self.requires_nonnull = set()
 
 
 class Frame(object):
-    """One abstract state: variable name -> lattice state."""
+    """One abstract state: variable name -> lattice state.
 
-    def __init__(self, states=None):
+    `nonnull` is a separate path-sensitive fact, not a lattice state: it
+    records the names a null test has already proved non-null on this
+    path. Ownership and nullability are tracked independently because a
+    borrowed parameter has no ownership state to refine.
+    """
+
+    def __init__(self, states=None, nonnull=None):
         self.states = dict(states or {})
+        self.nonnull = set(nonnull or ())
         self.terminated = False
 
     def copy(self):
-        frame = Frame(self.states)
+        frame = Frame(self.states, self.nonnull)
         frame.terminated = self.terminated
         return frame
 
@@ -322,6 +333,10 @@ def merge_frames(frames):
         for f in live:
             state = join_states(state, f.states.get(name, UNKNOWN))
         merged.states[name] = state
+    # a name is non-null after the merge only if every live path proved it
+    merged.nonnull = set(live[0].nonnull)
+    for f in live[1:]:
+        merged.nonnull &= f.nonnull
     return merged
 
 
