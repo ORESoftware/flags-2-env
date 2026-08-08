@@ -1003,17 +1003,72 @@ def infer_summaries(functions, path, source_lines, comment_lines, contracts):
     return summaries
 
 
+def comment_text_by_line(source_text):
+    """Return, per source line, only the text that sits inside a comment.
+
+    String and character literals are stripped, so a literal that merely
+    quotes the waiver syntax cannot suppress a diagnostic. Block comments
+    are tracked across lines so a waiver inside a multi-line comment still
+    works.
+    """
+    result = []
+    in_block = False
+    for line in source_text.splitlines():
+        collected = []
+        in_string = False
+        in_char = False
+        i = 0
+        width = len(line)
+        while i < width:
+            ch = line[i]
+            nxt = line[i + 1] if i + 1 < width else ""
+            if in_block:
+                if ch == "*" and nxt == "/":
+                    in_block = False
+                    i += 2
+                    continue
+                collected.append(ch)
+                i += 1
+            elif in_string or in_char:
+                if ch == "\\":
+                    i += 2
+                    continue
+                if (in_string and ch == '"') or (in_char and ch == "'"):
+                    in_string = False
+                    in_char = False
+                i += 1
+            elif ch == '"':
+                in_string = True
+                i += 1
+            elif ch == "'":
+                in_char = True
+                i += 1
+            elif ch == "/" and nxt == "/":
+                collected.append(line[i + 2:])
+                break
+            elif ch == "/" and nxt == "*":
+                in_block = True
+                i += 2
+            else:
+                i += 1
+        result.append("".join(collected))
+    return result
+
+
 def check_file(path, clang, include_dirs, extra_args, contracts):
     tu = run_clang(clang, path, include_dirs, extra_args)
     with open(path, "r") as fh:
         source_text = fh.read()
     source_lines = source_text.splitlines()
+    comment_lines = comment_text_by_line(source_text)
     functions = collect_functions(tu, path)
     audit_collection(source_text, functions, path)
-    summaries = infer_summaries(functions, path, source_lines, contracts)
+    summaries = infer_summaries(functions, path, source_lines, comment_lines,
+                                contracts)
     diagnostics = []
     for fn in functions:
-        analyzer = Analyzer(path, source_lines, contracts, summaries)
+        analyzer = Analyzer(path, source_lines, comment_lines, contracts,
+                            summaries)
         analyzer.run(fn)
         diagnostics.extend(analyzer.diagnostics)
     return diagnostics
