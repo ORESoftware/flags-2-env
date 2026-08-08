@@ -747,6 +747,7 @@ class Analyzer(object):
         if kind == "DeclRefExpr":
             src = ref_name(bare)
             src_state = frame.get(src)
+            src_qual = bare.get("type", {}).get("qualType", "")
             if src_state in OWNING_STATES:
                 frame.set(name, src_state)
                 frame.set(src, MOVED)
@@ -759,6 +760,11 @@ class Analyzer(object):
                 frame.set(name, src_state)
                 if src in self.local_addrs:
                     self.local_addrs.add(name)
+            elif src in self.locals_ and "[" in src_qual and \
+                    "*" not in src_qual:
+                # stack array decaying into a pointer variable
+                self.local_addrs.add(name)
+                frame.set(name, BORROWED)
             else:
                 frame.set(name, UNKNOWN)
             return
