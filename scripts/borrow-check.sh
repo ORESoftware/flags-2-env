@@ -94,6 +94,29 @@ int main(void) {
 }
 EOF
 
+# Stage 1: the custom flags-2-env borrow checker — a flow-sensitive
+# ownership analysis of the F2E_OWNED_RESULT / F2E_TAKES_OWNED_ARG_1
+# contract (tools/borrow-checker/). Its self-test must pass before its
+# verdict on the real sources counts for anything.
+PYTHON="${PYTHON:-python3}"
+if ! command -v "$PYTHON" >/dev/null 2>&1; then
+  printf 'borrow-check requires python3 on PATH for the ownership analysis\n' >&2
+  exit 1
+fi
+printf 'borrow-check: custom checker self-test\n'
+CLANG="$CLANG" "$PYTHON" "$ROOT_DIR/tools/borrow-checker/borrow_check.py" --self-test
+printf 'borrow-check: custom checker src/ + clients/c\n'
+CLANG="$CLANG" "$PYTHON" "$ROOT_DIR/tools/borrow-checker/borrow_check.py" \
+  -I"$ROOT_DIR" -I"$ROOT_DIR/src" -I"$ROOT_DIR/clients/c" \
+  --header-contract "$ROOT_DIR/src/parser.h" \
+  --header-contract "$ROOT_DIR/src/terminal_context.h" \
+  "$ROOT_DIR/src/parser.c" \
+  "$ROOT_DIR/src/main.c" \
+  "$ROOT_DIR/src/terminal_context.c" \
+  "$ROOT_DIR/clients/c/lib.c" \
+  "$ROOT_DIR/clients/c/test.c"
+
+# Stage 2: clang's static analyzer as an independent second opinion.
 analyze "src/parser.c" "$ROOT_DIR/src/parser.c"
 analyze "src/main.c" "$ROOT_DIR/src/main.c"
 analyze "clients/c/lib.c" -I"$ROOT_DIR/clients/c" "$ROOT_DIR/clients/c/lib.c"
