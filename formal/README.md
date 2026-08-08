@@ -4,7 +4,16 @@
 implementations:
 
 - `cbmc/parser_harness.c` model-checks bounded calls into the real C parser.
+- `cbmc/terminal_context_harness.c` model-checks the terminal-context string
+  scanners: case-insensitive comparison, basename slicing, truthiness, and
+  the `[20, 10000]` column clamp, over nondeterministic inputs.
 - `smt/parser_invariants.smt2` proves parser dispatch invariants with Z3.
+- `smt/ownership_lattice.smt2` proves the custom borrow checker's ownership
+  state machine sound: within bounded traces, no use-after-free or
+  double-free can pass unflagged, the canonical allocate/check/use/free
+  contract never flags, and branch merging never forgets a conditional
+  free. The model mirrors `tools/borrow-checker/borrow_check.py`
+  transition-for-transition; change them together.
 - `../clients/rust/src/formal_model.rs` expresses the same dispatch rules in
   Rust and proves them with Kani.
 - `fmctl.json` is the repository analysis manifest. It uses the
