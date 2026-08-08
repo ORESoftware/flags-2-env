@@ -299,6 +299,7 @@ class Analyzer(object):
         self.takes_seen = set()
         self.param_order = []
         self.current_loc = (0, 1)
+        self._takes_map = None
 
     # -- diagnostics --------------------------------------------------------
 
