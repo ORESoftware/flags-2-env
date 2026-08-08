@@ -341,10 +341,12 @@ def merge_frames(frames):
 
 
 class Analyzer(object):
-    def __init__(self, path, source_lines, contracts, summaries,
-                 infer_only=False):
+    def __init__(self, path, source_lines, comment_lines, contracts,
+                 summaries, infer_only=False):
         self.path = path
         self.source_lines = source_lines
+        self.comment_lines = comment_lines
+        self.nonnull_required = set()
         self.contracts = contracts
         self.summaries = summaries
         self.infer_only = infer_only
