@@ -35,16 +35,19 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(git rev-parse HEAD^)" = "b484930d440388322b900f4039c69ca49a5261f0"
+          test "$(git rev-parse HEAD^)" = "19f88f62c57421fd0037e8cf4121735e0cab10b9"
           test "$(git hash-object tools/borrow-checker/borrow_check.py)" = \
             "e00047d734ffa1b43e5d3415e33d6d12425b4d06"
           test -f .github/repair/den-3096.py
           test -f .github/repair/den-3096-post.py
+          test -f .github/repair/den-3096-carrier-fix.py
 
-      - name: Apply the exact-blob repair
+      - name: Align and apply the exact-blob repair
         shell: bash
         run: |
           set -euo pipefail
+          PYTHONPYCACHEPREFIX="$RUNNER_TEMP/python-cache" \
+            python3 .github/repair/den-3096-carrier-fix.py
           PYTHONPYCACHEPREFIX="$RUNNER_TEMP/python-cache" \
             python3 .github/repair/den-3096.py
           PYTHONPYCACHEPREFIX="$RUNNER_TEMP/python-cache" \
@@ -69,15 +72,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm .github/repair/den-3096.py .github/repair/den-3096-post.py
+          rm \
+            .github/repair/den-3096.py \
+            .github/repair/den-3096-post.py \
+            .github/repair/den-3096-carrier-fix.py
           rmdir .github/repair || true
           git rm .github/workflows/den-3096-repair.yml
           git add -A
           test ! -e .github/repair/den-3096.py
           test ! -e .github/repair/den-3096-post.py
+          test ! -e .github/repair/den-3096-carrier-fix.py
           test ! -e .github/workflows/den-3096-repair.yml
           ! git ls-files --error-unmatch .github/repair/den-3096.py >/dev/null 2>&1
           ! git ls-files --error-unmatch .github/repair/den-3096-post.py >/dev/null 2>&1
+          ! git ls-files --error-unmatch .github/repair/den-3096-carrier-fix.py >/dev/null 2>&1
           ! git ls-files --error-unmatch .github/workflows/den-3096-repair.yml >/dev/null 2>&1
           git diff --cached --check
           git config user.name 'github-actions[bot]'
