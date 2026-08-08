@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "artifact_kinds": ["static", "shared"],
+  "budgets": {
+    "max_file_bytes": 1048576,
+    "max_tree_bytes": 10485760,
+    "max_history_growth_per_release_bytes": 5242880
+  },
+  "targets": [
+    {
+      "triple": "aarch64-apple-darwin",
+      "tier": 1,
+      "minimum_runtime": "macOS 11.0",
+      "fixture_owner": "flags-2-env-test/rust-app (macOS arm64 lane)"
+    },
+    {
+      "triple": "x86_64-apple-darwin",
+      "tier": 1,
+      "minimum_runtime": "macOS 10.15",
+      "fixture_owner": "flags-2-env-test/rust-app (macOS x86_64 lane)"
+    },
+    {
+      "triple": "x86_64-unknown-linux-gnu",
+      "tier": 1,
+      "minimum_runtime": "glibc 2.28",
+      "fixture_owner": "flags-2-env-test/rust-app (Linux x86_64 GNU lane)"
+    },
+    {
+      "triple": "aarch64-unknown-linux-gnu",
+      "tier": 1,
+      "minimum_runtime": "glibc 2.28",
+      "fixture_owner": "flags-2-env-test/rust-app (Linux arm64 GNU lane)"
+    },
+    {
+      "triple": "x86_64-unknown-linux-musl",
+      "tier": 1,
+      "minimum_runtime": "musl 1.2.2",
+      "fixture_owner": "flags-2-env-test/rust-app (Linux x86_64 musl lane)"
+    },
+    {
+      "triple": "aarch64-unknown-linux-musl",
+      "tier": 1,
+      "minimum_runtime": "musl 1.2.2",
+      "fixture_owner": "flags-2-env-test/rust-app (Linux arm64 musl lane)"
+    },
+    {
+      "triple": "armv7-unknown-linux-gnueabihf",
+      "tier": 2,
+      "minimum_runtime": "glibc 2.28",
+      "fixture_owner": null
+    }
+  ],
+  "deferred_targets": [
+    "x86_64-pc-windows-msvc",
+    "x86_64-pc-windows-gnu",
+    "wasm32-wasip1",
+    "i686-unknown-linux-gnu"
+  ]
+}

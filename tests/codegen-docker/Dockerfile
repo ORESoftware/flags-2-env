@@ -33,10 +33,12 @@ WORKDIR /package
 RUN npm pack --pack-destination /tmp
 
 WORKDIR /test
-RUN npm init -y \
+RUN package_tarball="$(find /tmp -maxdepth 1 -type f -name 'oresoftware-f2e-*.tgz' -print -quit)" \
+    && test -n "$package_tarball" \
+    && npm init -y \
     && npm pkg set type=module \
     && npm install --no-audit --no-fund \
-      /tmp/oresoftware-f2e-0.1.0.tgz \
+      "$package_tarball" \
       @types/node@22 \
       typescript@5
 COPY --from=generator /generated/cli-interfaces.ts ./cli-interfaces.ts
