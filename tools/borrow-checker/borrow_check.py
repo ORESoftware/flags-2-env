@@ -394,12 +394,14 @@ class Analyzer(object):
                 if not name:
                     continue
                 self.locals_.add(name)
-                if not is_pointer_type(child):
-                    continue
                 init = None
                 for sub in child.get("inner", ()):
                     if sub.get("kind") not in ("FullComment",):
                         init = sub
+                if not is_pointer_type(child):
+                    if init is not None:
+                        self.eval_expr(init, frame, node_loc(child, loc))
+                    continue
                 frame.set(name, UNINIT)
                 if init is not None:
                     self.assign(name, init, frame,
