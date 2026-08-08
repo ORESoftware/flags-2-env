@@ -21,7 +21,8 @@ temp/worktrees
 .zed/
 
 # BEGIN ORESoftware plaintext dotenv boundary
-# Real plaintext dotenv state is local-only. Parser fixtures use fixture.dotenv.
+# Real plaintext dotenv state is local-only. Synthetic parser fixtures are
+# tracked as fixture.dotenv and may materialize .env only during test runtime.
 *.env
 */*.env
 */**/*.env
