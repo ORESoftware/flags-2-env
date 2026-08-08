@@ -673,32 +673,23 @@ class Analyzer(object):
             if len(inner) == 2:
                 lhs, rhs = inner
                 self.eval_expr(lhs, frame, loc)
-                # C short-circuits: the right operand is evaluated only when
-                # the left did not already decide the result, so it may
-                # assume the left's outcome. `p && p->x` and
-                # `!p || use(p)` are guarded, and must not be diagnosed.
-                assumed = expr.get("opcode") == "&&"
-                facts = self.null_facts(lhs, assumed)
-                before = dict((n, frame.get(n)) for n, _ in facts)
-                saved_nonnull = set(frame.nonnull)
-                self.apply_refinement(lhs, frame, assumed)
-                refined = dict((n, frame.get(n)) for n in before)
-                self.eval_expr(rhs, frame, loc)
-                # The assumption held only for the right operand; the
-                # enclosing statement re-derives facts for the whole
-                # condition. Undo it, but keep anything the right operand
-                # genuinely changed (a free or a transfer inside it).
-                for fname, prior in before.items():
-                    if frame.get(fname) == refined[fname]:
-                        if prior is None:
-                            frame.states.pop(fname, None)
-                        else:
-                            frame.set(fname, prior)
-                frame.nonnull = saved_nonnull
+                # The right operand runs only when the left did not already
+                # decide the result: `p && p->x` and `!p || use(p)` are both
+                # guarded and must not be diagnosed.
+                self.eval_guarded(lhs, expr.get("opcode") == "&&", rhs,
+                                  frame, loc)
                 return
 
         if kind == "ConditionalOperator":
             inner = [c for c in expr.get("inner", ()) if isinstance(c, dict)]
+            if len(inner) == 3:
+                cond, when_true, when_false = inner
+                self.eval_expr(cond, frame, loc)
+                # `p ? use(p) : NULL` guards exactly as an if-statement
+                # does; each arm may assume the condition's outcome.
+                self.eval_guarded(cond, True, when_true, frame, loc)
+                self.eval_guarded(cond, False, when_false, frame, loc)
+                return
             for child in inner:
                 self.eval_expr(child, frame, loc)
             return
@@ -726,6 +717,29 @@ class Analyzer(object):
             self._takes_map = takes
             self._may_take_map = may_take
         return self._takes_map
+
+    def eval_guarded(self, cond, truth, expr, frame, loc):
+        """Evaluate `expr` under the assumption that `cond` came out `truth`.
+
+        C's short-circuit operators and `?:` only reach the guarded operand
+        on one outcome of the condition, so that operand may rely on it.
+        The assumption is scoped to the operand: afterwards it is undone,
+        except where the operand genuinely changed the state itself (a free
+        or an ownership transfer inside it must survive).
+        """
+        facts = self.null_facts(cond, truth)
+        before = dict((name, frame.get(name)) for name, _ in facts)
+        saved_nonnull = set(frame.nonnull)
+        self.apply_refinement(cond, frame, truth)
+        refined = dict((name, frame.get(name)) for name in before)
+        self.eval_expr(expr, frame, loc)
+        for name, prior in before.items():
+            if frame.get(name) == refined[name]:
+                if prior is None:
+                    frame.states.pop(name, None)
+                else:
+                    frame.set(name, prior)
+        frame.nonnull = saved_nonnull
 
     def eval_call(self, call, frame, loc):
         name = callee_name(call)
@@ -800,12 +814,23 @@ class Analyzer(object):
                             "the allocation first" % (arg_name, name))
                 continue
             callee = self.summaries.get(name)
-            if callee is not None and idx in callee.requires_nonnull and \
-                    state in (MAYBE_NULL, NULLPTR):
-                self.report(loc, "null-deref",
-                            "'%s' may be NULL when passed to %s, which "
-                            "dereferences that parameter without a null "
-                            "check" % (arg_name, name))
+            if callee is not None and idx in callee.requires_nonnull:
+                # The obligation is transitive: forwarding one of our own
+                # unguarded parameters into a callee that requires non-null
+                # makes it our caller's obligation too. Without this the
+                # requirement dies at the first hop and a -> b -> deref
+                # escapes entirely.
+                if arg_name in self.params and arg_name not in frame.nonnull:
+                    try:
+                        self.nonnull_required.add(
+                            self.param_order.index(arg_name))
+                    except ValueError:
+                        pass
+                if state in (MAYBE_NULL, NULLPTR):
+                    self.report(loc, "null-deref",
+                                "'%s' may be NULL when passed to %s, which "
+                                "dereferences that parameter without a null "
+                                "check" % (arg_name, name))
 
     def param_index_declared_taken(self, param_name):
         try:
@@ -1002,7 +1027,9 @@ def infer_summaries(functions, path, source_lines, comment_lines, contracts):
         name = fn.get("name")
         if name:
             summaries[name] = FunctionSummary(name)
-    for _ in range(4):
+    # Transitive non-null obligations need one iteration per call-chain
+    # hop, so allow more rounds than the purely local ownership facts did.
+    for _ in range(12):
         changed = False
         for fn in functions:
             name = fn.get("name")
