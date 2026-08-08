@@ -967,7 +967,7 @@ class Analyzer(object):
 
 # --- Driver ----------------------------------------------------------------
 
-def infer_summaries(functions, path, source_lines, contracts):
+def infer_summaries(functions, path, source_lines, comment_lines, contracts):
     summaries = {}
     for fn in functions:
         name = fn.get("name")
@@ -979,10 +979,14 @@ def infer_summaries(functions, path, source_lines, contracts):
             name = fn.get("name")
             if not name:
                 continue
-            analyzer = Analyzer(path, source_lines, contracts, summaries,
-                                infer_only=True)
+            analyzer = Analyzer(path, source_lines, comment_lines, contracts,
+                                summaries, infer_only=True)
             analyzer.run(fn)
             summary = summaries[name]
+            new_nonnull = analyzer.nonnull_required - summary.requires_nonnull
+            if new_nonnull:
+                summary.requires_nonnull |= new_nonnull
+                changed = True
             if analyzer.returns_owned_seen and not summary.returns_owned:
                 summary.returns_owned = True
                 changed = True
