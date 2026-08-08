@@ -769,6 +769,14 @@ class Analyzer(object):
                 self.report(loc, "null-deref",
                             "'%s' may be NULL when passed to %s; check "
                             "the allocation first" % (arg_name, name))
+                continue
+            callee = self.summaries.get(name)
+            if callee is not None and idx in callee.requires_nonnull and \
+                    state in (MAYBE_NULL, NULLPTR):
+                self.report(loc, "null-deref",
+                            "'%s' may be NULL when passed to %s, which "
+                            "dereferences that parameter without a null "
+                            "check" % (arg_name, name))
 
     def param_index_declared_taken(self, param_name):
         try:
