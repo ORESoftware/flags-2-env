@@ -13,7 +13,11 @@ implementations:
   double-free can pass unflagged, the canonical allocate/check/use/free
   contract never flags, and branch merging never forgets a conditional
   free. The model mirrors `tools/borrow-checker/borrow_check.py`
-  transition-for-transition; change them together.
+  transition-for-transition; change them together. It proves the abstract
+  machine **only** — AST collection, control-flow lowering, summary
+  inference, nullability tracking, and waiver parsing are unproved and
+  fixture-covered, as `tools/borrow-checker/README.md` sets out under
+  "What is proved, and what is not".
 - `../clients/rust/src/formal_model.rs` expresses the same dispatch rules in
   Rust and proves them with Kani.
 - `fmctl.json` is the repository analysis manifest. It uses the
