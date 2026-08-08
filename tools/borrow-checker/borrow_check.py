@@ -598,9 +598,14 @@ class Analyzer(object):
                 self.eval_expr(rhs, frame, loc)
                 self.eval_expr(lhs, frame, loc)
                 rhs_name = ref_name(rhs)
-                if rhs_name is not None and \
-                        frame.get(rhs_name) in OWNING_STATES:
-                    frame.set(rhs_name, MOVED)
+                if rhs_name is not None:
+                    if frame.get(rhs_name) in OWNING_STATES:
+                        frame.set(rhs_name, MOVED)
+                    if rhs_name in self.params:
+                        # a parameter stored into non-local memory: callers
+                        # conditionally transfer ownership at this callee
+                        self.stores_seen.add(
+                            self.param_order.index(rhs_name))
             return
 
         if kind == "CallExpr":
