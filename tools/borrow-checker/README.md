@@ -99,7 +99,10 @@ the line above:
 /* borrow-check: allow(leak) -- handed to the OS at process exit */
 ```
 
-The waiver names one rule and must carry a reason after `--`.
+The waiver names one rule and must carry a **non-empty** reason after `--`,
+and it must live in a real `//` or `/* */` comment: string literals are
+stripped before waivers are matched, so quoting the syntax in data cannot
+suppress a finding.
 
 ## Fixtures
 
