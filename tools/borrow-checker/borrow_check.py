@@ -477,14 +477,14 @@ class Analyzer(object):
 
         if kind in ("CaseStmt", "DefaultStmt", "LabelStmt"):
             for child in stmt.get("inner", ()):
-                if isinstance(child, dict) and "Expr" not in child.get(
-                        "kind", "") or isinstance(child, dict):
-                    frame = self.exec_stmt(child, frame)
-                    if frame.terminated:
-                        # case bodies commonly end in break; recover so the
-                        # next case still gets analyzed
-                        frame = frame.copy()
-                        frame.terminated = False
+                if not isinstance(child, dict):
+                    continue
+                frame = self.exec_stmt(child, frame)
+                if frame.terminated:
+                    # case bodies end in break/return; recover so the next
+                    # case label still gets analyzed from a live state
+                    frame = frame.copy()
+                    frame.terminated = False
             return frame
 
         if kind == "NullStmt":
