@@ -30,6 +30,13 @@ export SOURCE_DATE_EPOCH="$SDE"
 # pushes the linux static archives against the 1 MiB per-file budget).
 CFLAGS_COMMON=(-std=c99 -Wall -Wextra -Wpedantic -O2 -g0 -fPIC "-ffile-prefix-map=$REPO=.")
 
+# What gets RECORDED in buildinfo/manifest. `-ffile-prefix-map` necessarily
+# contains the absolute checkout path; recording it verbatim would make the
+# manifest differ per machine and would publish a local filesystem path. The
+# binaries are unaffected (the flag maps that prefix to "." inside them), so the
+# recorded form is normalized to a placeholder.
+CFLAGS_RECORDED=("${CFLAGS_COMMON[@]/-ffile-prefix-map=$REPO=./-ffile-prefix-map=<source-root>=.}")
+
 jq_py() { python3 -c "import json,sys; $1" "${@:2}"; }
 
 pin() { jq_py "d=json.load(open(sys.argv[1])); print(eval(sys.argv[2]))" "$PIN" "$1"; }
@@ -158,14 +165,14 @@ build_one() { # triple outdir
 
   make_archive "$dir/libflags2env.a" "${objs[@]}"
   emit_symbols "$dir/libflags2env.a"
-  emit_buildinfo "$dir/libflags2env.a" "$triple" static "$cc_desc" "n/a (archive)" "$ar_desc" "$sysroot" "$floor" "${CFLAGS_COMMON[@]}"
+  emit_buildinfo "$dir/libflags2env.a" "$triple" static "$cc_desc" "n/a (archive)" "$ar_desc" "$sysroot" "$floor" "${CFLAGS_RECORDED[@]}"
 
   "${cc[@]}" "${CFLAGS_COMMON[@]}" "${shared_flags[@]}" "${SRC[@]}" -o "$dir/$shared_name"
   if [ "${F2E_SIGN:-off}" = adhoc ] && [[ "$triple" == *apple-darwin ]]; then
     codesign -s - -f "$dir/$shared_name"
   fi
   emit_symbols "$dir/$shared_name"
-  emit_buildinfo "$dir/$shared_name" "$triple" shared "$cc_desc" "$link_desc" "n/a" "$sysroot" "$floor" "${CFLAGS_COMMON[@]}" "${shared_flags[@]}"
+  emit_buildinfo "$dir/$shared_name" "$triple" shared "$cc_desc" "$link_desc" "n/a" "$sysroot" "$floor" "${CFLAGS_RECORDED[@]}" "${shared_flags[@]}"
 
   rm -f "${objs[@]}"
   echo "built $triple -> $dir"
