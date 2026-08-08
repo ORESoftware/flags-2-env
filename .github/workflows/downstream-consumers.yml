@@ -66,11 +66,11 @@ jobs:
 
   # Each fixture checks its own .cli-flags.toml against a digest it carries, so
   # a single repository cannot drift unnoticed. That is not enough on its own:
-  # twelve repositories could be edited together and stay self-consistent while
+  # the fixtures could be edited together and stay self-consistent while
   # the constant they all agree on no longer describes anything. This job is the
-  # cross-repository half -- it fetches all twelve and proves they are one file.
+  # cross-repository half -- it fetches them all and proves the contract is one file.
   conformance:
-    name: The twelve fixtures share one contract
+    name: The fixtures share one contract
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -79,39 +79,64 @@ jobs:
         run: |
           set -euo pipefail
           work="$(mktemp -d)"
-          repos="bun-app cpp-app dart-app deno-app gleam-app golang-app
-                 java-app nodejs-app php-app python-app ruby-app rust-app"
 
-          for repo in $repos; do
-            for file in .cli-flags.toml EXPECTED.md; do
-              curl --fail-with-body --silent --show-error --location \
-                --output "$work/$repo--$file" \
-                "https://raw.githubusercontent.com/flags-2-env-test/$repo/main/$file"
-            done
-          done
+          # Every fixture in the fleet declares the same flag contract. That
+          # includes feature-matrix, which deliberately adopted the identical
+          # .cli-flags.toml so its wider surface is measured against the same
+          # declarations the argv fixtures use.
+          argv_fixtures=(
+            bun-app cpp-app dart-app deno-app gleam-app golang-app
+            java-app nodejs-app php-app python-app ruby-app rust-app
+          )
+
+          # feature-matrix is in the fleet but is not an argv fixture. It shares
+          # the contract, and is compared on it, but asserts a different and
+          # larger surface -- value sources, ordering, subcommands, audits,
+          # codegen, completion -- so its EXPECTED.md is legitimately its own
+          # document. Holding it to the argv one would fail a repository that is
+          # behaving correctly.
+          contract_repos=("${argv_fixtures[@]}" feature-matrix)
+
+          fetch() {
+            local prefix="$1" repo="$2" file="$3"
+            curl --fail-with-body --silent --show-error --location \
+              --output "$work/$prefix--$repo--$file" \
+              "https://raw.githubusercontent.com/flags-2-env-test/$repo/main/$file"
+          }
+
+          for repo in "${contract_repos[@]}"; do fetch contract "$repo" .cli-flags.toml; done
+          for repo in "${argv_fixtures[@]}";  do fetch expected "$repo" EXPECTED.md;   done
 
           fail=0
-          for file in .cli-flags.toml EXPECTED.md; do
-            echo "### $file"
-            digests="$(sha256sum "$work"/*--"$file" | awk '{print $1}' | sort -u)"
+          compare() {
+            local label="$1" prefix="$2" file="$3" want="$4"
+            local digests count
+            echo "### $label"
+            digests="$(sha256sum "$work/$prefix"--*--"$file" | awk '{print $1}' | sort -u)"
             count="$(printf '%s\n' "$digests" | wc -l)"
             if [ "$count" -ne 1 ]; then
-              echo "::error::$file differs across the fixtures; $count distinct versions" >&2
-              sha256sum "$work"/*--"$file" >&2
+              echo "::error::$file differs across $label; $count distinct versions" >&2
+              sha256sum "$work/$prefix"--*--"$file" >&2
               fail=1
-            else
-              echo "all twelve agree: $digests"
+              return
             fi
-          done
+            echo "all $want agree: $digests"
+          }
+
+          compare "the whole fleet (.cli-flags.toml)" contract .cli-flags.toml \
+            "${#contract_repos[@]}"
+          compare "the argv fixtures (EXPECTED.md)" expected EXPECTED.md \
+            "${#argv_fixtures[@]}"
 
           # The contract each fixture asserts against locally must be the same
           # file this repository's own consumers are held to.
-          canonical="$(sha256sum "$work/rust-app--.cli-flags.toml" | awk '{print $1}')"
+          canonical="$(sha256sum "$work/contract--rust-app--.cli-flags.toml" | awk '{print $1}')"
           echo "canonical_contract=$canonical"
           {
             echo "### Fixture contract conformance"
             echo
-            echo "- Repositories compared: 12"
+            echo "- Contract compared across: ${#contract_repos[@]} repositories"
+            echo "- EXPECTED.md compared across: ${#argv_fixtures[@]} argv fixtures"
             echo "- Shared \`.cli-flags.toml\`: \`$canonical\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -139,6 +164,11 @@ jobs:
           - python-app
           - ruby-app
           - rust-app
+          # Not an argv fixture: feature-matrix covers value sources, ordering,
+          # subcommands, audits, codegen, and completion. It follows the same
+          # conventions as the twelve -- same vendor path, same self-asserting
+          # container -- so it runs through this matrix unchanged.
+          - feature-matrix
     steps:
       - name: Check out the consumer fixture without credentials
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -255,39 +285,3 @@ jobs:
             echo "- Library under review: \`$TOOLING_REF\`"
             echo "- Vendored at: \`$VENDOR\` (from the fixture's own \`[install].dir\`)"
           } >> "$GITHUB_STEP_SUMMARY"
-
-  # Pushes to main tell each fixture to re-run against the new commit, so the
-  # downstream repositories carry their own green/red signal rather than only
-  # appearing in this repository's checks. Needs a PAT with `repo` scope on the
-  # flags-2-env-test organization; without the secret the job reports that it
-  # skipped rather than failing, because the fixtures above already ran.
-  notify:
-    name: Notify the fixtures
-    needs: [prepare, fixture]
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - name: Dispatch upstream-changed to every fixture
-        env:
-          DISPATCH_TOKEN: ${{ secrets.FLAGS_2_ENV_TEST_DISPATCH_TOKEN }}
-          TOOLING_REF: ${{ needs.prepare.outputs.tooling_ref }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ -z "${DISPATCH_TOKEN:-}" ]; then
-            echo "FLAGS_2_ENV_TEST_DISPATCH_TOKEN is not set; skipping dispatch." \
-              >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          for repo in bun-app cpp-app dart-app deno-app gleam-app golang-app \
-                      java-app nodejs-app php-app python-app ruby-app rust-app; do
-            curl --fail-with-body --silent --show-error \
-              --request POST \
-              --header "Accept: application/vnd.github+json" \
-              --header "Authorization: Bearer $DISPATCH_TOKEN" \
-              --header "X-GitHub-Api-Version: 2022-11-28" \
-              --data "{\"event_type\":\"upstream-changed\",\"client_payload\":{\"sha\":\"$TOOLING_REF\"}}" \
-              "https://api.github.com/repos/flags-2-env-test/$repo/dispatches"
-            echo "dispatched $repo"
-          done
