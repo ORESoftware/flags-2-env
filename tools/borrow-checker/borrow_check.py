@@ -800,12 +800,23 @@ class Analyzer(object):
                             "the allocation first" % (arg_name, name))
                 continue
             callee = self.summaries.get(name)
-            if callee is not None and idx in callee.requires_nonnull and \
-                    state in (MAYBE_NULL, NULLPTR):
-                self.report(loc, "null-deref",
-                            "'%s' may be NULL when passed to %s, which "
-                            "dereferences that parameter without a null "
-                            "check" % (arg_name, name))
+            if callee is not None and idx in callee.requires_nonnull:
+                # The obligation is transitive: forwarding one of our own
+                # unguarded parameters into a callee that requires non-null
+                # makes it our caller's obligation too. Without this the
+                # requirement dies at the first hop and a -> b -> deref
+                # escapes entirely.
+                if arg_name in self.params and arg_name not in frame.nonnull:
+                    try:
+                        self.nonnull_required.add(
+                            self.param_order.index(arg_name))
+                    except ValueError:
+                        pass
+                if state in (MAYBE_NULL, NULLPTR):
+                    self.report(loc, "null-deref",
+                                "'%s' may be NULL when passed to %s, which "
+                                "dereferences that parameter without a null "
+                                "check" % (arg_name, name))
 
     def param_index_declared_taken(self, param_name):
         try:
