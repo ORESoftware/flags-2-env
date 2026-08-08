@@ -35,13 +35,13 @@ files="$(changed_files "$@" | awk '
     print
     next
   }
-  $0 == ".env" {
+  $0 == ".env" || $0 == "fixture.dotenv" {
     print ".cli-flags.toml"
     next
   }
-  /\/\.env$/ {
+  /\/(\.env|fixture\.dotenv)$/ {
     file = $0
-    sub(/\/\.env$/, "/.cli-flags.toml", file)
+    sub(/\/(\.env|fixture\.dotenv)$/, "/.cli-flags.toml", file)
     print file
   }
 ' | sort -u)"
@@ -56,6 +56,7 @@ while IFS= read -r file; do
   case "$file" in
     tests/audit-invalid*/.cli-flags.toml | \
     tests/audit-unsafe-shell/.cli-flags.toml | \
+    tests/env-audit/.cli-flags.toml | \
     tests/env-audit-drift/.cli-flags.toml)
       printf 'cli-flags audit: skipping expected-negative fixture %s\n' "$file"
       continue
@@ -93,8 +94,19 @@ while IFS= read -r file; do
     *) env_file="$(dirname -- "$file")/.env" ;;
   esac
   if [ ! -f "$env_path" ]; then
-    printf 'cli-flags env audit: no adjacent .env for %s\n' "$file"
-    continue
+    fixture_path="$(dirname -- "$path")/fixture.dotenv"
+    case "$file" in
+      .cli-flags.toml) fixture_file="fixture.dotenv" ;;
+      */.cli-flags.toml) fixture_file="${file%/.cli-flags.toml}/fixture.dotenv" ;;
+      *) fixture_file="$(dirname -- "$file")/fixture.dotenv" ;;
+    esac
+    if [ -f "$fixture_path" ]; then
+      env_path="$fixture_path"
+      env_file="$fixture_file"
+    else
+      printf 'cli-flags env audit: no adjacent .env or fixture.dotenv for %s\n' "$file"
+      continue
+    fi
   fi
 
   printf 'cli-flags env audit: %s\n' "$env_file"
