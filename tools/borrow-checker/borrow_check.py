@@ -286,17 +286,28 @@ class FunctionSummary(object):
         # the callee succeeding, so callers' arguments blur to unknown the
         # way realloc's does.
         self.may_take_params = set()
+        # params this function dereferences on some path without first
+        # null-guarding them: passing a maybe-null pointer here is a
+        # caller-side defect. Guarded dereferences never land here.
+        self.requires_nonnull = set()
 
 
 class Frame(object):
-    """One abstract state: variable name -> lattice state."""
+    """One abstract state: variable name -> lattice state.
 
-    def __init__(self, states=None):
+    `nonnull` is a separate path-sensitive fact, not a lattice state: it
+    records the names a null test has already proved non-null on this
+    path. Ownership and nullability are tracked independently because a
+    borrowed parameter has no ownership state to refine.
+    """
+
+    def __init__(self, states=None, nonnull=None):
         self.states = dict(states or {})
+        self.nonnull = set(nonnull or ())
         self.terminated = False
 
     def copy(self):
-        frame = Frame(self.states)
+        frame = Frame(self.states, self.nonnull)
         frame.terminated = self.terminated
         return frame
 
@@ -322,14 +333,20 @@ def merge_frames(frames):
         for f in live:
             state = join_states(state, f.states.get(name, UNKNOWN))
         merged.states[name] = state
+    # a name is non-null after the merge only if every live path proved it
+    merged.nonnull = set(live[0].nonnull)
+    for f in live[1:]:
+        merged.nonnull &= f.nonnull
     return merged
 
 
 class Analyzer(object):
-    def __init__(self, path, source_lines, contracts, summaries,
-                 infer_only=False):
+    def __init__(self, path, source_lines, comment_lines, contracts,
+                 summaries, infer_only=False):
         self.path = path
         self.source_lines = source_lines
+        self.comment_lines = comment_lines
+        self.nonnull_required = set()
         self.contracts = contracts
         self.summaries = summaries
         self.infer_only = infer_only
@@ -359,12 +376,23 @@ class Analyzer(object):
             Diagnostic(self.path, line, col, rule, message))
 
     def is_waived(self, line, rule):
+        """A waiver counts only inside a real comment, with a real reason.
+
+        Reading raw source would let a string literal that merely quotes
+        the waiver syntax silence a genuine finding, and an empty reason
+        would make the justification requirement decorative.
+        """
         needle = "borrow-check: allow(%s)" % rule
         for idx in (line - 1, line - 2):
-            if 0 <= idx < len(self.source_lines):
-                text = self.source_lines[idx]
-                if needle in text and "--" in text.split(needle, 1)[1]:
-                    return True
+            if not (0 <= idx < len(self.comment_lines)):
+                continue
+            text = self.comment_lines[idx]
+            if needle not in text:
+                continue
+            tail = text.split(needle, 1)[1]
+            marker = tail.find("--")
+            if marker != -1 and tail[marker + 2:].strip():
+                return True
         return False
 
     # -- entry --------------------------------------------------------------
@@ -640,6 +668,35 @@ class Analyzer(object):
                 self.eval_expr(child, frame, loc)
             return
 
+        if kind == "BinaryOperator" and expr.get("opcode") in ("&&", "||"):
+            inner = [c for c in expr.get("inner", ()) if isinstance(c, dict)]
+            if len(inner) == 2:
+                lhs, rhs = inner
+                self.eval_expr(lhs, frame, loc)
+                # C short-circuits: the right operand is evaluated only when
+                # the left did not already decide the result, so it may
+                # assume the left's outcome. `p && p->x` and
+                # `!p || use(p)` are guarded, and must not be diagnosed.
+                assumed = expr.get("opcode") == "&&"
+                facts = self.null_facts(lhs, assumed)
+                before = dict((n, frame.get(n)) for n, _ in facts)
+                saved_nonnull = set(frame.nonnull)
+                self.apply_refinement(lhs, frame, assumed)
+                refined = dict((n, frame.get(n)) for n in before)
+                self.eval_expr(rhs, frame, loc)
+                # The assumption held only for the right operand; the
+                # enclosing statement re-derives facts for the whole
+                # condition. Undo it, but keep anything the right operand
+                # genuinely changed (a free or a transfer inside it).
+                for fname, prior in before.items():
+                    if frame.get(fname) == refined[fname]:
+                        if prior is None:
+                            frame.states.pop(fname, None)
+                        else:
+                            frame.set(fname, prior)
+                frame.nonnull = saved_nonnull
+                return
+
         if kind == "ConditionalOperator":
             inner = [c for c in expr.get("inner", ()) if isinstance(c, dict)]
             for child in inner:
@@ -741,6 +798,14 @@ class Analyzer(object):
                 self.report(loc, "null-deref",
                             "'%s' may be NULL when passed to %s; check "
                             "the allocation first" % (arg_name, name))
+                continue
+            callee = self.summaries.get(name)
+            if callee is not None and idx in callee.requires_nonnull and \
+                    state in (MAYBE_NULL, NULLPTR):
+                self.report(loc, "null-deref",
+                            "'%s' may be NULL when passed to %s, which "
+                            "dereferences that parameter without a null "
+                            "check" % (arg_name, name))
 
     def param_index_declared_taken(self, param_name):
         try:
@@ -754,6 +819,13 @@ class Analyzer(object):
         if name is None:
             return
         state = frame.get(name)
+        if name in self.params and name not in frame.nonnull:
+            # this function dereferences the parameter without proving it
+            # non-null first, so its callers must not pass a maybe-null
+            try:
+                self.nonnull_required.add(self.param_order.index(name))
+            except ValueError:
+                pass
         if state == FREED:
             self.report(loc, "use-after-free",
                         "%s '%s' after it was freed" % (verb, name))
@@ -855,6 +927,10 @@ class Analyzer(object):
 
     def apply_refinement(self, cond, frame, truth):
         for name, is_null in self.null_facts(cond, truth):
+            if is_null:
+                frame.nonnull.discard(name)
+            else:
+                frame.nonnull.add(name)
             state = frame.get(name)
             if state is None:
                 continue
@@ -920,7 +996,7 @@ class Analyzer(object):
 
 # --- Driver ----------------------------------------------------------------
 
-def infer_summaries(functions, path, source_lines, contracts):
+def infer_summaries(functions, path, source_lines, comment_lines, contracts):
     summaries = {}
     for fn in functions:
         name = fn.get("name")
@@ -932,10 +1008,14 @@ def infer_summaries(functions, path, source_lines, contracts):
             name = fn.get("name")
             if not name:
                 continue
-            analyzer = Analyzer(path, source_lines, contracts, summaries,
-                                infer_only=True)
+            analyzer = Analyzer(path, source_lines, comment_lines, contracts,
+                                summaries, infer_only=True)
             analyzer.run(fn)
             summary = summaries[name]
+            new_nonnull = analyzer.nonnull_required - summary.requires_nonnull
+            if new_nonnull:
+                summary.requires_nonnull |= new_nonnull
+                changed = True
             if analyzer.returns_owned_seen and not summary.returns_owned:
                 summary.returns_owned = True
                 changed = True
@@ -952,17 +1032,72 @@ def infer_summaries(functions, path, source_lines, contracts):
     return summaries
 
 
+def comment_text_by_line(source_text):
+    """Return, per source line, only the text that sits inside a comment.
+
+    String and character literals are stripped, so a literal that merely
+    quotes the waiver syntax cannot suppress a diagnostic. Block comments
+    are tracked across lines so a waiver inside a multi-line comment still
+    works.
+    """
+    result = []
+    in_block = False
+    for line in source_text.splitlines():
+        collected = []
+        in_string = False
+        in_char = False
+        i = 0
+        width = len(line)
+        while i < width:
+            ch = line[i]
+            nxt = line[i + 1] if i + 1 < width else ""
+            if in_block:
+                if ch == "*" and nxt == "/":
+                    in_block = False
+                    i += 2
+                    continue
+                collected.append(ch)
+                i += 1
+            elif in_string or in_char:
+                if ch == "\\":
+                    i += 2
+                    continue
+                if (in_string and ch == '"') or (in_char and ch == "'"):
+                    in_string = False
+                    in_char = False
+                i += 1
+            elif ch == '"':
+                in_string = True
+                i += 1
+            elif ch == "'":
+                in_char = True
+                i += 1
+            elif ch == "/" and nxt == "/":
+                collected.append(line[i + 2:])
+                break
+            elif ch == "/" and nxt == "*":
+                in_block = True
+                i += 2
+            else:
+                i += 1
+        result.append("".join(collected))
+    return result
+
+
 def check_file(path, clang, include_dirs, extra_args, contracts):
     tu = run_clang(clang, path, include_dirs, extra_args)
     with open(path, "r") as fh:
         source_text = fh.read()
     source_lines = source_text.splitlines()
+    comment_lines = comment_text_by_line(source_text)
     functions = collect_functions(tu, path)
     audit_collection(source_text, functions, path)
-    summaries = infer_summaries(functions, path, source_lines, contracts)
+    summaries = infer_summaries(functions, path, source_lines, comment_lines,
+                                contracts)
     diagnostics = []
     for fn in functions:
-        analyzer = Analyzer(path, source_lines, contracts, summaries)
+        analyzer = Analyzer(path, source_lines, comment_lines, contracts,
+                            summaries)
         analyzer.run(fn)
         diagnostics.extend(analyzer.diagnostics)
     return diagnostics

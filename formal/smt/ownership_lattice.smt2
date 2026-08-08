@@ -6,6 +6,16 @@
 ; the Python implementation; the proofs establish that the machine as
 ; implemented cannot let a segfault-class event trace through unflagged.
 ;
+; SCOPE — what these obligations do NOT establish. They quantify over
+; abstract event sequences, so they say nothing about whether the tool
+; produces the right event sequence for a given translation unit. AST
+; collection, control-flow lowering, summary inference, nullability
+; tracking (a side-channel fact, not a state below), and waiver parsing
+; are outside this model and are covered only by fixtures. Two real false
+; negatives once lived in those unproved components while every obligation
+; here stayed unsat (DEN-3096). See tools/borrow-checker/README.md,
+; "What is proved, and what is not".
+;
 ; Event vocabulary (abstraction of the Python analyzer's actions):
 ;   alloc          x = allocator(...)        -> maybe-null
 ;   refine         null-check passed         maybe-null -> owned

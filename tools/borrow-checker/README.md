@@ -14,7 +14,7 @@ without annotation.
 | `double-free` | a freed pointer reaches `free`/`f2e_free`/a taking callee again |
 | `use-after-free` | a freed pointer is read, dereferenced, passed on, or returned |
 | `free-borrowed` | a public (non-`static`) function frees a parameter without declaring `F2E_TAKES_OWNED_ARG_1` |
-| `null-deref` | an unchecked allocation result (or definitely-NULL pointer) is dereferenced or handed to null-strict libc |
+| `null-deref` | an unchecked allocation result (or definitely-NULL pointer) is dereferenced, handed to null-strict libc, or passed to a local function that dereferences that parameter without guarding it |
 | `leak` | an owned pointer goes out of scope or crosses a `return` unreleased |
 | `overwrite-leak` | an owned pointer is overwritten while it still owns its block |
 | `return-local-addr` | the address of a stack local (or a decayed stack array) escapes via `return` |
@@ -41,12 +41,40 @@ without annotation.
    shrink the analyzed surface (Apple clang 21 and Ubuntu clang 18 disagreed
    by 95 functions before this guard existed).
 
-The state machine is mirrored, transition for transition, by
-`formal/smt/ownership_lattice.smt2`; `scripts/formal-check.sh` has Z3 prove
-that the machine cannot let a use-after-free or double-free trace through
-unflagged within bounded traces, and that the canonical
-allocate/check/use/free contract never raises a diagnostic. Change the
-Python and the SMT model together.
+## What is proved, and what is not
+
+This distinction matters, because "a Z3 proof backs this tool" is easy to
+over-read. The proof covers **one component**, not the pipeline.
+
+**Proved** (`formal/smt/ownership_lattice.smt2`, run by
+`scripts/formal-check.sh`): the abstract ownership state machine. Given a
+sequence of abstract events, Z3 shows no bounded trace reaches a
+use-after-free or double-free unflagged, the canonical
+allocate/check/use/free contract never flags, and the branch-merge join is
+commutative and never forgets a conditional free. The SMT model mirrors
+`STATES` and the transition logic transition-for-transition; change them
+together.
+
+**Not proved — trusted, and covered only by tests:**
+
+- *AST collection* — that clang's JSON gives us every function. Guarded by
+  the `audit_collection` cross-check, not by proof; a clang-version
+  serialization difference once hid 95 functions.
+- *Control-flow lowering* — that abstract interpretation of the AST
+  (loop widening, switch arms, short-circuit operands) emits the event
+  sequence the proved machine reasons about.
+- *Summary inference* — the fixpoint deriving returns-owned, takes,
+  may-take, and requires-nonnull facts for local functions.
+- *Nullability tracking* — `Frame.nonnull` is a side-channel fact, not a
+  lattice state, and is outside the proved machine entirely.
+- *Waiver parsing* — which findings get suppressed.
+
+A defect in any unproved component is a false negative the proof cannot
+see. Two such defects were found by adversarial review (DEN-3096) after
+the first release: a helper that dereferenced an unguarded parameter was
+missed, and a string literal quoting the waiver syntax suppressed a real
+leak. Both are now fixture-covered; treat this list as the map of where
+to look next.
 
 ## Running
 
@@ -71,7 +99,10 @@ the line above:
 /* borrow-check: allow(leak) -- handed to the OS at process exit */
 ```
 
-The waiver names one rule and must carry a reason after `--`.
+The waiver names one rule and must carry a **non-empty** reason after `--`,
+and it must live in a real `//` or `/* */` comment: string literals are
+stripped before waivers are matched, so quoting the syntax in data cannot
+suppress a finding.
 
 ## Fixtures
 
