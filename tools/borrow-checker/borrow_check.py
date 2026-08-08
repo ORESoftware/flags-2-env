@@ -661,16 +661,12 @@ class Analyzer(object):
                             "'%s' may be NULL when passed to %s; check "
                             "the allocation first" % (arg_name, name))
 
-    def param_index_taken(self, param_name):
-        summary = self.summaries.get(self.fn_name)
-        if summary is None:
-            return False
+    def param_index_declared_taken(self, param_name):
         try:
             idx = self.param_order.index(param_name)
         except ValueError:
             return False
-        return idx in summary.takes_params or \
-            self.contracts.takes.get(self.fn_name) == idx
+        return self.contracts.takes.get(self.fn_name) == idx
 
     def check_deref(self, base_expr, frame, loc, verb):
         name = ref_name(base_expr)
