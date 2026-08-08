@@ -810,7 +810,7 @@ class Analyzer(object):
 
     def check_leaks(self, frame, loc, where, skip=None):
         for name, state in sorted(frame.states.items()):
-            if name == skip or name in self.params:
+            if name == skip:
                 continue
             if state in OWNING_STATES:
                 self.report(loc, "leak",
