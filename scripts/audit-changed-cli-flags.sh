@@ -56,6 +56,7 @@ while IFS= read -r file; do
   case "$file" in
     tests/audit-invalid*/.cli-flags.toml | \
     tests/audit-unsafe-shell/.cli-flags.toml | \
+    tests/env-audit/.cli-flags.toml | \
     tests/env-audit-drift/.cli-flags.toml)
       printf 'cli-flags audit: skipping expected-negative fixture %s\n' "$file"
       continue
