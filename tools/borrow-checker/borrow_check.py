@@ -890,6 +890,10 @@ class Analyzer(object):
 
     def apply_refinement(self, cond, frame, truth):
         for name, is_null in self.null_facts(cond, truth):
+            if is_null:
+                frame.nonnull.discard(name)
+            else:
+                frame.nonnull.add(name)
             state = frame.get(name)
             if state is None:
                 continue
