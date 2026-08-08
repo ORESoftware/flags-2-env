@@ -19,3 +19,13 @@ temp
 tmp/worktrees
 temp/worktrees
 .zed/
+
+# BEGIN ORESoftware plaintext dotenv boundary
+# Real plaintext dotenv state is local-only. Parser fixtures use fixture.dotenv.
+*.env
+*/*.env
+*/**/*.env
+.env.*
+*.env.*
+!.env.example
+# END ORESoftware plaintext dotenv boundary
