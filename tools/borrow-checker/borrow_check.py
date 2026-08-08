@@ -376,12 +376,23 @@ class Analyzer(object):
             Diagnostic(self.path, line, col, rule, message))
 
     def is_waived(self, line, rule):
+        """A waiver counts only inside a real comment, with a real reason.
+
+        Reading raw source would let a string literal that merely quotes
+        the waiver syntax silence a genuine finding, and an empty reason
+        would make the justification requirement decorative.
+        """
         needle = "borrow-check: allow(%s)" % rule
         for idx in (line - 1, line - 2):
-            if 0 <= idx < len(self.source_lines):
-                text = self.source_lines[idx]
-                if needle in text and "--" in text.split(needle, 1)[1]:
-                    return True
+            if not (0 <= idx < len(self.comment_lines)):
+                continue
+            text = self.comment_lines[idx]
+            if needle not in text:
+                continue
+            tail = text.split(needle, 1)[1]
+            marker = tail.find("--")
+            if marker != -1 and tail[marker + 2:].strip():
+                return True
         return False
 
     # -- entry --------------------------------------------------------------
