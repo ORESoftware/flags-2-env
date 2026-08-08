@@ -691,6 +691,14 @@ class Analyzer(object):
                 continue
             state = frame.get(arg_name)
             takes_this = name in takes and takes[name] == idx
+            may_take = self._may_take_map.get(name)
+            if may_take is not None and idx in may_take and \
+                    state in OWNING_STATES:
+                # conditional transfer into a callee that stores this
+                # argument: the caller may legally free it on the callee's
+                # failure path or forget it on success
+                frame.set(arg_name, UNKNOWN)
+                continue
             if name == "realloc" and idx == 0 and state != FREED:
                 # realloc consumes its argument only when it succeeds; the
                 # caller may legally free it on failure or overwrite it on
