@@ -169,18 +169,23 @@ def run_clang(clang, path, include_dirs, extra_args):
 def collect_functions(tu, main_path):
     """Yield FunctionDecl nodes with bodies that live in main_path.
 
-    clang only emits loc.file when the file changes, so track it statefully.
+    clang serializes locations differentially: loc.file appears only when
+    the file changes. Track exactly what the serializer tracks — the
+    expansion file (expansionLoc, or the plain loc) — and never the
+    spelling file: a macro spelled in a system header would otherwise
+    poison the tracker while clang's own state still says main file,
+    silently dropping every following function.
     """
     want = os.path.realpath(main_path)
     functions = []
     current_file = None
     for node in tu.get("inner", ()):
         loc = node.get("loc", {})
-        if "file" in loc:
+        expansion = loc.get("expansionLoc", {})
+        if "file" in expansion:
+            current_file = expansion["file"]
+        elif "file" in loc:
             current_file = loc["file"]
-        spelling = loc.get("spellingLoc", {})
-        if "file" in spelling:
-            current_file = spelling["file"]
         if node.get("kind") != "FunctionDecl":
             continue
         if current_file is None or os.path.realpath(current_file) != want:
@@ -189,6 +194,40 @@ def collect_functions(tu, main_path):
                for child in node.get("inner", ())):
             functions.append(node)
     return functions
+
+
+_STATIC_DEF_RE = re.compile(r"^static\s+[^;{}()]*?\b(\w+)\s*\(", re.M)
+
+
+def audit_collection(source_text, functions, path):
+    """Fail loudly if AST file tracking dropped a function.
+
+    Every `static <type> name(` definition found textually in the source
+    must appear in the collected set; a mismatch means the differential
+    location tracking desynced from this clang's serializer, which would
+    otherwise silently shrink the analyzed surface (observed: Apple clang
+    21 vs Ubuntu clang 18 disagreeing by 95 functions before this guard).
+    """
+    collected = set()
+    for fn in functions:
+        name = fn.get("name")
+        if name:
+            collected.add(name)
+    missing = []
+    for match in _STATIC_DEF_RE.finditer(source_text):
+        name = match.group(1)
+        rest = source_text[match.end():]
+        # a prototype reaches ';' before any '{'; a definition hits '{'
+        semi = rest.find(";")
+        brace = rest.find("{")
+        if brace == -1 or (semi != -1 and semi < brace):
+            continue
+        if name not in collected:
+            missing.append(name)
+    if missing:
+        raise RuntimeError(
+            "%s: AST location tracking dropped %d function(s): %s"
+            % (path, len(missing), ", ".join(sorted(set(missing))[:8])))
 
 
 def is_pointer_type(node):
