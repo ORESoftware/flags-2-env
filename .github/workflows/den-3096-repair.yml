@@ -1,0 +1,78 @@
+name: DEN-3096 one-shot analyzer repair
+
+on:
+  push:
+    branches:
+      - feat/custom-borrow-checker
+    paths:
+      - .github/workflows/den-3096-repair.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: den-3096-one-shot-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    if: >-
+      github.repository == 'ORESoftware/flags-2-env' &&
+      github.ref == 'refs/heads/feat/custom-borrow-checker'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out the exact repair carrier
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: feat/custom-borrow-checker
+          fetch-depth: 2
+          persist-credentials: true
+          show-progress: false
+
+      - name: Require the reviewed carrier ancestry and checker blob
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD^)" = "8acd469bbb431a041c7811d808170317022d480e"
+          test "$(git hash-object tools/borrow-checker/borrow_check.py)" = \
+            "e00047d734ffa1b43e5d3415e33d6d12425b4d06"
+          test -f .github/repair/den-3096.py
+
+      - name: Apply the exact-blob repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONPYCACHEPREFIX="$RUNNER_TEMP/python-cache" \
+            python3 .github/repair/den-3096.py
+
+      - name: Compile and exercise the repaired checker
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v clang
+          PYTHONPYCACHEPREFIX="$RUNNER_TEMP/python-cache" \
+            python3 -m py_compile tools/borrow-checker/borrow_check.py
+          PYTHONPYCACHEPREFIX="$RUNNER_TEMP/python-cache" \
+            python3 tools/borrow-checker/borrow_check.py \
+              --clang clang \
+              --self-test
+          PYTHONPYCACHEPREFIX="$RUNNER_TEMP/python-cache" \
+            bash scripts/borrow-check.sh
+          git diff --check
+
+      - name: Remove the write-capable carrier and commit only reviewed outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/repair/den-3096.py
+          rmdir .github/repair || true
+          git rm .github/workflows/den-3096-repair.yml
+          git add -A
+          test -z "$(git status --porcelain=v1 | grep -E '^.. (\.github/repair/|\.github/workflows/den-3096-repair\.yml)$' || true)"
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(analyzer): close nullability and waiver bypasses'
+          git push origin HEAD:feat/custom-borrow-checker
