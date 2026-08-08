@@ -295,6 +295,7 @@ class Analyzer(object):
         self.params = set()
         self.local_addrs = set()   # vars holding &stack-local or array decay
         self.fn_name = None
+        self.is_static = False
         self.returns_owned_seen = False
         self.takes_seen = set()
         self.param_order = []
