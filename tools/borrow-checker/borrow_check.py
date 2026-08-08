@@ -943,6 +943,10 @@ def infer_summaries(functions, path, source_lines, contracts):
             if new_takes:
                 summary.takes_params |= new_takes
                 changed = True
+            new_stores = analyzer.stores_seen - summary.may_take_params
+            if new_stores:
+                summary.may_take_params |= new_stores
+                changed = True
         if not changed:
             break
     return summaries
