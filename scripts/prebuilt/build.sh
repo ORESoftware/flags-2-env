@@ -40,8 +40,16 @@ print('\n'.join(t['triple'] for t in d['targets'] if t['tier']==1))" "$TARGETS_J
 }
 
 runtime_floor() {
-  jq_py "d=json.load(open(sys.argv[1]));
-print(next(t['minimum_runtime'] for t in d['targets'] if t['triple']==sys.argv[2]))" "$TARGETS_JSON" "$1"
+  # Fails with a clear diagnostic rather than a StopIteration traceback when the
+  # `prebuilt-%` pattern rule forwards a name that is not a declared triple
+  # (e.g. `make prebuilt-typo`).
+  jq_py "d=json.load(open(sys.argv[1]))
+m=[t for t in d['targets'] if t['triple']==sys.argv[2]]
+if not m:
+    sys.stderr.write('FATAL: %r is not a target in prebuilt/targets.json; known: %s\n' % (
+        sys.argv[2], ', '.join(t['triple'] for t in d['targets'])))
+    raise SystemExit(2)
+print(m[0]['minimum_runtime'])" "$TARGETS_JSON" "$1"
 }
 
 check_toolchains() {
