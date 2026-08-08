@@ -1,5 +1,18 @@
 #include <assert.h>
+#include <ctype.h>
 #include <stddef.h>
+
+/* glibc implements tolower as a lookup through __ctype_tolower_loc(), a
+ * table CBMC leaves unmodeled and therefore havocs per call — even
+ * tolower(x) == tolower(x) fails, which broke reflexivity on x86_64-linux
+ * while Apple's arithmetic tolower passed. The scanners under proof are
+ * ASCII by contract, so substitute the definitional C-locale mapping and
+ * quantify the proofs over it. */
+static int f2e_proof_tolower(int c) {
+  return (c >= 'A' && c <= 'Z') ? (c - 'A' + 'a') : c;
+}
+#undef tolower
+#define tolower(c) f2e_proof_tolower(c)
 
 #include "../../src/terminal_context.c"
 
