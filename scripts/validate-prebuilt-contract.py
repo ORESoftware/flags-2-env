@@ -17,6 +17,7 @@ TARGETS_PATH = PREBUILT_ROOT / "targets.json"
 SCHEMA_PATH = PREBUILT_ROOT / "manifest.schema.json"
 DEFAULT_MANIFEST_PATH = PREBUILT_ROOT / "manifest.json"
 TRIPLE = re.compile(r"^[a-z0-9_]+(?:-[a-z0-9_]+){2,3}$")
+TARGET_ID = re.compile(r"^[a-z0-9_]+(?:-[a-z0-9_]+){1,3}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
 EXPECTED_TIER_ONE = {
@@ -128,7 +129,7 @@ def validate_policy_and_schema() -> tuple[
 
     deferred = policy.get("deferred_targets")
     if not isinstance(deferred, list) or not all(
-        isinstance(item, str) and TRIPLE.fullmatch(item) for item in deferred
+        isinstance(item, str) and TARGET_ID.fullmatch(item) for item in deferred
     ):
         fail("deferred_targets must be an array of canonical target strings")
     if len(set(deferred)) != len(deferred):
