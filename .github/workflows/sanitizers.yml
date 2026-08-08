@@ -8,6 +8,7 @@ on:
       - "src/**"
       - "tests/**"
       - "scripts/borrow-check.sh"
+      - "tools/borrow-checker/**"
       - "scripts/formal-check.sh"
       - "scripts/test-readme-snippets.mjs"
   push:
@@ -18,6 +19,7 @@ on:
       - "src/**"
       - "tests/**"
       - "scripts/borrow-check.sh"
+      - "tools/borrow-checker/**"
       - "scripts/formal-check.sh"
       - "scripts/test-readme-snippets.mjs"
 
