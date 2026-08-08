@@ -586,29 +586,30 @@ class Analyzer(object):
             if isinstance(child, dict):
                 self.eval_expr(child, frame, loc)
 
+    def takes_map(self):
+        if self._takes_map is None:
+            takes = dict(self.contracts.takes)
+            for summary in self.summaries.values():
+                for idx in summary.takes_params:
+                    takes.setdefault(summary.name, idx)
+            self._takes_map = takes
+        return self._takes_map
+
     def eval_call(self, call, frame, loc):
         name = callee_name(call)
         inner = [c for c in call.get("inner", ()) if isinstance(c, dict)]
         args = inner[1:] if inner else []
-
-        takes = dict(self.contracts.takes)
-        for summary in self.summaries.values():
-            for idx in summary.takes_params:
-                takes.setdefault(summary.name, idx)
+        takes = self.takes_map()
 
         for idx, arg in enumerate(args):
             arg_name = ref_name(arg)
             bare = unwrap(arg)
-            # out-параметр: &x re-initializes x
+            # out-parameter: passing &x lets the callee re-initialize x
             if bare is not None and bare.get("kind") == "UnaryOperator" \
                     and bare.get("opcode") == "&":
                 sub = bare.get("inner", ())
                 target = ref_name(sub[0]) if sub else None
                 if target is not None and target in frame.states:
-                    if frame.get(target) in OWNING_STATES and \
-                            name not in (self.fn_name,):
-                        # passing &owned lets the callee overwrite it
-                        pass
                     frame.set(target, UNKNOWN)
                 continue
             if arg_name is None:
