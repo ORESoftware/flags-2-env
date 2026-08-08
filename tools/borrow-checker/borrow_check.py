@@ -325,6 +325,7 @@ class Analyzer(object):
 
     def run(self, fn):
         self.fn_name = fn.get("name")
+        self.is_static = fn.get("storageClass") == "static"
         frame = Frame()
         body = None
         for child in fn.get("inner", ()):
