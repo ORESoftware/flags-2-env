@@ -89,7 +89,9 @@ void harness_value_truthy(void) {
 }
 
 /* Column parsing returns 0 or a value inside the documented [20, 10000]
- * clamp, for every input the type can carry. */
+ * clamp, for every input the type can carry. Exact-value behavior of the
+ * strtoul path is exercised by tests/terminal_context.c; CBMC's libc model
+ * havocs strtoul, so only the code's own range recheck is provable here. */
 void harness_parse_columns(void) {
   char value[8];
 
@@ -104,7 +106,4 @@ void harness_parse_columns(void) {
   assert(columns == 0 || (columns >= 20 && columns <= 10000));
   assert(f2e_parse_columns(NULL) == 0);
   assert(f2e_parse_columns("") == 0);
-  assert(f2e_parse_columns("19") == 0);
-  assert(f2e_parse_columns("10001") == 0);
-  assert(f2e_parse_columns("80") == 80);
 }
