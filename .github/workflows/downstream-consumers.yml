@@ -70,7 +70,7 @@ jobs:
   # the constant they all agree on no longer describes anything. This job is the
   # cross-repository half -- it fetches all twelve and proves they are one file.
   conformance:
-    name: The twelve fixtures share one contract
+    name: The fixtures share one contract
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -79,39 +79,63 @@ jobs:
         run: |
           set -euo pipefail
           work="$(mktemp -d)"
-          repos="bun-app cpp-app dart-app deno-app gleam-app golang-app
-                 java-app nodejs-app php-app python-app ruby-app rust-app"
 
-          for repo in $repos; do
-            for file in .cli-flags.toml EXPECTED.md; do
-              curl --fail-with-body --silent --show-error --location \
-                --output "$work/$repo--$file" \
-                "https://raw.githubusercontent.com/flags-2-env-test/$repo/main/$file"
-            done
-          done
+          # Every fixture in the fleet declares the same flag contract. That
+          # includes feature-matrix, which deliberately adopted the identical
+          # .cli-flags.toml so its wider surface is measured against the same
+          # declarations the argv fixtures use.
+          contract_repos="bun-app cpp-app dart-app deno-app gleam-app golang-app
+                          java-app nodejs-app php-app python-app ruby-app rust-app
+                          feature-matrix"
+
+          # EXPECTED.md is compared over the argv fixtures only. feature-matrix
+          # asserts a different and larger surface -- value sources, ordering,
+          # subcommands, audits, codegen, completion -- so its EXPECTED.md is
+          # legitimately its own document. Holding it to the argv one would fail
+          # for a repository that is behaving correctly.
+          expected_repos="bun-app cpp-app dart-app deno-app gleam-app golang-app
+                          java-app nodejs-app php-app python-app ruby-app rust-app"
+
+          fetch() {
+            local repo="$1" file="$2"
+            curl --fail-with-body --silent --show-error --location \
+              --output "$work/$3--$repo--$file" \
+              "https://raw.githubusercontent.com/flags-2-env-test/$repo/main/$file"
+          }
+
+          for repo in $contract_repos; do fetch "$repo" .cli-flags.toml contract; done
+          for repo in $expected_repos;  do fetch "$repo" EXPECTED.md   expected; done
 
           fail=0
-          for file in .cli-flags.toml EXPECTED.md; do
-            echo "### $file"
-            digests="$(sha256sum "$work"/*--"$file" | awk '{print $1}' | sort -u)"
+          compare() {
+            local label="$1" prefix="$2" file="$3" expected_count="$4"
+            local digests count
+            echo "### $label"
+            digests="$(sha256sum "$work/$prefix"--*--"$file" | awk '{print $1}' | sort -u)"
             count="$(printf '%s\n' "$digests" | wc -l)"
             if [ "$count" -ne 1 ]; then
-              echo "::error::$file differs across the fixtures; $count distinct versions" >&2
-              sha256sum "$work"/*--"$file" >&2
+              echo "::error::$file differs across $label; $count distinct versions" >&2
+              sha256sum "$work/$prefix"--*--"$file" >&2
               fail=1
-            else
-              echo "all twelve agree: $digests"
+              return
             fi
-          done
+            echo "all $expected_count agree: $digests"
+          }
+
+          compare "the whole fleet (.cli-flags.toml)" contract .cli-flags.toml \
+            "$(printf '%s\n' $contract_repos | wc -l | tr -d ' ')"
+          compare "the argv fixtures (EXPECTED.md)" expected EXPECTED.md \
+            "$(printf '%s\n' $expected_repos | wc -l | tr -d ' ')"
 
           # The contract each fixture asserts against locally must be the same
           # file this repository's own consumers are held to.
-          canonical="$(sha256sum "$work/rust-app--.cli-flags.toml" | awk '{print $1}')"
+          canonical="$(sha256sum "$work/contract--rust-app--.cli-flags.toml" | awk '{print $1}')"
           echo "canonical_contract=$canonical"
           {
             echo "### Fixture contract conformance"
             echo
-            echo "- Repositories compared: 12"
+            echo "- Contract compared across: $(printf '%s\n' $contract_repos | wc -l | tr -d ' ') repositories"
+            echo "- EXPECTED.md compared across: $(printf '%s\n' $expected_repos | wc -l | tr -d ' ') argv fixtures"
             echo "- Shared \`.cli-flags.toml\`: \`$canonical\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
