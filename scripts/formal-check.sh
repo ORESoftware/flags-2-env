@@ -32,7 +32,7 @@ run_manifest() {
       "schemaVersion"
     ] | sort))
     and .schemaVersion == "formal-methods.v1"
-    and .repoUrl == "https://github.com/ORESoftware/flags-2-env.git"
+    and .repoUrl == "https://github.com/flags-2-env/flags-2-env.git"
     and (.gitRef | type == "string"
       and test("^[A-Za-z0-9][A-Za-z0-9._/-]{0,179}$")
       and contains("..") == false

@@ -1,14 +1,14 @@
 [package]
-org = "oresoftware"
+org = "flags-2-env"
 name = "flags-2-env"
-version = "0.2.0"
+version = "0.3.0"
 description = "Portable nested CLI flag-to-environment parser and polyglot bindings"
 license = "MIT"
 keywords = ["cli", "flags", "environment", "polyglot"]
 
 [package.repository]
 vcs = "git"
-url = "https://github.com/ORESoftware/flags-2-env"
+url = "https://github.com/flags-2-env/flags-2-env"
 
 [publish]
 include_readme = true

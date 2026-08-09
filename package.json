@@ -1,6 +1,6 @@
 {
   "name": "@oresoftware/f2e",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Parse project-declared CLI flags into environment override maps.",
   "license": "MIT",
   "type": "module",
@@ -57,7 +57,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ORESoftware/flags-2-env.git"
+    "url": "git+https://github.com/flags-2-env/flags-2-env.git"
   },
   "keywords": [
     "cli",

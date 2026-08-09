@@ -11,12 +11,15 @@ mkdir -p \
   "$TMP_DIR/bad-secret" \
   "$TMP_DIR/bad-unknown" \
   "$TMP_DIR/bad-pin" \
-  "$TMP_DIR/bad-cwd"
+  "$TMP_DIR/bad-cwd" \
+  "$TMP_DIR/legacy-good" \
+  "$TMP_DIR/legacy-expired"
 
 write_rust_files() {
   local dir="$1"
   local rev="$2"
   local extra="$3"
+  local upstream="${4:-https://github.com/flags-2-env/flags-2-env.git}"
   cat >"$dir/Cargo.toml" <<EOF
 [package]
 name = "consumer"
@@ -24,7 +27,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-flags2env = { git = "https://github.com/ORESoftware/flags-2-env.git", rev = "$rev"$extra }
+flags2env = { git = "$upstream", rev = "$rev"$extra }
 EOF
   cat >"$dir/Cargo.lock" <<EOF
 version = 4
@@ -32,7 +35,7 @@ version = 4
 [[package]]
 name = "flags2env"
 version = "0.1.0"
-source = "git+https://github.com/ORESoftware/flags-2-env.git?rev=$rev#$rev"
+source = "git+$upstream?rev=$rev#$rev"
 EOF
 }
 
@@ -60,6 +63,32 @@ python3 "$CHECKER" \
   --parser-ref "$PARSER_REF" \
   --kind server \
   --rust-manifest Cargo.toml
+
+cp -R "$TMP_DIR/good/." "$TMP_DIR/legacy-good/"
+write_rust_files \
+  "$TMP_DIR/legacy-good" \
+  "$PARSER_REF" \
+  "" \
+  "https://github.com/ORESoftware/flags-2-env.git"
+python3 "$CHECKER" \
+  --root "$TMP_DIR/legacy-good" \
+  --contract .cli-flags.toml \
+  --parser-ref "$PARSER_REF" \
+  --kind server \
+  --rust-manifest Cargo.toml \
+  --policy-date 2026-08-19
+
+cp -R "$TMP_DIR/legacy-good/." "$TMP_DIR/legacy-expired/"
+if python3 "$CHECKER" \
+  --root "$TMP_DIR/legacy-expired" \
+  --contract .cli-flags.toml \
+  --parser-ref "$PARSER_REF" \
+  --kind server \
+  --rust-manifest Cargo.toml \
+  --policy-date 2026-08-20; then
+  echo "compatibility source should expire after 2026-08-19" >&2
+  exit 1
+fi
 
 cp -R "$TMP_DIR/good/." "$TMP_DIR/bad-secret/"
 cat >>"$TMP_DIR/bad-secret/.cli-flags.toml" <<'EOF'

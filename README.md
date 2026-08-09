@@ -4,6 +4,24 @@
 
 The native core is C. Runtime clients bind to the same small ABI and convert the returned JSON object into each language's native map type.
 
+## Source repository transition
+
+The canonical source repository is
+[`flags-2-env/flags-2-env`](https://github.com/flags-2-env/flags-2-env).
+The original
+[`ORESoftware/flags-2-env`](https://github.com/ORESoftware/flags-2-env)
+repository remains a supported, commit-identical compatibility source through
+2026-08-19. New source references should use the canonical repository; existing
+immutable references to the compatibility repository remain valid during the
+ten-day transition.
+
+The canonical Zed package is `flags-2-env/flags-2-env@0.3.0`. Zed currently
+treats `org/name` as immutable package identity and has no package-alias field,
+so `oresoftware/flags-2-env@0.3.0` is published separately from the exact same
+tagged source commit during the transition. See
+[`docs/source-migration.md`](docs/source-migration.md) for the machine-checked
+contract, publication order, and cutoff procedure.
+
 ## Config
 
 Create `.cli-flags.toml` in the project root:
@@ -229,7 +247,7 @@ In an existing project without a `.zpkg.toml`, install it without changing the
 native package manifest:
 
 ```sh
-zed install oresoftware/flags-2-env@^0.1 \
+zed install flags-2-env/flags-2-env@^0.3 \
   --skip-manifest \
   --allow-build \
   --adapter none
@@ -245,7 +263,7 @@ adapter once:
 
 ```toml
 [dependencies]
-"oresoftware/flags-2-env" = "^0.1"
+"flags-2-env/flags-2-env" = "^0.3"
 
 [install]
 adapter = "none"
@@ -255,6 +273,11 @@ Then run `zed install --allow-build`. Both install forms retain the native
 project structure, write an integrity-pinned `.zpkg.lock`, and support frozen
 reinstallation with `zed install --frozen --skip-manifest --allow-build
 --adapter none` for manifestless consumers.
+
+Until the end of 2026-08-19, the compatibility coordinate
+`oresoftware/flags-2-env@^0.3` resolves a separately published artifact from
+the same tagged source commit. New manifests should use the canonical
+`flags-2-env/flags-2-env` coordinate.
 
 `tests/flags-2-env-e2e.sh` round-trips the exact publishable artifact through a
 temporary file registry and installs it into npm, nested pnpm, Maven, Ruby,

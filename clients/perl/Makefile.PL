@@ -14,8 +14,8 @@ WriteMakefile(
   },
   META_MERGE => {
     resources => {
-      repository => 'https://github.com/ORESoftware/flags-2-env',
-      bugtracker => 'https://github.com/ORESoftware/flags-2-env/issues',
+      repository => 'https://github.com/flags-2-env/flags-2-env',
+      bugtracker => 'https://github.com/flags-2-env/flags-2-env/issues',
     },
   },
 );

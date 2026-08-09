@@ -1,0 +1,31 @@
+{
+  "$schema": "source-migration.schema.json",
+  "schemaVersion": "flags-2-env.source-migration.v1",
+  "canonical": {
+    "repository": "https://github.com/flags-2-env/flags-2-env.git",
+    "web": "https://github.com/flags-2-env/flags-2-env"
+  },
+  "compatibility": {
+    "repository": "https://github.com/ORESoftware/flags-2-env.git",
+    "web": "https://github.com/ORESoftware/flags-2-env",
+    "supportStartsOn": "2026-08-09",
+    "supportEndsOn": "2026-08-19",
+    "mode": "commit-identical-mirror",
+    "mirroredRefs": [
+      "refs/heads/main",
+      "refs/tags/*"
+    ]
+  },
+  "zedPackage": {
+    "version": "0.3.0",
+    "canonicalIdentity": "flags-2-env/flags-2-env",
+    "compatibilityIdentity": "oresoftware/flags-2-env",
+    "aliasSupport": "unavailable",
+    "compatibilityPublishMode": "single-field-manifest-overlay",
+    "repositoryAuthority": "canonical"
+  },
+  "publicationOrder": [
+    "canonical",
+    "compatibility"
+  ]
+}

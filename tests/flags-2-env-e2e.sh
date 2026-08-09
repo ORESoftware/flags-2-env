@@ -19,7 +19,7 @@ if [[ ! -f "$repo_root/.zpkg.toml" ]]; then
   exit 2
 fi
 
-read -r package_ref package_version < <(
+read -r package_ref package_version package_org package_name < <(
   python3 - "$repo_root/.zpkg.toml" <<'PY_ZPKG'
 import pathlib
 import sys
@@ -29,10 +29,10 @@ package = tomllib.loads(pathlib.Path(sys.argv[1]).read_text())["package"]
 org = package["org"]
 name = package["name"]
 version = package["version"]
-print(f"{org}/{name}@={version} {version}")
+print(f"{org}/{name}@={version} {version} {org} {name}")
 PY_ZPKG
 )
-if [[ -z "$package_ref" || -z "$package_version" ]]; then
+if [[ -z "$package_ref" || -z "$package_version" || -z "$package_org" || -z "$package_name" ]]; then
   echo "could not derive the exact package coordinate from .zpkg.toml" >&2
   exit 2
 fi
@@ -66,7 +66,7 @@ author_home="$suite_root/author-home"
   ZED_PKG_HOME="$author_home" "$zed" r2g --r2g-root "$r2g_root"
 )
 
-roundtrip="$r2g_root/oresoftware-flags-2-env"
+roundtrip="$r2g_root/$package_org-$package_name"
 registry="$roundtrip/registry"
 if [[ ! -d "$registry" ]]; then
   echo "zed r2g did not create its file registry: $registry" >&2
@@ -188,7 +188,7 @@ install_layout() {
   )
 
   local modules="$expected/zed_modules"
-  local target="$modules/oresoftware/flags-2-env"
+  local target="$modules/$package_org/$package_name"
   local bin="$modules/.bin/flags2env"
   local contract="$target/.cli-flags.toml"
 
@@ -205,8 +205,8 @@ install_layout() {
   [[ ! -e "$expected/.zed/classpath" ]]
   [[ ! -e "$expected/.zed/go.work" ]]
   [[ ! -e "$expected/.zed/pythonpath" ]]
-  grep -Fq 'org = "oresoftware"' "$expected/.zpkg.lock"
-  grep -Fq 'name = "flags-2-env"' "$expected/.zpkg.lock"
+  grep -Fq "org = \"$package_org\"" "$expected/.zpkg.lock"
+  grep -Fq "name = \"$package_name\"" "$expected/.zpkg.lock"
   grep -Fq "version = \"$package_version\"" "$expected/.zpkg.lock"
 
   if [[ "$mode" == symlink ]]; then

@@ -21,7 +21,7 @@ defmodule Flags2Env.MixProject do
     [
       name: "flags2env_elixir",
       licenses: ["MIT"],
-      links: %{"GitHub" => "https://github.com/ORESoftware/flags-2-env"},
+      links: %{"GitHub" => "https://github.com/flags-2-env/flags-2-env"},
       files: [
         "lib.ex",
         "README.md",

@@ -1,13 +1,13 @@
 package = "flags2env"
 version = "0.1.0-1"
 source = {
-  url = "git+https://github.com/ORESoftware/flags-2-env.git",
+  url = "git+https://github.com/flags-2-env/flags-2-env.git",
   tag = "v0.1.0"
 }
 description = {
   summary = "LuaJIT bindings for flags2env",
   detailed = "Thin LuaJIT FFI bindings over the flags2env C ABI.",
-  homepage = "https://github.com/ORESoftware/flags-2-env",
+  homepage = "https://github.com/flags-2-env/flags-2-env",
   license = "MIT"
 }
 dependencies = {

@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/flags-2-env/flags-2-env/blob/main/docs/source-migration.schema.json",
+  "title": "flags-2-env source migration contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schemaVersion",
+    "canonical",
+    "compatibility",
+    "zedPackage",
+    "publicationOrder"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "source-migration.schema.json"
+    },
+    "schemaVersion": {
+      "const": "flags-2-env.source-migration.v1"
+    },
+    "canonical": {
+      "$ref": "#/$defs/canonicalRepository"
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "web",
+        "supportStartsOn",
+        "supportEndsOn",
+        "mode",
+        "mirroredRefs"
+      ],
+      "properties": {
+        "repository": {
+          "const": "https://github.com/ORESoftware/flags-2-env.git"
+        },
+        "web": {
+          "const": "https://github.com/ORESoftware/flags-2-env"
+        },
+        "supportStartsOn": {
+          "type": "string",
+          "format": "date"
+        },
+        "supportEndsOn": {
+          "type": "string",
+          "format": "date"
+        },
+        "mode": {
+          "const": "commit-identical-mirror"
+        },
+        "mirroredRefs": {
+          "const": [
+            "refs/heads/main",
+            "refs/tags/*"
+          ]
+        }
+      }
+    },
+    "zedPackage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "canonicalIdentity",
+        "compatibilityIdentity",
+        "aliasSupport",
+        "compatibilityPublishMode",
+        "repositoryAuthority"
+      ],
+      "properties": {
+        "version": {
+          "const": "0.3.0"
+        },
+        "canonicalIdentity": {
+          "const": "flags-2-env/flags-2-env"
+        },
+        "compatibilityIdentity": {
+          "const": "oresoftware/flags-2-env"
+        },
+        "aliasSupport": {
+          "const": "unavailable"
+        },
+        "compatibilityPublishMode": {
+          "const": "single-field-manifest-overlay"
+        },
+        "repositoryAuthority": {
+          "const": "canonical"
+        }
+      }
+    },
+    "publicationOrder": {
+      "const": [
+        "canonical",
+        "compatibility"
+      ]
+    }
+  },
+  "$defs": {
+    "canonicalRepository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "web"
+      ],
+      "properties": {
+        "repository": {
+          "const": "https://github.com/flags-2-env/flags-2-env.git"
+        },
+        "web": {
+          "const": "https://github.com/flags-2-env/flags-2-env"
+        }
+      }
+    }
+  }
+}

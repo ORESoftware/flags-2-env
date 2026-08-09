@@ -180,7 +180,7 @@ jobs:
       - name: Check out the canonical library at the commit under review
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          repository: ORESoftware/flags-2-env
+          repository: flags-2-env/flags-2-env
           ref: ${{ needs.prepare.outputs.tooling_ref }}
           path: library
           persist-credentials: false

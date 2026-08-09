@@ -13,6 +13,7 @@ on:
       - "clients/zsh/flags2env.zsh"
       - "scripts/verify-shell-contract.py"
       - "scripts/verify-zed-package.sh"
+      - "scripts/publish-zed-compatibility.sh"
       - "src/**"
       - "tests/flags-2-env-e2e.sh"
   push:
@@ -27,6 +28,7 @@ on:
       - "clients/zsh/flags2env.zsh"
       - "scripts/verify-shell-contract.py"
       - "scripts/verify-zed-package.sh"
+      - "scripts/publish-zed-compatibility.sh"
       - "src/**"
       - "tests/flags-2-env-e2e.sh"
   workflow_dispatch:

@@ -7,8 +7,8 @@ license: MIT
 license-file: LICENSE
 author: ORESoftware
 maintainer: ORESoftware
-homepage: https://github.com/ORESoftware/flags-2-env
-bug-reports: https://github.com/ORESoftware/flags-2-env/issues
+homepage: https://github.com/flags-2-env/flags-2-env
+bug-reports: https://github.com/flags-2-env/flags-2-env/issues
 build-type: Simple
 extra-source-files:
   LICENSE
