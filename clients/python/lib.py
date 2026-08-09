@@ -5,7 +5,13 @@ import json
 import os
 import platform
 import sys
+from pathlib import Path
 from typing import Mapping, MutableMapping, Sequence
+
+
+_CANONICAL_LIBRARY_NAMES = frozenset(
+    {"libflags2env.dylib", "libflags2env.so", "flags2env.dll"}
+)
 
 
 def _default_library_name() -> str:
@@ -17,8 +23,22 @@ def _default_library_name() -> str:
     return "libflags2env.so"
 
 
+def _resolve_library_path(library_path: str | None = None) -> str:
+    requested = library_path or os.environ.get("FLAGS2ENV_NATIVE_LIB") or _default_library_name()
+    requested_path = Path(requested)
+
+    if requested_path.is_file() or requested_path.name not in _CANONICAL_LIBRARY_NAMES:
+        return requested
+
+    platform_path = requested_path.with_name(_default_library_name())
+    if platform_path.is_file():
+        return str(platform_path)
+
+    return requested
+
+
 def _load_library(library_path: str | None = None) -> ctypes.CDLL:
-    resolved_path = library_path or os.environ.get("FLAGS2ENV_NATIVE_LIB") or _default_library_name()
+    resolved_path = _resolve_library_path(library_path)
     lib = ctypes.CDLL(resolved_path)
     lib.f2e_parse_json_argv.argtypes = [ctypes.c_char_p]
     lib.f2e_parse_json_argv.restype = ctypes.c_void_p
