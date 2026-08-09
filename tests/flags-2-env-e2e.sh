@@ -195,7 +195,7 @@ install_layout() {
     ZED_PKG_HOME="$consumer_home" \
     ZED_PKG_REGISTRY="$registry_url" \
       "$zed" install "$package_ref" \
-        --skip-manifest \
+        --allow-no-manifest \
         --allow-build \
         --adapter none \
         --install-mode "$mode"
@@ -284,7 +284,7 @@ install_layout() {
     ZED_PKG_REGISTRY="$registry_url" \
       "$zed" install \
         --frozen \
-        --skip-manifest \
+        --allow-no-manifest \
         --allow-build \
         --adapter none \
         --install-mode "$mode"
