@@ -66,7 +66,21 @@ author_home="$suite_root/author-home"
   ZED_PKG_HOME="$author_home" "$zed" r2g --r2g-root "$r2g_root"
 )
 
-roundtrip="$r2g_root/$package_org-$package_name"
+roundtrip=""
+roundtrip_count=0
+while IFS= read -r candidate; do
+  roundtrip="$candidate"
+  roundtrip_count=$((roundtrip_count + 1))
+done < <(
+  find "$r2g_root" -mindepth 1 -maxdepth 1 -type d \
+    \( -name "$package_org-$package_name" -o -name "$package_org-$package_name-*" \) \
+    -print
+)
+if [[ "$roundtrip_count" -ne 1 ]]; then
+  printf 'expected one Zed r2g workspace for %s/%s, found %s\n' \
+    "$package_org" "$package_name" "$roundtrip_count" >&2
+  exit 1
+fi
 registry="$roundtrip/registry"
 if [[ ! -d "$registry" ]]; then
   echo "zed r2g did not create its file registry: $registry" >&2
