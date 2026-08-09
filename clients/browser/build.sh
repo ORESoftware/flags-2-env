@@ -15,6 +15,7 @@ emcc "$ROOT/src/parser.c" \
   -I"$ROOT/src" \
   -include "$ROOT/clients/browser/compat.h" \
   -std=c99 \
+  -Werror=implicit-function-declaration \
   -O2 \
   -DNDEBUG \
   -sMODULARIZE=1 \
