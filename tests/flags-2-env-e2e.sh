@@ -19,6 +19,24 @@ if [[ ! -f "$repo_root/.zpkg.toml" ]]; then
   exit 2
 fi
 
+read -r package_ref package_version < <(
+  python3 - "$repo_root/.zpkg.toml" <<'PY_ZPKG'
+import pathlib
+import sys
+import tomllib
+
+package = tomllib.loads(pathlib.Path(sys.argv[1]).read_text())["package"]
+org = package["org"]
+name = package["name"]
+version = package["version"]
+print(f"{org}/{name}@={version} {version}")
+PY_ZPKG
+)
+if [[ -z "$package_ref" || -z "$package_version" ]]; then
+  echo "could not derive the exact package coordinate from .zpkg.toml" >&2
+  exit 2
+fi
+
 remove_suite_root=false
 if [[ -n "${F2E_E2E_ROOT:-}" ]]; then
   suite_root=$F2E_E2E_ROOT
@@ -162,7 +180,7 @@ install_layout() {
     cd "$invocation"
     ZED_PKG_HOME="$consumer_home" \
     ZED_PKG_REGISTRY="$registry_url" \
-      "$zed" install 'oresoftware/flags-2-env@=0.1.0' \
+      "$zed" install "$package_ref" \
         --skip-manifest \
         --allow-build \
         --adapter none \
@@ -189,7 +207,7 @@ install_layout() {
   [[ ! -e "$expected/.zed/pythonpath" ]]
   grep -Fq 'org = "oresoftware"' "$expected/.zpkg.lock"
   grep -Fq 'name = "flags-2-env"' "$expected/.zpkg.lock"
-  grep -Fq 'version = "0.1.0"' "$expected/.zpkg.lock"
+  grep -Fq "version = \"$package_version\"" "$expected/.zpkg.lock"
 
   if [[ "$mode" == symlink ]]; then
     [[ -L "$target" ]]

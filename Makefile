@@ -29,6 +29,7 @@ PROCESS_SMOKE := $(BUILD_DIR)/process-smoke
 API_HARDENING := $(BUILD_DIR)/api-hardening
 ALLOCATION_FAILURE := $(BUILD_DIR)/allocation-failure
 TERMINAL_CONTEXT_TEST := $(BUILD_DIR)/terminal-context-test
+DOTENV_API_TEST := $(BUILD_DIR)/dotenv-api-test
 PARSER_OBJ := $(BUILD_DIR)/parser.o
 CONTEXT_OBJ := $(BUILD_DIR)/terminal_context.o
 LIB_OBJECTS := $(PARSER_OBJ) $(CONTEXT_OBJ)
@@ -63,11 +64,12 @@ cli: $(CLI)
 $(CLI): $(SRC) $(CONTEXT_SRC) $(CLI_SRC) $(HEADER) $(CONTEXT_HEADER) FORCE | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(SRC) $(CONTEXT_SRC) $(CLI_SRC) -o $@
 
-test: borrow-check readme-test parity-test $(PROCESS_SMOKE) $(API_HARDENING) $(ALLOCATION_FAILURE) $(TERMINAL_CONTEXT_TEST)
+test: borrow-check readme-test parity-test $(PROCESS_SMOKE) $(API_HARDENING) $(ALLOCATION_FAILURE) $(TERMINAL_CONTEXT_TEST) $(DOTENV_API_TEST)
 	./tests/run.sh
 	$(API_HARDENING)
 	$(ALLOCATION_FAILURE) tests/subcommands-deep/.cli-flags.toml
 	$(TERMINAL_CONTEXT_TEST)
+	$(DOTENV_API_TEST)
 	$(PROCESS_SMOKE) --port 7777 -d
 
 codegen-docker-test:
@@ -103,5 +105,37 @@ $(ALLOCATION_FAILURE): $(SRC) tests/allocation_failure.c $(HEADER) | $(BUILD_DIR
 $(TERMINAL_CONTEXT_TEST): $(CONTEXT_SRC) $(CONTEXT_HEADER) $(HEADER) tests/terminal_context.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -Isrc $(CONTEXT_SRC) tests/terminal_context.c -o $@
 
+$(DOTENV_API_TEST): $(SRC) tests/dotenv_api.c $(HEADER) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -Isrc $(SRC) tests/dotenv_api.c -o $@
+
 clean:
 	rm -rf $(BUILD_DIR)
+
+# DEN-2846: pinned prebuilt harness (staging output; artifacts commit in DEN-2848)
+PREBUILT_HARNESS := scripts/prebuilt/build.sh
+
+prebuilt-tier1:
+	$(PREBUILT_HARNESS) build tier1
+
+prebuilt-verify:
+	$(PREBUILT_HARNESS) verify tier1
+
+prebuilt-%:
+	$(PREBUILT_HARNESS) build $*
+
+.PHONY: prebuilt-tier1 prebuilt-verify
+
+# DEN-2847: manifest generation + deep verification (staging; artifacts commit in DEN-2848)
+PREBUILT_MANIFEST := scripts/prebuilt/manifest.py
+PREBUILT_STAGING := build/prebuilt-staging
+
+prebuilt-manifest: prebuilt-tier1
+	python3 $(PREBUILT_MANIFEST) generate --staging $(PREBUILT_STAGING) --out build/manifest.json
+
+prebuilt-manifest-verify: prebuilt-manifest
+	python3 $(PREBUILT_MANIFEST) verify --manifest build/manifest.json --artifact-root $(PREBUILT_STAGING)
+
+prebuilt-manifest-selftest: prebuilt-manifest
+	python3 $(PREBUILT_MANIFEST) self-test --manifest build/manifest.json --artifact-root $(PREBUILT_STAGING)
+
+.PHONY: prebuilt-manifest prebuilt-manifest-verify prebuilt-manifest-selftest

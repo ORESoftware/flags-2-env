@@ -1,0 +1,8 @@
+# values every dotenv test in tests/run.sh reads
+F2E_DOTENV_PORT=8080
+export F2E_DOTENV_HOST="db.internal"   # inline comment after a quoted value
+F2E_DOTENV_TOKEN='from-dotenv'
+F2E_DOTENV_DEBUG=true
+
+# undeclared keys never reach the parsed map
+F2E_DOTENV_UNDECLARED=ignored

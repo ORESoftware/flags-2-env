@@ -29,6 +29,39 @@ export F2E_FUZZ_FIXTURE="$ROOT_DIR/tests/subcommands-deep/.cli-flags.toml"
 export F2E_FUZZ_CONFIG="$WORK_DIR/fuzz-config.toml"
 export F2E_FUZZ_ENV="$WORK_DIR/fuzz.env"
 
+# ./.env is only ever read from the working directory, so the harness chdirs
+# into a scratch directory of its own and writes the fuzzed file there
+export F2E_FUZZ_DOTENV_CWD="$WORK_DIR/dotenv-cwd"
+export F2E_FUZZ_DOTENV_CONFIG="$WORK_DIR/dotenv-config.toml"
+mkdir -p "$F2E_FUZZ_DOTENV_CWD"
+cat > "$F2E_FUZZ_DOTENV_CONFIG" <<'TOML'
+[order-of-preference]
+F2E_FUZZ_STR = (env_file, env_shell, flags)
+F2E_FUZZ_INT = (env_shell, flags)
+F2E_FUZZ_JSON = [env_file, flags]
+
+[flags.str]
+env = "F2E_FUZZ_STR"
+aliases = ["str"]
+type = "string"
+
+[flags.int]
+env = "F2E_FUZZ_INT"
+aliases = ["int"]
+type = "integer"
+
+[flags.bool]
+env = "F2E_FUZZ_BOOL"
+aliases = ["bool"]
+type = "bool"
+dotenv_override = true
+
+[flags.json]
+env = "F2E_FUZZ_JSON"
+aliases = ["json"]
+type = "json"
+TOML
+
 set -- \
   -std=c99 \
   -O1 \

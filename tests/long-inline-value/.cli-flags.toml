@@ -1,0 +1,6 @@
+# Regression fixture: a long inline `--flag=value` must not be truncated.
+[flags.path]
+env = "F2E_LONG_PATH"
+aliases = ["path"]
+type = "string"
+help = "A filesystem path long enough to exceed the flag-name buffer."

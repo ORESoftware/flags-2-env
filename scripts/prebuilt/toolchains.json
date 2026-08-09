@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "comment": "Pinned toolchains for the DEN-2846 prebuilt harness. Drift fails the build; update via reviewed PR only.",
+  "zig": {
+    "version": "0.16.0"
+  },
+  "darwin": {
+    "compiler_id": "Apple clang version 21.0.0",
+    "sdk_version": "26.5"
+  }
+}

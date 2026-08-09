@@ -5,6 +5,9 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 struct CwdGuard(PathBuf);
 
@@ -255,7 +258,11 @@ default = "true"
 }
 
 fn temp_dir(label: &str) -> PathBuf {
-    let path = env::temp_dir().join(format!("flags2env-rust-{label}-{}", std::process::id()));
+    let sequence = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let path = env::temp_dir().join(format!(
+        "flags2env-rust-{label}-{}-{sequence}",
+        std::process::id()
+    ));
     let _ = fs::remove_dir_all(&path);
     fs::create_dir_all(&path).unwrap();
     path

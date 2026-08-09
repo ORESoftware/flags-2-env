@@ -1,7 +1,7 @@
 [package]
 org = "oresoftware"
 name = "flags-2-env"
-version = "0.1.0"
+version = "0.2.0"
 description = "Portable nested CLI flag-to-environment parser and polyglot bindings"
 license = "MIT"
 keywords = ["cli", "flags", "environment", "polyglot"]
@@ -22,6 +22,11 @@ exclude = [
   "clients/**/_build/**",
   "clients/**/build/**",
   "clients/**/target/**",
+  # generated client lockfiles: resolved locally, never a release input
+  "clients/dart/pubspec.lock",
+  "clients/rust/Cargo.lock",
+  # zed's own local pack staging directory
+  ".zed/**",
 ]
 
 [build]

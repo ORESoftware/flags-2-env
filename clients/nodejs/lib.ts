@@ -72,6 +72,15 @@ type NativeModule = {
 export type StructuredParseResult = {
   flags: EnvMap;
   providedFlags: EnvMap;
+  /**
+   * `./.env` values that lose to `process.env`, and the ones that win it,
+   * split so per-flag `dotenv_override` survives a flat merge:
+   * `{...dotenv, ...process.env, ...dotenvOverrides, ...providedFlags}`.
+   */
+  dotenv: EnvMap;
+  dotenvOverrides: EnvMap;
+  /** Resolved source order for each key that deviates from the default. */
+  sourceOrder: Record<string, string[]>;
   command: string;
   subcommands: string[];
   extras: string[];
@@ -181,11 +190,17 @@ export function parseFromArgs(argv: readonly unknown[] = process.argv, options: 
 }
 
 /**
- * Structured parse: {flags, providedFlags, command, subcommands, extras,
- * unknownOptions, errors} as separate channels (dashdash-style), so nothing
- * is packed into — or shadowed by — env keys. `flags` is the same
- * default-bearing map parse() returns; `providedFlags` contains only
- * argv-derived values and command markers.
+ * Structured parse: {flags, providedFlags, dotenv, dotenvOverrides, command,
+ * subcommands, extras, unknownOptions, errors} as separate channels
+ * (dashdash-style), so nothing is packed into — or shadowed by — env keys.
+ * `flags` is the same fully-resolved map parse() returns; `providedFlags`
+ * contains only argv-derived values and command markers. `dotenv` and
+ * `dotenvOverrides` split the ./.env values by their rank relative to
+ * process.env, so a re-ranked .env survives a flat merge:
+ * {...dotenv, ...process.env, ...dotenvOverrides, ...providedFlags}.
+ * That holds while `flags` outranks both env sources, which is the default.
+ * `sourceOrder` reports the resolved order for each key that deviates; if one
+ * ranks `flags` below an env source, use `flags` rather than the spread.
  */
 export function parseStructured(
   argv: readonly unknown[] = process.argv,

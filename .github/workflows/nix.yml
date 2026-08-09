@@ -13,6 +13,7 @@ on:
       - src/**
       - tests/**
       - scripts/**
+      - tools/borrow-checker/**
       - clients/nodejs/**
       - clients/python/**
       - clients/ruby/**
@@ -28,6 +29,7 @@ on:
       - src/**
       - tests/**
       - scripts/**
+      - tools/borrow-checker/**
       - clients/nodejs/**
       - clients/python/**
       - clients/ruby/**
