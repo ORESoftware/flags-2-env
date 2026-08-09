@@ -21,6 +21,7 @@ exclude = [
   "clients/**/.zig-cache/**",
   "clients/**/_build/**",
   "clients/**/build/**",
+  "clients/**/dist/**",
   "clients/**/target/**",
   # generated client lockfiles: resolved locally, never a release input
   "clients/dart/pubspec.lock",

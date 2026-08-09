@@ -3707,7 +3707,13 @@ static void f2e_dotenv_unquote(char *value) {
 static FILE *f2e_dotenv_fopen(const char *path) {
 /* the same platform triplet the rest of this file uses to decide whether the
    POSIX headers above were included */
-#if !defined(__APPLE__) && !defined(__unix__)
+#if defined(__EMSCRIPTEN__)
+  /* Browser callers provide inputs through Emscripten's isolated virtual
+     filesystem. Emscripten does not expose the POSIX fdopen() declaration in
+     strict C99 mode, so use the ISO C stream API for that virtual filesystem.
+     Native Unix builds retain the nonblocking open/fstat gate below. */
+  return fopen(path, "r");
+#elif !defined(__APPLE__) && !defined(__unix__)
   return fopen(path, "r");
 #else
   int flags = O_RDONLY | O_NONBLOCK;
