@@ -143,7 +143,7 @@ jobs:
           }
           $devcmd = Join-Path $installation "Common7\Tools\VsDevCmd.bat"
           New-Item -ItemType Directory -Force "build\windows" | Out-Null
-          $compile = "`"$devcmd`" -arch=x64 -host_arch=x64 && cl /nologo /std:c11 /W4 /D_CRT_SECURE_NO_WARNINGS src\parser.c src\main.c /Fe:build\windows\flags2env.exe shell32.lib"
+          $compile = "`"$devcmd`" -arch=x64 -host_arch=x64 && cl /nologo /std:c11 /W4 /D_CRT_SECURE_NO_WARNINGS src\parser.c src\terminal_context.c src\main.c /Fe:build\windows\flags2env.exe shell32.lib"
           & $env:COMSPEC /d /s /c $compile
           if ($LASTEXITCODE -ne 0) {
             throw "MSVC compilation failed with exit code $LASTEXITCODE"
