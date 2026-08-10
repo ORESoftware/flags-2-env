@@ -1298,7 +1298,7 @@ esac
 TTY_CONFIG="$ROOT_DIR/tests/requires-tty/.cli-flags.toml"
 
 tty_run() {
-  "$CLI" shell-env --config "$TTY_CONFIG" -- prog "$@"
+  "$CLI" shell-env --config "$TTY_CONFIG" -- prog "$@" || [ "$?" -eq 2 ]
 }
 
 # Refused: every spelling of setting it, including inside a short bundle.
@@ -1349,7 +1349,7 @@ esac
 # CI and TERM=dumb defeat a real terminal: nobody is there to answer.
 for hostile in "F2E_FORCE_CI=1" "TERM=dumb"; do
   blocked="$(env F2E_FORCE_STDIN_TTY=1 F2E_FORCE_STDERR_TTY=1 $hostile \
-    "$CLI" shell-env --config "$TTY_CONFIG" -- prog --interactive)"
+    "$CLI" shell-env --config "$TTY_CONFIG" -- prog --interactive)" || [ "$?" -eq 2 ]
   case "$blocked" in
     *"requires an interactive terminal"*) ;;
     *) printf '%s should defeat a terminal for requires_tty:\n%s\n' "$hostile" "$blocked" >&2; exit 1 ;;
