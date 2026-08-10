@@ -611,6 +611,7 @@ require_contains scripts/publish-homebrew.sh 'brew audit --strict --new --online
 require_contains scripts/publish-homebrew.sh 'FLAGS2ENV_HOMEBREW_AUDIT_TARGET'
 require_contains scripts/publish-homebrew.sh 'rev-parse "v\$VERSION'
 require_contains src/main.c 'shell-env'
+require_contains src/terminal_context.c 'f2e_terminal_context_json'
 require_contains clients/bash/LICENSE 'MIT License'
 require_contains clients/bash/README.md 'flags2env Bash'
 require_contains clients/bash/flags2env.bash 'flags2env_apply'

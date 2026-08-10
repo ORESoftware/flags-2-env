@@ -178,6 +178,158 @@ Set `[parse] allow_unknown = true`, pass `--allow-unknown`, or set `FLAGS2ENV_AL
 
 Add `help` or `description` on any flag to populate the generated help table. Add `[help] url = "https://..."` to print a support or docs URL under the `--help` menu. Use `[help] columns = ["options", "env", "description"]` to choose table columns, or `[help] exclude = ["default"]` to remove columns from the default set. `options` is always kept so every row still identifies the flag.
 
+## Which `.env` files are read
+
+By default `./.env` in the working directory is read if it is present, and
+nothing else — no upward walk, and no lookup beside an explicitly passed config
+path. `[env] files` changes that:
+
+```toml
+[env]
+files = [".env", ".env.local"]
+```
+
+The list **replaces** the default, and the files are read in order, so a later
+file's value wins for a key both define — `[".env", ".env.local"]` behaves the
+way the names suggest. Paths are relative to the working directory; a
+subdirectory such as `config/.env` is fine, but an absolute path or a `..`
+segment is an audit error rather than a silent fallback, because only the
+working directory is ever read.
+
+Declaring an empty list means read none at all:
+
+```toml
+[env]
+files = []          # same effect as `load = false`
+```
+
+`[env] load = false` and `FLAGS2ENV_DOTENV=0` still switch loading off
+entirely; the config declaration wins, because the environment variable can
+only turn loading off, never on.
+
+## Terminals
+
+Three behaviours depend on whether a terminal is attached, and all three are
+defined rather than incidental.
+
+### `requires_tty` — flags that need someone there
+
+A flag like `--interactive` is meaningless without a terminal, and a CLI that
+honours it anyway waits forever on input nobody can give — in CI, in cron, or on
+the far side of a pipe. Declare the requirement and flags2env refuses the flag
+instead:
+
+```toml
+[flags.interactive]
+env = "APP_INTERACTIVE"
+aliases = ["interactive"]
+type = "bool"
+requires_tty = true          # stdin and stderr, outside CI, not TERM=dumb
+
+[flags.progress]
+env = "APP_PROGRESS"
+aliases = ["progress"]
+type = "bool"
+requires_tty = "stdout"      # only stdout has to be a terminal
+```
+
+`requires_tty` accepts `true` (or `prompt`), `false`, `stdin`, `stdout`, and
+`stderr`. `true` mirrors `canPrompt` below: **stdin and stderr** must be
+terminals, outside CI, with `TERM` not `dumb`. Stdout is deliberately not
+required — data is often piped while the prompt stays on stderr.
+
+Refusal is reported through the normal errors channel, so every client already
+fails closed on it:
+
+```
+$ app --interactive | cat
+flags.interactive requires an interactive terminal; stdin and stderr must be a
+terminal, outside CI, with TERM set
+```
+
+Three deliberate details:
+
+- **Turning it off is always legal.** `--no-interactive` is exactly how a caller
+  says "do not prompt", so it never needs a terminal.
+- **Short bundles count.** `-qi` checks the `i` just as `--interactive` would.
+- **It applies to argv, not to the environment.** A value in the environment or
+  a `.env` is ambient configuration, not someone asking for a prompt right now,
+  and failing a CI job because `APP_INTERACTIVE` was inherited would be worse
+  than the problem. `flags2env doctor` warns when a `.env` sets a
+  `requires_tty` flag, so the bypass is visible rather than silent.
+
+A `requires_tty` value that is not one of the six spellings is an **audit
+error**, because a terminal check that silently is not one is worse than none.
+
+### `flags2env context` — what this process can see
+
+```sh
+$ flags2env context
+{ "stdinTty": true, "stdoutTty": false, "canPrompt": true, "outputMode": "plain", ... }
+```
+
+Run it where the real command runs to answer "why did my CLI refuse to prompt".
+`columns` is `null` when the terminal size is unknown — a pty with no window
+size set, for instance — so consumers must handle that.
+
+The `F2E_FORCE_STDIN_TTY`, `F2E_FORCE_STDOUT_TTY`, `F2E_FORCE_STDERR_TTY`, and
+`F2E_FORCE_CI` variables override detection, which is how the test suite pins
+this behaviour without allocating a pty.
+
+### Help table width
+
+| Situation | Width |
+|-----------|-------|
+| `COLUMNS` set to a value in 1–1000 | that value |
+| otherwise, stdout is a terminal | the terminal's width |
+| otherwise (piped, redirected, CI) | **80** |
+
+Clamped to 40–160 in every case. The last row is the one that matters: piped
+`--help` is byte-identical regardless of the terminal that launched it, so
+golden-file tests and diffs are stable. `COLUMNS` remains the explicit override
+for the cases that want something else.
+
+## `flags2env doctor`
+
+`audit` checks `.cli-flags.toml`, and `audit env` compares one `.env` against
+it. `doctor` answers the question you actually have when a value does not
+arrive — *is my `.env` being read, and does it say what I think it says?* It
+reads every file `[env] files` names (or `./.env`) and reports two classes of
+problem:
+
+```sh
+flags2env doctor                 # the discovered .cli-flags.toml
+flags2env doctor path/to/.cli-flags.toml
+```
+
+**Malformed** — lines the loader cannot use and silently skips today:
+
+```
+.env:4: APP_HOST has an unterminated quote, so the quote becomes part of the value
+.env:5: no "=", so this line is not an assignment and is skipped
+.env:6: "app-host" is not a valid environment variable name, so it is skipped
+.env:8: "export" with nothing after it
+```
+
+**Ambiguous** — lines that read as configuration but do something else, or
+nothing:
+
+```
+.env:3: APP_PORT was already assigned at line 2; the later value wins
+.env:7: TYPO_HOST is not declared by any [flags.*] env and is not in env.ignore, so it is read by nothing
+.env.local:1: APP_HOST is also set in .env:2; .env.local wins because it is read later
+.env is readable by group or other (mode 644); a .env usually holds secrets
+```
+
+Malformed lines are errors and exit non-zero, so `doctor` works as a pre-commit
+or CI gate. Ambiguity and permissions are warnings: worth seeing, not worth
+blocking a commit over. Keys listed in `[env] ignore` are not reported as
+undeclared.
+
+**Values are never printed** — only key names and positions. A `.env` holds
+secrets, and this report is exactly the kind of output that gets pasted into an
+issue.
+
 Ignore project-specific env keys during `.env` audits with an `[env]` table:
 
 ```toml
@@ -248,7 +400,7 @@ native package manifest:
 
 ```sh
 zed install flags-2-env/flags-2-env@^0.3 \
-  --allow-no-manifest \
+  --do-not-write-new-manifest \
   --allow-build \
   --adapter none
 zed run flags2env -- audit .cli-flags.toml
@@ -271,7 +423,7 @@ adapter = "none"
 
 Then run `zed install --allow-build`. Both install forms retain the native
 project structure, write an integrity-pinned `.zpkg.lock`, and support frozen
-reinstallation with `zed install --frozen --allow-no-manifest --allow-build
+reinstallation with `zed install --frozen --do-not-write-new-manifest --allow-build
 --adapter none` for manifestless consumers.
 
 Until the end of 2026-08-19, the compatibility coordinate

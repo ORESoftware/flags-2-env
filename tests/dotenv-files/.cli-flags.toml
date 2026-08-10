@@ -1,0 +1,13 @@
+# Fixture: [env] files reads several .env files, later ones winning.
+[env]
+files = [".env", ".env.local"]
+
+[flags.port]
+env = "F2E_FILES_PORT"
+aliases = ["port"]
+type = "integer"
+
+[flags.host]
+env = "F2E_FILES_HOST"
+aliases = ["host"]
+type = "string"
