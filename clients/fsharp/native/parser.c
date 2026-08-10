@@ -1,3 +1,7 @@
+#if defined(__linux__) && !defined(_XOPEN_SOURCE)
+#define _XOPEN_SOURCE 700
+#endif
+
 #if defined(__linux__) && !defined(_POSIX_C_SOURCE)
 #define _POSIX_C_SOURCE 200809L
 #endif
@@ -1594,7 +1598,8 @@ static int f2e_load_config(const char *config_path, F2EConfig *config) {
   F2EConfigSection section = F2E_SECTION_NONE;
   char line[F2E_MAX_LINE];
   char logical_line[F2E_MAX_LOGICAL_LINE];
-  while (fgets(line, sizeof(line), file)) {
+  int stream_exhausted = 0;
+  while (!stream_exhausted && fgets(line, sizeof(line), file)) {
     f2e_strip_comment(line);
     char *trimmed = f2e_trim(line);
     if (trimmed[0] == '\0') {
@@ -1608,6 +1613,7 @@ static int f2e_load_config(const char *config_path, F2EConfig *config) {
       while ((*logical_value == '[' || *logical_value == '(') &&
              !f2e_array_value_is_complete(logical_value)) {
         if (!fgets(line, sizeof(line), file)) {
+          stream_exhausted = 1;
           break;
         }
         f2e_strip_comment(line);
@@ -8454,8 +8460,6 @@ static char *f2e_coerce_report_from_config(const F2EConfig *config, const char *
                  !f2e_buffer_append_char(&output, ':') ||
                  !f2e_buffer_append_json_string(&output, input->text)) {
         errors.failed = 1;
-      } else {
-        wrote = 1;
       }
     }
   }
@@ -8529,7 +8533,6 @@ static void f2e_free_json_items(char **items, int count);
 static int f2e_parse_json_argv_items(const char *argv_json, char ***items, int *count) {
   const char *cursor = f2e_trim_left((char *)argv_json);
   int cap = 0;
-  int expecting_value = 1;
   int saw_value = 0;
   *items = NULL;
   *count = 0;
@@ -8542,7 +8545,7 @@ static int f2e_parse_json_argv_items(const char *argv_json, char ***items, int *
   while (*cursor) {
     cursor = f2e_trim_left((char *)cursor);
     if (*cursor == ']') {
-      return !saw_value || !expecting_value;
+      return !saw_value;
     }
 
     char value[F2E_MAX_VALUE];
@@ -8553,12 +8556,10 @@ static int f2e_parse_json_argv_items(const char *argv_json, char ***items, int *
       return 0;
     }
     saw_value = 1;
-    expecting_value = 0;
 
     cursor = f2e_trim_left((char *)cursor);
     if (*cursor == ',') {
       cursor++;
-      expecting_value = 1;
       continue;
     }
     if (*cursor == ']') {

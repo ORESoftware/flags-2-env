@@ -2,7 +2,7 @@
 set -eu
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-CLI="$ROOT_DIR/build/flags2env"
+CLI="${F2E_AUDIT_CLI:-$ROOT_DIR/build/flags2env}"
 
 if [ ! -x "$CLI" ]; then
   make -C "$ROOT_DIR" cli
@@ -86,6 +86,17 @@ while IFS= read -r file; do
       printf '::error file=%s::flags2env config audit failed\n' "$file"
     fi
   fi
+
+  case "$file" in
+    tests/doctor-findings/.cli-flags.toml)
+      # This fixture intentionally contains malformed, duplicate, and
+      # undeclared dotenv entries so `doctor` can prove it reports them without
+      # disclosing values. Its config is audited above; its synthetic dotenv is
+      # an expected-negative diagnostic corpus, not deployable environment.
+      printf 'cli-flags env audit: skipping expected-negative doctor fixture %s\n' "$file"
+      continue
+      ;;
+  esac
 
   env_path="$(dirname -- "$path")/.env"
   case "$file" in
