@@ -49,6 +49,8 @@
 #define F2E_SCOPE_LENIENT (-2)
 #define F2E_MAX_PAIRS (F2E_MAX_FLAGS + F2E_MAX_META_PAIRS + F2E_MAX_COMMANDS)
 #define F2E_MAX_ENV_FILE_KEYS 512
+#define F2E_MAX_DOTENV_FILES 16
+#define F2E_MAX_ENV_FILE_PATH 256
 #define F2E_DEFAULT_COMMAND_ENV "FLAGS2ENV_COMMAND"
 
 #define F2E_HELP_COL_OPTIONS (1u << 0)
@@ -143,8 +145,15 @@ typedef struct {
   char env_audit_ignored_keys[F2E_MAX_ENV_FILE_KEYS][F2E_MAX_ENV];
   size_t env_audit_ignored_count;
   int invalid_env_audit_ignore;
-  int dotenv_enabled;  /* read ./.env at parse time; default on */
+  int dotenv_enabled;  /* read the .env files at parse time; default on */
   int dotenv_override; /* default for flags that do not declare dotenv_override */
+  /* [env] files. Empty means the default single "./.env". Read in order, so a
+     later file's value replaces an earlier one's — `[".env", ".env.local"]`
+     reads the way the names suggest. */
+  char dotenv_files[F2E_MAX_DOTENV_FILES][F2E_MAX_ENV_FILE_PATH];
+  size_t dotenv_file_count;
+  int dotenv_files_set;   /* the table declared the key, even if the list was empty */
+  int invalid_dotenv_files; /* a malformed list, or a path that escapes the cwd */
   F2EEnvOrder env_orders[F2E_MAX_FLAGS]; /* [order-of-preference] entries */
   size_t env_order_count;
   F2ESourceOrder default_order; /* [env] order, applied to unlisted keys */
@@ -160,6 +169,8 @@ typedef struct {
   int invalid_help_columns;
   int invalid_help_exclude_columns;
 } F2EConfig;
+
+static int f2e_dotenv_path_containment(const char *relative_path);
 
 typedef struct {
   char key[F2E_MAX_ENV];
@@ -961,6 +972,106 @@ static int f2e_add_env_key_to_list(char keys[][F2E_MAX_ENV], size_t *key_count, 
   return 1;
 }
 
+/*
+ * Is `path` safe to read as a .env file?
+ *
+ * The contract has always been that only the working directory is consulted:
+ * no upward walk, and no lookup beside an explicitly passed config path. A list
+ * of files must not become a way around that, so a path may name a
+ * subdirectory but never climb out of the tree or start from the filesystem
+ * root. Otherwise `[env] files = ["../../.env"]` in a checked-in config would
+ * read a file the project does not own.
+ */
+static int f2e_dotenv_path_is_safe(const char *path) {
+  if (!path || path[0] == '\0') {
+    return 0;
+  }
+  if (path[0] == '/' || path[0] == '\\') {
+    return 0; /* absolute */
+  }
+  if (isalpha((unsigned char)path[0]) && path[1] == ':') {
+    return 0; /* windows drive-qualified */
+  }
+
+  /* Reject any ".." segment rather than trying to resolve the path: a
+     canonicalizing check would have to follow symlinks, and refusing the
+     spelling outright is both simpler and easier to explain. */
+  const char *cursor = path;
+  while (*cursor) {
+    const char *segment_end = cursor;
+    while (*segment_end && *segment_end != '/' && *segment_end != '\\') {
+      segment_end++;
+    }
+    size_t length = (size_t)(segment_end - cursor);
+    if (length == 2 && cursor[0] == '.' && cursor[1] == '.') {
+      return 0;
+    }
+    cursor = *segment_end ? segment_end + 1 : segment_end;
+  }
+  return 1;
+}
+
+/*
+ * Parses `[env] files = [".env", ".env.local"]` into `paths`.
+ *
+ * Returns 0 on a malformed list or an unsafe path, in which case the caller
+ * records the problem and the audit reports it — a config whose .env list
+ * cannot be read must not quietly fall back to the default file.
+ */
+static int f2e_parse_dotenv_file_list(char paths[][F2E_MAX_ENV_FILE_PATH], size_t *path_count,
+                                      const char *value) {
+  *path_count = 0;
+  const char *cursor = f2e_trim_left((char *)value);
+  if (*cursor != '[') {
+    return 0;
+  }
+  cursor++;
+
+  while (*cursor) {
+    cursor = f2e_trim_left((char *)cursor);
+    if (*cursor == ']') {
+      cursor = f2e_trim_left((char *)cursor + 1);
+      return *cursor == '\0';
+    }
+    char quote = *cursor;
+    if (quote != '"' && quote != '\'') {
+      return 0;
+    }
+    cursor++;
+
+    char entry[F2E_MAX_ENV_FILE_PATH];
+    size_t length = 0;
+    while (*cursor && *cursor != quote) {
+      if (length + 1 >= sizeof(entry)) {
+        return 0;
+      }
+      entry[length++] = *cursor++;
+    }
+    if (*cursor != quote) {
+      return 0;
+    }
+    cursor++;
+    entry[length] = '\0';
+
+    if (!f2e_dotenv_path_is_safe(entry)) {
+      return 0;
+    }
+    if (*path_count >= F2E_MAX_DOTENV_FILES) {
+      return 0;
+    }
+    f2e_strlcpy(paths[*path_count], entry, F2E_MAX_ENV_FILE_PATH);
+    (*path_count)++;
+
+    cursor = f2e_trim_left((char *)cursor);
+    if (*cursor == ',') {
+      cursor++;
+    } else if (*cursor != ']') {
+      return 0;
+    }
+  }
+  return 0; /* unterminated */
+}
+
 static int f2e_parse_env_key_list(char keys[][F2E_MAX_ENV], size_t *key_count, const char *value) {
   size_t original_count = key_count ? *key_count : 0;
   const char *cursor = f2e_trim_left((char *)value);
@@ -1684,6 +1795,20 @@ static int f2e_load_config(const char *config_path, F2EConfig *config) {
                                     &config->env_audit_ignored_count,
                                     value)) {
           config->invalid_env_audit_ignore = 1;
+        }
+      } else if (f2e_streq(key, "files") ||
+                 f2e_streq(key, "file") ||
+                 f2e_streq(key, "dotenv_files") ||
+                 f2e_streq(key, "env_files") ||
+                 f2e_streq(key, "paths")) {
+        /* Declaring the key at all is meaningful: `files = []` means "read no
+           .env at all", which is not the same as leaving the key out. */
+        config->dotenv_files_set = 1;
+        if (!f2e_parse_dotenv_file_list(config->dotenv_files,
+                                        &config->dotenv_file_count,
+                                        value)) {
+          config->invalid_dotenv_files = 1;
+          config->dotenv_file_count = 0;
         }
       } else if (f2e_streq(key, "load") ||
                  f2e_streq(key, "load_dotenv") ||
@@ -3056,6 +3181,22 @@ static void f2e_audit_config_semantics(const F2EConfig *config, F2EAudit *audit)
   if (config->invalid_env_audit_ignore) {
     f2e_audit_add(audit, 1, "env.ignore must be a list of env var names");
   }
+  if (config->invalid_dotenv_files) {
+    /* An error, not a warning: the config asked for specific .env files and
+       none of them will be read, so every value in them is silently missing. */
+    f2e_audit_add(audit, 1,
+                  "env.files must be a list of paths inside the working directory "
+                  "(no absolute paths and no \"..\" segments)");
+  }
+  if (config->dotenv_files_set && !config->invalid_dotenv_files) {
+    for (size_t i = 0; i < config->dotenv_file_count; i++) {
+      if (f2e_dotenv_path_containment(config->dotenv_files[i]) == 0) {
+        f2e_audit_add(audit, 1,
+                      "env.files path \"%s\" resolves outside the working directory",
+                      config->dotenv_files[i]);
+      }
+    }
+  }
   for (size_t i = 0; i < config->env_audit_ignored_count; i++) {
     if (!f2e_env_name_is_valid(config->env_audit_ignored_keys[i])) {
       f2e_audit_add(audit, 1, "env.ignore contains invalid env var name \"%s\"",
@@ -3595,6 +3736,98 @@ static char *f2e_cwd_path(const char *file_name) {
   return path;
 }
 
+static int f2e_path_char_equal(char left, char right, int fold_case) {
+  if (fold_case) {
+    return tolower((unsigned char)left) == tolower((unsigned char)right);
+  }
+  return left == right;
+}
+
+static int f2e_path_is_within_root(const char *root, const char *path,
+                                   int fold_case) {
+  if (!root || !path || root[0] == '\0' || path[0] == '\0') {
+    return 0;
+  }
+  size_t root_len = strlen(root);
+  for (size_t i = 0; i < root_len; i++) {
+    if (path[i] == '\0' || !f2e_path_char_equal(root[i], path[i], fold_case)) {
+      return 0;
+    }
+  }
+  if (path[root_len] == '\0') {
+    return 1;
+  }
+  if (root[root_len - 1] == '/' || root[root_len - 1] == '\\') {
+    return 1;
+  }
+  return path[root_len] == '/' || path[root_len] == '\\';
+}
+
+/* Returns 1 when an existing explicit dotenv path resolves inside the physical
+   working directory, 0 when it resolves outside, and -1 when it cannot yet be
+   resolved (for example because the explicitly listed file is missing). */
+static int f2e_dotenv_path_containment(const char *relative_path) {
+  char *candidate = f2e_cwd_path(relative_path);
+  if (!candidate) {
+    return -1;
+  }
+
+#if defined(_WIN32)
+  char cwd[PATH_MAX];
+  if (GetCurrentDirectoryA((DWORD)sizeof(cwd), cwd) == 0) {
+    free(candidate);
+    return -1;
+  }
+  HANDLE root_handle = CreateFileA(
+      cwd, FILE_READ_ATTRIBUTES,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
+      OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+  HANDLE path_handle = CreateFileA(
+      candidate, FILE_READ_ATTRIBUTES,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
+      OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+  free(candidate);
+  if (root_handle == INVALID_HANDLE_VALUE || path_handle == INVALID_HANDLE_VALUE) {
+    if (root_handle != INVALID_HANDLE_VALUE) {
+      CloseHandle(root_handle);
+    }
+    if (path_handle != INVALID_HANDLE_VALUE) {
+      CloseHandle(path_handle);
+    }
+    return -1;
+  }
+  char resolved_root[PATH_MAX];
+  char resolved_path[PATH_MAX];
+  DWORD root_len = GetFinalPathNameByHandleA(
+      root_handle, resolved_root, (DWORD)sizeof(resolved_root), FILE_NAME_NORMALIZED);
+  DWORD path_len = GetFinalPathNameByHandleA(
+      path_handle, resolved_path, (DWORD)sizeof(resolved_path), FILE_NAME_NORMALIZED);
+  CloseHandle(root_handle);
+  CloseHandle(path_handle);
+  if (root_len == 0 || path_len == 0 || root_len >= sizeof(resolved_root) ||
+      path_len >= sizeof(resolved_path)) {
+    return -1;
+  }
+  return f2e_path_is_within_root(resolved_root, resolved_path, 1);
+#elif defined(__APPLE__) || (defined(__unix__) && !defined(__EMSCRIPTEN__))
+  char cwd[PATH_MAX];
+  char resolved_root[PATH_MAX];
+  char resolved_path[PATH_MAX];
+  if (!getcwd(cwd, sizeof(cwd)) || !realpath(cwd, resolved_root) ||
+      !realpath(candidate, resolved_path)) {
+    free(candidate);
+    return -1;
+  }
+  free(candidate);
+  return f2e_path_is_within_root(resolved_root, resolved_path, 0);
+#else
+  /* Emscripten's isolated virtual filesystem has no host filesystem escape.
+     The lexical absolute/parent-segment gate remains authoritative there. */
+  free(candidate);
+  return 1;
+#endif
+}
+
 static const F2EFlag *f2e_flag_declaring_env(const F2EConfig *config, const char *key) {
   if (!config || !key || key[0] == '\0') {
     return NULL;
@@ -3739,11 +3972,36 @@ static FILE *f2e_dotenv_fopen(const char *path) {
 #endif
 }
 
-/* Reads ./.env into `dotenv`. Returns 0 when there is no readable ./.env. */
-static int f2e_dotenv_load(F2EDotEnv *dotenv, const F2EConfig *config) {
-  memset(dotenv, 0, sizeof(*dotenv));
+/*
+ * The .env files this config reads, in order.
+ *
+ * `[env] files` replaces the default entirely, so a config that lists
+ * `[".env.shared", ".env"]` reads exactly those two. Declaring an empty list
+ * means "read none", which is why `dotenv_files_set` is consulted rather than
+ * just the count.
+ */
+static size_t f2e_dotenv_file_count(const F2EConfig *config) {
+  if (config && config->dotenv_files_set) {
+    return config->dotenv_file_count;
+  }
+  return 1; /* the implicit "./.env" */
+}
 
-  char *path = f2e_cwd_path(".env");
+static const char *f2e_dotenv_file_at(const F2EConfig *config, size_t index) {
+  if (config && config->dotenv_files_set) {
+    return index < config->dotenv_file_count ? config->dotenv_files[index] : NULL;
+  }
+  return index == 0 ? ".env" : NULL;
+}
+
+/* Reads one .env file into `dotenv`. Returns 0 when it is not readable. */
+static int f2e_dotenv_load_one(F2EDotEnv *dotenv, const F2EConfig *config,
+                               const char *relative_path) {
+  if (config && config->dotenv_files_set &&
+      f2e_dotenv_path_containment(relative_path) != 1) {
+    return 0;
+  }
+  char *path = f2e_cwd_path(relative_path);
   if (!path) {
     return 0;
   }
@@ -3803,6 +4061,28 @@ static int f2e_dotenv_load(F2EDotEnv *dotenv, const F2EConfig *config) {
 
   fclose(file);
   return 1;
+}
+
+/*
+ * Reads every configured .env file into `dotenv`. Returns 0 when none of them
+ * were readable, which keeps the "no .env present" path exactly as it was.
+ *
+ * Files are read in declaration order and `f2e_dotenv_store` overwrites, so a
+ * later file wins for a key both define — the order the list is written in is
+ * the order a reader expects it to apply.
+ */
+static int f2e_dotenv_load(F2EDotEnv *dotenv, const F2EConfig *config) {
+  memset(dotenv, 0, sizeof(*dotenv));
+
+  size_t count = f2e_dotenv_file_count(config);
+  int loaded_any = 0;
+  for (size_t i = 0; i < count; i++) {
+    const char *path = f2e_dotenv_file_at(config, i);
+    if (path && f2e_dotenv_load_one(dotenv, config, path)) {
+      loaded_any = 1;
+    }
+  }
+  return loaded_any;
 }
 
 /*
@@ -8363,4 +8643,357 @@ char *f2e_parse_json_argv(const char *argv_json) {
 
 void f2e_free(char *value) {
   free(value);
+}
+
+/* ==========================================================================
+ * doctor — diagnose the .env files a config reads
+ *
+ * `audit` checks .cli-flags.toml and `audit env` compares one .env file
+ * against it. Neither answers the question an operator actually has when a
+ * value does not arrive: "is my .env being read, and does it say what I think
+ * it says?"
+ *
+ * So doctor re-reads every file in `[env] files` (default `./.env`) with line
+ * numbers and no filtering, and reports two classes of problem:
+ *
+ *   malformed  a line the loader cannot use, and silently skips today
+ *   ambiguous  a line whose effect is not what the file appears to say
+ *
+ * The second class is the interesting one. A key assigned twice, a key set in
+ * two files, or a key no flag declares are all readable-looking lines that do
+ * nothing, or do something other than they look like.
+ *
+ * Values are never quoted back. A .env is where secrets live, and doctor's
+ * output is exactly the kind of thing that gets pasted into an issue.
+ * ========================================================================== */
+
+typedef struct {
+  char key[F2E_MAX_ENV];
+  char file[F2E_MAX_ENV_FILE_PATH];
+  int line;
+} F2EDoctorSeen;
+
+typedef struct {
+  F2EDoctorSeen entries[F2E_MAX_ENV_FILE_KEYS];
+  size_t count;
+} F2EDoctorSeenSet;
+
+static int f2e_doctor_is_ignored(const F2EConfig *config, const char *key) {
+  for (size_t i = 0; i < config->env_audit_ignored_count; i++) {
+    if (f2e_streq(config->env_audit_ignored_keys[i], key)) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+/*
+ * Is the value's quoting closed?
+ *
+ * The loader's unquoting treats an unterminated quote as an ordinary
+ * character, so `KEY="oops` silently yields a value with a leading quote. That
+ * is precisely the sort of line a reader would swear is fine.
+ */
+static int f2e_doctor_quotes_are_closed(const char *value) {
+  const char *cursor = f2e_trim_left((char *)value);
+  char quote = *cursor;
+  if (quote != '"' && quote != '\'') {
+    return 1;
+  }
+  cursor++;
+  while (*cursor) {
+    if (quote == '"' && *cursor == '\\' && cursor[1]) {
+      cursor += 2;
+      continue;
+    }
+    if (*cursor == quote) {
+      return 1;
+    }
+    cursor++;
+  }
+  return 0;
+}
+
+/* Reports POSIX permissions that let other users read a secrets file. */
+static void f2e_doctor_check_permissions(F2EAudit *audit, const char *path,
+                                         const char *display) {
+#if defined(__unix__) || defined(__APPLE__)
+  struct stat info;
+  if (stat(path, &info) != 0) {
+    return;
+  }
+  if (info.st_mode & (S_IRGRP | S_IROTH)) {
+    f2e_audit_add(audit, 0,
+                  "%s is readable by group or other (mode %03o); a .env usually holds secrets",
+                  display, (unsigned)(info.st_mode & 0777));
+  }
+#else
+  (void)audit;
+  (void)path;
+  (void)display;
+#endif
+}
+
+/* Scans one .env file, recording findings against `audit`. */
+static void f2e_doctor_scan_file(F2EAudit *audit, const F2EConfig *config,
+                                 const char *relative_path, F2EDoctorSeenSet *seen,
+                                 int declared_explicitly) {
+  if (declared_explicitly && f2e_dotenv_path_containment(relative_path) == 0) {
+    f2e_audit_add(audit, 1,
+                  "%s resolves outside the working directory and is not read",
+                  relative_path);
+    return;
+  }
+  char *path = f2e_cwd_path(relative_path);
+  if (!path) {
+    return;
+  }
+
+  FILE *file = f2e_dotenv_fopen(path);
+  if (!file) {
+    /* A missing default ./.env is the normal case and says nothing. A file the
+       config explicitly named is different: someone expects it to be read. */
+    if (declared_explicitly) {
+      f2e_audit_add(audit, 0,
+                    "%s is listed in env.files but was not readable "
+                    "(missing, a directory, or a symlink to a non-regular file)",
+                    relative_path);
+    }
+    free(path);
+    return;
+  }
+
+  f2e_doctor_check_permissions(audit, path, relative_path);
+  free(path);
+
+  char line[F2E_MAX_LINE];
+  int line_number = 0;
+  int first_line = 1;
+  int continuing = 0;
+
+  while (fgets(line, sizeof(line), file)) {
+    size_t chunk = strlen(line);
+    int completed = memchr(line, '\n', chunk) != NULL || chunk < sizeof(line) - 1;
+
+    if (continuing) {
+      /* The tail of an over-long line. The loader drops it, so the value is
+         already truncated; the error was reported when the line started. */
+      continuing = !completed;
+      continue;
+    }
+    continuing = !completed;
+    line_number++;
+
+    if (!completed) {
+      f2e_audit_add(audit, 1,
+                    "%s:%d: line is longer than %d bytes and its value is truncated",
+                    relative_path, line_number, (int)sizeof(line) - 1);
+    }
+
+    char *raw = line;
+    if (first_line) {
+      first_line = 0;
+      if ((unsigned char)raw[0] == 0xEF && (unsigned char)raw[1] == 0xBB &&
+          (unsigned char)raw[2] == 0xBF) {
+        raw += 3;
+      }
+    } else if ((unsigned char)raw[0] == 0xEF && (unsigned char)raw[1] == 0xBB &&
+               (unsigned char)raw[2] == 0xBF) {
+      f2e_audit_add(audit, 1,
+                    "%s:%d: a UTF-8 byte-order mark appears mid-file and makes this key unreadable",
+                    relative_path, line_number);
+      raw += 3;
+    }
+
+    char *trimmed = f2e_trim(raw);
+    if (trimmed[0] == '\0' || trimmed[0] == '#') {
+      continue;
+    }
+
+    if (strncmp(trimmed, "export", 6) == 0 &&
+        (trimmed[6] == '\0' || isspace((unsigned char)trimmed[6]))) {
+      /* A bare `export` is its own mistake, and reporting it as "no =" would
+         send the reader looking for a missing value rather than a missing key.
+         Note the loader only strips `export` when whitespace follows, so a
+         bare one is skipped as an unparseable line either way. */
+      trimmed = f2e_trim_left(trimmed + 6);
+      if (trimmed[0] == '\0') {
+        f2e_audit_add(audit, 1, "%s:%d: \"export\" with nothing after it",
+                      relative_path, line_number);
+        continue;
+      }
+    }
+
+    char *eq = strchr(trimmed, '=');
+    if (!eq) {
+      f2e_audit_add(audit, 1,
+                    "%s:%d: no \"=\", so this line is not an assignment and is skipped",
+                    relative_path, line_number);
+      continue;
+    }
+
+    *eq = '\0';
+    char *key = f2e_trim(trimmed);
+    char *value = f2e_trim(eq + 1);
+
+    if (key[0] == '\0') {
+      f2e_audit_add(audit, 1, "%s:%d: assignment with an empty name",
+                    relative_path, line_number);
+      continue;
+    }
+    if (!f2e_env_key_is_valid(key)) {
+      /* The key is named, never the value: the name is the diagnosis. */
+      f2e_audit_add(audit, 1,
+                    "%s:%d: \"%s\" is not a valid environment variable name, so it is skipped",
+                    relative_path, line_number, key);
+      continue;
+    }
+    if (!f2e_doctor_quotes_are_closed(value)) {
+      f2e_audit_add(audit, 1,
+                    "%s:%d: %s has an unterminated quote, so the quote becomes part of the value",
+                    relative_path, line_number, key);
+    }
+
+    /* Ambiguity: the same key assigned more than once, here or in an earlier
+       file. Either way the last one silently wins. */
+    F2EDoctorSeen *previous = NULL;
+    for (size_t i = 0; i < seen->count; i++) {
+      if (!f2e_streq(seen->entries[i].key, key)) {
+        continue;
+      }
+      previous = &seen->entries[i];
+      if (f2e_streq(previous->file, relative_path)) {
+        f2e_audit_add(audit, 0,
+                      "%s:%d: %s was already assigned at line %d; the later value wins",
+                      relative_path, line_number, key, previous->line);
+      } else {
+        f2e_audit_add(audit, 0,
+                      "%s:%d: %s is also set in %s:%d; %s wins because it is read later",
+                      relative_path, line_number, key, previous->file,
+                      previous->line, relative_path);
+      }
+      break;
+    }
+
+    if (!previous && seen->count < F2E_MAX_ENV_FILE_KEYS) {
+      previous = &seen->entries[seen->count++];
+      f2e_strlcpy(previous->key, key, sizeof(previous->key));
+    }
+    if (previous) {
+      f2e_strlcpy(previous->file, relative_path, sizeof(previous->file));
+      previous->line = line_number;
+    }
+
+    /* Ambiguity: a key nothing declares. The file says it is configuration;
+       the parser will never look at it. */
+    if (!f2e_flag_declaring_env(config, key) && !f2e_doctor_is_ignored(config, key)) {
+      f2e_audit_add(audit, 0,
+                    "%s:%d: %s is not declared by any [flags.*] env and is not in env.ignore, "
+                    "so it is read by nothing",
+                    relative_path, line_number, key);
+    }
+  }
+
+  fclose(file);
+}
+
+static char *f2e_doctor_from_file_impl(const char *config_path, int *status_out) {
+  F2EAudit audit;
+  if (!f2e_audit_init(&audit)) {
+    if (status_out) {
+      *status_out = 1;
+    }
+    return f2e_empty_json_object();
+  }
+
+  F2EConfig *config = (F2EConfig *)malloc(sizeof(F2EConfig));
+  if (!config) {
+    f2e_audit_add(&audit, 1, "doctor allocation failed");
+    return f2e_audit_report(&audit, status_out);
+  }
+
+  if (!config_path || config_path[0] == '\0') {
+    f2e_audit_add(&audit, 1, "config path is empty");
+    free(config);
+    return f2e_audit_report(&audit, status_out);
+  }
+  if (!f2e_load_config(config_path, config)) {
+    f2e_audit_add(&audit, 1, "could not read config \"%s\"", config_path);
+    free(config);
+    return f2e_audit_report(&audit, status_out);
+  }
+
+  if (config->invalid_dotenv_files) {
+    f2e_audit_add(&audit, 1,
+                  "env.files is not a list of paths inside the working directory, "
+                  "so no .env file is read");
+    free(config);
+    return f2e_audit_report(&audit, status_out);
+  }
+
+  if (!config->dotenv_enabled) {
+    /* Not a finding: the config said so. Saying it out loud is the point,
+       because "my .env is ignored" is the symptom that brings people here. */
+    f2e_audit_add(&audit, 0,
+                  "env.load is false, so no .env file is read at all");
+    free(config);
+    return f2e_audit_report(&audit, status_out);
+  }
+  if (config->dotenv_files_set && config->dotenv_file_count == 0) {
+    f2e_audit_add(&audit, 0,
+                  "env.files is empty, so no .env file is read at all");
+    free(config);
+    return f2e_audit_report(&audit, status_out);
+  }
+
+  F2EDoctorSeenSet *seen = (F2EDoctorSeenSet *)malloc(sizeof(F2EDoctorSeenSet));
+  if (!seen) {
+    f2e_audit_add(&audit, 1, "doctor allocation failed");
+    free(config);
+    return f2e_audit_report(&audit, status_out);
+  }
+  seen->count = 0;
+
+  size_t count = f2e_dotenv_file_count(config);
+  for (size_t i = 0; i < count; i++) {
+    const char *path = f2e_dotenv_file_at(config, i);
+    if (path) {
+      f2e_doctor_scan_file(&audit, config, path, seen, config->dotenv_files_set);
+    }
+  }
+
+  free(seen);
+  free(config);
+  return f2e_audit_report(&audit, status_out);
+}
+
+char *f2e_doctor_from_file(const char *config_path) {
+  return f2e_doctor_from_file_impl(config_path, NULL);
+}
+
+char *f2e_doctor(void) {
+  char *path = f2e_default_config_path();
+  if (!path) {
+    return f2e_audit_error_report("no usable .cli-flags.toml found before HOME", NULL);
+  }
+  char *result = f2e_doctor_from_file(path);
+  free(path);
+  return result;
+}
+
+int f2e_doctor_status_from_file(const char *config_path) {
+  int status = 1;
+  char *report = f2e_doctor_from_file_impl(config_path, &status);
+  free(report);
+  return status;
+}
+
+int f2e_doctor_status(void) {
+  char *path = f2e_default_config_path();
+  if (!path) {
+    return 1;
+  }
+  int status = f2e_doctor_status_from_file(path);
+  free(path);
+  return status;
 }

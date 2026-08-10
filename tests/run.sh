@@ -17,6 +17,8 @@ tests/env-audit-drift
 tests/env-audit-clean
 tests/env-audit-ignore
 tests/dotenv-global-override
+tests/doctor-findings
+tests/dotenv-files
 "
 
 cleanup_test_state() {
@@ -24,6 +26,7 @@ cleanup_test_state() {
   for fixture_dir in $MATERIALIZED_DOTENV_DIRS; do
     rm -f "$ROOT_DIR/$fixture_dir/.env"
   done
+  rm -f "$ROOT_DIR/tests/dotenv-files/.env.local"
 }
 trap cleanup_test_state EXIT
 trap 'cleanup_test_state; exit 130' HUP INT TERM
@@ -34,6 +37,8 @@ trap 'cleanup_test_state; exit 130' HUP INT TERM
 for fixture_dir in $MATERIALIZED_DOTENV_DIRS; do
   cp "$ROOT_DIR/$fixture_dir/fixture.dotenv" "$ROOT_DIR/$fixture_dir/.env"
 done
+cp "$ROOT_DIR/tests/dotenv-files/fixture.local.dotenv" \
+  "$ROOT_DIR/tests/dotenv-files/.env.local"
 
 run_case() {
   expected="$1"
@@ -1214,5 +1219,73 @@ if [ "$separated" != "$inline" ]; then
   printf 'Inline and separated forms disagree:\nInline:    %s\nSeparated: %s\n' "$inline" "$separated" >&2
   exit 1
 fi
+
+# [env] files: several .env files, read in order, later ones winning.
+FILES_DIR="$ROOT_DIR/tests/dotenv-files"
+files_output="$(cd "$FILES_DIR" && "$CLI" shell-env --config .cli-flags.toml -- prog)"
+case "$files_output" in
+  *"export F2E_FILES_PORT='3000'"*) ;;
+  *) printf 'env.files did not read the first file:\n%s\n' "$files_output" >&2; exit 1 ;;
+esac
+case "$files_output" in
+  *"export F2E_FILES_HOST='override'"*) ;;
+  *) printf 'env.files: the later file should win:\n%s\n' "$files_output" >&2; exit 1 ;;
+esac
+
+# A path that escapes the working directory is an audit error, not a silent
+# fallback to ./.env -- the contract is that only the cwd is read.
+UNSAFE_DIR="$(mktemp -d)"
+printf '[env]\nfiles = ["../.env"]\n\n[flags.a]\nenv = "F2E_UNSAFE_A"\naliases = ["a"]\ntype = "string"\n' \
+  > "$UNSAFE_DIR/.cli-flags.toml"
+set +e
+unsafe_report="$("$CLI" audit "$UNSAFE_DIR/.cli-flags.toml")"
+unsafe_status=$?
+set -e
+rm -rf "$UNSAFE_DIR"
+if [ "$unsafe_status" -eq 0 ]; then
+  printf 'env.files with a ".." segment should fail the audit:\n%s\n' "$unsafe_report" >&2
+  exit 1
+fi
+case "$unsafe_report" in
+  *"env.files must be a list of paths inside the working directory"*) ;;
+  *) printf 'unexpected env.files audit message:\n%s\n' "$unsafe_report" >&2; exit 1 ;;
+esac
+
+# doctor: malformed lines are errors, ambiguous ones are warnings, and a key
+# listed in [env] ignore is neither.
+DOCTOR_DIR="$ROOT_DIR/tests/doctor-findings"
+set +e
+doctor_report="$(cd "$DOCTOR_DIR" && "$CLI" doctor .cli-flags.toml)"
+doctor_status=$?
+set -e
+if [ "$doctor_status" -eq 0 ]; then
+  printf 'doctor should exit non-zero on malformed .env lines:\n%s\n' "$doctor_report" >&2
+  exit 1
+fi
+for expected in \
+  'has an unterminated quote' \
+  'no \"=\"' \
+  'is not a valid environment variable name' \
+  'was already assigned at line 2' \
+  'F2E_DOCTOR_UNDECLARED is not declared'; do
+  case "$doctor_report" in
+    *"$expected"*) ;;
+    *) printf 'doctor did not report %s:\n%s\n' "$expected" "$doctor_report" >&2; exit 1 ;;
+  esac
+done
+# An [env] ignore entry is deliberately not reported as undeclared.
+case "$doctor_report" in
+  *"F2E_DOCTOR_IGNORED is not declared"*)
+    printf 'doctor reported an env.ignore key as undeclared:\n%s\n' "$doctor_report" >&2
+    exit 1 ;;
+  *) ;;
+esac
+# Values never appear in the report: a .env holds secrets.
+case "$doctor_report" in
+  *second*|*nope*)
+    printf 'doctor echoed a .env value:\n%s\n' "$doctor_report" >&2
+    exit 1 ;;
+  *) ;;
+esac
 
 printf 'flags2env tests passed\n'

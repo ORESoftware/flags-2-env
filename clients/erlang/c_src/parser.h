@@ -33,7 +33,7 @@ const char *f2e_version(void);
  * A value can come from three sources, ranked highest first by default:
  *   flags      argv
  *   env_shell  the live process environment
- *   env_file   ./.env in the process working directory
+ *   env_file   the .env files in the working directory ([env] files)
  * Below all three sits the [flags.*] default declared in .cli-flags.toml.
  *
  * .cli-flags.toml can re-rank the sources per env key, including ranking argv
@@ -50,9 +50,16 @@ const char *f2e_version(void);
  * config-wide default, and [flags.*] dotenv_override = true / [env] override
  * = true remain as shorthands for lifting env_file over env_shell.
  *
- * Only ./.env is read: no upward walk, and no lookup next to an explicitly
- * passed config path. A ./.env symlink is followed, but only when it resolves
- * to a regular file. Only [flags.*] env keys are taken from it. Parse-derived
+ * ./.env is read by default: no upward walk, and no lookup next to an
+ * explicitly passed config path. [env] files = [".env", ".env.local"] replaces
+ * that default; the files are read in order, so a later one wins for a key both
+ * define. Paths are relative to the working directory and may name a
+ * subdirectory, but an absolute path or a ".." segment is an audit error rather
+ * than a silent fallback -- a list of files must not become a way out of the
+ * working directory. An empty list reads nothing. Symlinks named by an
+ * explicit list are followed only when their final target remains inside the
+ * physical working directory and is a regular file. Only [flags.*] env keys
+ * are taken from dotenv files. Parse-derived
  * keys -- the command path, per-command markers, positionals, unknown options,
  * and parse errors -- are never read from .env or the environment, so neither
  * can forge them. Set FLAGS2ENV_DOTENV=0 or [env] load = false to skip .env
@@ -214,6 +221,29 @@ char *f2e_coerce_json_from_file(const char *config_path, const char *values_json
  */
 char *f2e_audit_env_file(void) F2E_OWNED_RESULT;
 char *f2e_audit_env_file_from_file(const char *config_path, const char *env_path) F2E_OWNED_RESULT;
+
+/*
+ * Diagnoses the .env files this config reads: every file in [env] files, or
+ * ./.env when the key is absent.
+ *
+ * Reports two classes of problem. Malformed lines are ones the loader cannot
+ * use and silently skips -- no '=', an invalid name, an unterminated quote, a
+ * value past the line buffer, a stray byte-order mark. Ambiguous lines are the
+ * more interesting class: a key assigned twice, a key set in two files, or a
+ * key no [flags.*] declares. Each of those reads as configuration and is
+ * either ignored or quietly overridden.
+ *
+ * Values are never included in the output, only key names and positions: a
+ * .env holds secrets and this report is made to be pasted into an issue.
+ *
+ * Returns the same shape as f2e_audit_config: a heap-allocated JSON object
+ * {"ok",...,"errors":[],"warnings":[]}. Call f2e_free() on the result.
+ * f2e_doctor_status* returns 0 when there are no errors.
+ */
+char *f2e_doctor(void) F2E_OWNED_RESULT;
+char *f2e_doctor_from_file(const char *config_path) F2E_OWNED_RESULT;
+int f2e_doctor_status(void) F2E_WARN_UNUSED_RESULT;
+int f2e_doctor_status_from_file(const char *config_path) F2E_WARN_UNUSED_RESULT;
 int f2e_audit_env_file_status(void) F2E_WARN_UNUSED_RESULT;
 int f2e_audit_env_file_status_from_file(const char *config_path, const char *env_path) F2E_WARN_UNUSED_RESULT;
 

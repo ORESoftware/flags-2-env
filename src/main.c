@@ -580,12 +580,22 @@ static int f2e_cli_print_owned(char *value, const char *fallback) {
   return ok ? 0 : 1;
 }
 
+/* Audit-family reports have one authoritative JSON result. Derive the CLI
+   status from that same immutable result instead of reopening and rescanning
+   mutable config or dotenv files through the separate status-only API. */
+static int f2e_cli_audit_report_status(const char *report) {
+  static const char ok_prefix[] = "{\"ok\":true,";
+  return report && strncmp(report, ok_prefix, sizeof(ok_prefix) - 1) == 0 ? 0 : 1;
+}
+
 static const char *f2e_cli_help_command_name(int argc, const char *const argv[]) {
   if (argc >= 2 && argv[1] && argv[1][0] != '-' &&
       !f2e_cli_streq(argv[1], "audit") &&
       !f2e_cli_streq(argv[1], "completion") &&
       !f2e_cli_streq(argv[1], "completions") &&
       !f2e_cli_streq(argv[1], "autocomplete") &&
+      !f2e_cli_streq(argv[1], "doctor") &&
+      !f2e_cli_streq(argv[1], "diagnose") &&
       !f2e_cli_streq(argv[1], "env-audit") &&
       !f2e_cli_streq(argv[1], "audit-env") &&
       !f2e_cli_streq(argv[1], "env-check") &&
@@ -600,11 +610,30 @@ static const char *f2e_cli_help_command_name(int argc, const char *const argv[])
 
 static int f2e_cli_run_audit(const char *config_path) {
   char *report = config_path ? f2e_audit_config_from_file(config_path) : f2e_audit_config();
-  int status = config_path ? f2e_audit_config_status_from_file(config_path) : f2e_audit_config_status();
   if (!report) {
     f2e_cli_stdout_line_locked("{\"ok\":false,\"errors\":[\"audit failed\"]}");
     return 1;
   }
+  int status = f2e_cli_audit_report_status(report);
+  int ok = f2e_cli_stdout_line_locked(report);
+  f2e_free(report);
+  return ok ? status : 1;
+}
+
+/*
+ * `flags2env doctor [config]` — diagnose the .env files the config reads.
+ *
+ * Exits non-zero on an error-level finding, so it works as a pre-commit or CI
+ * gate. Warnings (ambiguity, permissions) are reported without failing: they
+ * are worth seeing but not worth blocking a commit over.
+ */
+static int f2e_cli_run_doctor(const char *config_path) {
+  char *report = config_path ? f2e_doctor_from_file(config_path) : f2e_doctor();
+  if (!report) {
+    f2e_cli_stdout_line_locked("{\"ok\":false,\"errors\":[\"doctor failed\"]}");
+    return 1;
+  }
+  int status = f2e_cli_audit_report_status(report);
   int ok = f2e_cli_stdout_line_locked(report);
   f2e_free(report);
   return ok ? status : 1;
@@ -612,11 +641,11 @@ static int f2e_cli_run_audit(const char *config_path) {
 
 static int f2e_cli_run_env_audit(const char *config_path, const char *env_path) {
   char *report = config_path ? f2e_audit_env_file_from_file(config_path, env_path) : f2e_audit_env_file();
-  int status = config_path ? f2e_audit_env_file_status_from_file(config_path, env_path) : f2e_audit_env_file_status();
   if (!report) {
     f2e_cli_stdout_line_locked("{\"ok\":false,\"errors\":[\"env audit failed\"]}");
     return 1;
   }
+  int status = f2e_cli_audit_report_status(report);
   int ok = f2e_cli_stdout_line_locked(report);
   f2e_free(report);
   return ok ? status : 1;
@@ -805,6 +834,12 @@ int main(int argc, const char *const argv[]) {
       return f2e_cli_run_audit(argc >= 4 ? argv[3] : NULL);
     }
     return f2e_cli_run_audit(argc >= 3 ? argv[2] : NULL);
+  }
+
+  if (argc >= 2 && (f2e_cli_streq(argv[1], "doctor") ||
+                    f2e_cli_streq(argv[1], "diagnose") ||
+                    f2e_cli_streq(argv[1], "--doctor"))) {
+    return f2e_cli_run_doctor(argc >= 3 ? argv[2] : NULL);
   }
 
   if (argc >= 2 && (f2e_cli_streq(argv[1], "env-audit") ||
