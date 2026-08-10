@@ -34,6 +34,15 @@
 #include <shellapi.h>
 #endif
 
+/*
+ * Some single-translation-unit harnesses include parser.c after their own
+ * system headers. Feature-test macros are necessarily too late in that form,
+ * so keep the XSI realpath declaration available at the actual call site too.
+ */
+#if (defined(__APPLE__) || defined(__unix__)) && !defined(__EMSCRIPTEN__)
+extern char *realpath(const char *restrict path, char *restrict resolved_path);
+#endif
+
 #ifndef PATH_MAX
 #define PATH_MAX 4096
 #endif
