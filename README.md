@@ -207,6 +207,88 @@ files = []          # same effect as `load = false`
 entirely; the config declaration wins, because the environment variable can
 only turn loading off, never on.
 
+## Terminals
+
+Three behaviours depend on whether a terminal is attached, and all three are
+defined rather than incidental.
+
+### `requires_tty` — flags that need someone there
+
+A flag like `--interactive` is meaningless without a terminal, and a CLI that
+honours it anyway waits forever on input nobody can give — in CI, in cron, or on
+the far side of a pipe. Declare the requirement and flags2env refuses the flag
+instead:
+
+```toml
+[flags.interactive]
+env = "APP_INTERACTIVE"
+aliases = ["interactive"]
+type = "bool"
+requires_tty = true          # stdin and stderr, outside CI, not TERM=dumb
+
+[flags.progress]
+env = "APP_PROGRESS"
+aliases = ["progress"]
+type = "bool"
+requires_tty = "stdout"      # only stdout has to be a terminal
+```
+
+`requires_tty` accepts `true` (or `prompt`), `false`, `stdin`, `stdout`, and
+`stderr`. `true` mirrors `canPrompt` below: **stdin and stderr** must be
+terminals, outside CI, with `TERM` not `dumb`. Stdout is deliberately not
+required — data is often piped while the prompt stays on stderr.
+
+Refusal is reported through the normal errors channel, so every client already
+fails closed on it:
+
+```
+$ app --interactive | cat
+flags.interactive requires an interactive terminal; stdin and stderr must be a
+terminal, outside CI, with TERM set
+```
+
+Three deliberate details:
+
+- **Turning it off is always legal.** `--no-interactive` is exactly how a caller
+  says "do not prompt", so it never needs a terminal.
+- **Short bundles count.** `-qi` checks the `i` just as `--interactive` would.
+- **It applies to argv, not to the environment.** A value in the environment or
+  a `.env` is ambient configuration, not someone asking for a prompt right now,
+  and failing a CI job because `APP_INTERACTIVE` was inherited would be worse
+  than the problem. `flags2env doctor` warns when a `.env` sets a
+  `requires_tty` flag, so the bypass is visible rather than silent.
+
+A `requires_tty` value that is not one of the six spellings is an **audit
+error**, because a terminal check that silently is not one is worse than none.
+
+### `flags2env context` — what this process can see
+
+```sh
+$ flags2env context
+{ "stdinTty": true, "stdoutTty": false, "canPrompt": true, "outputMode": "plain", ... }
+```
+
+Run it where the real command runs to answer "why did my CLI refuse to prompt".
+`columns` is `null` when the terminal size is unknown — a pty with no window
+size set, for instance — so consumers must handle that.
+
+The `F2E_FORCE_STDIN_TTY`, `F2E_FORCE_STDOUT_TTY`, `F2E_FORCE_STDERR_TTY`, and
+`F2E_FORCE_CI` variables override detection, which is how the test suite pins
+this behaviour without allocating a pty.
+
+### Help table width
+
+| Situation | Width |
+|-----------|-------|
+| `COLUMNS` set to a value in 1–1000 | that value |
+| otherwise, stdout is a terminal | the terminal's width |
+| otherwise (piped, redirected, CI) | **80** |
+
+Clamped to 40–160 in every case. The last row is the one that matters: piped
+`--help` is byte-identical regardless of the terminal that launched it, so
+golden-file tests and diffs are stable. `COLUMNS` remains the explicit override
+for the cases that want something else.
+
 ## `flags2env doctor`
 
 `audit` checks `.cli-flags.toml`, and `audit env` compares one `.env` against

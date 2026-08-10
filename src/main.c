@@ -3,6 +3,7 @@
 #endif
 
 #include "parser.h"
+#include "terminal_context.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -323,6 +324,75 @@ static int f2e_cli_emit_shell_exports(const char *json) {
   return 0;
 }
 
+/*
+ * shell-env is commonly evaluated by a caller, so parse failures must remain
+ * visible without ever turning diagnostic text into executable shell syntax.
+ * A single-quoted no-op preserves the exact message for humans and automation
+ * while keeping every byte inert when the output is sourced.
+ */
+static int f2e_cli_emit_structured_errors(const char *json) {
+  const char marker[] = ",\"errors\":";
+  const char *field = NULL;
+  const char *search = json;
+  while (search && (search = strstr(search, marker)) != NULL) {
+    field = search;
+    search += sizeof(marker) - 1;
+  }
+  if (!field) {
+    return -1;
+  }
+
+  const char *cursor = field + sizeof(marker) - 1;
+  f2e_cli_json_skip_ws(&cursor);
+  if (*cursor != '[') {
+    return -1;
+  }
+  cursor++;
+  f2e_cli_json_skip_ws(&cursor);
+  if (*cursor == ']') {
+    return 0;
+  }
+
+  int count = 0;
+  while (*cursor) {
+    char *message = f2e_cli_parse_json_string(&cursor);
+    if (!message) {
+      return -1;
+    }
+    char *quoted = f2e_cli_shell_quote(message);
+    free(message);
+    if (!quoted) {
+      return -1;
+    }
+    size_t line_len = strlen(": ") + strlen(quoted);
+    char *line = (char *)malloc(line_len + 1);
+    if (!line) {
+      free(quoted);
+      return -1;
+    }
+    snprintf(line, line_len + 1, ": %s", quoted);
+    int printed = f2e_cli_stdout_line_locked(line);
+    free(line);
+    free(quoted);
+    if (!printed) {
+      return -1;
+    }
+    count++;
+
+    f2e_cli_json_skip_ws(&cursor);
+    if (*cursor == ',') {
+      cursor++;
+      f2e_cli_json_skip_ws(&cursor);
+      continue;
+    }
+    if (*cursor == ']') {
+      return count;
+    }
+    return -1;
+  }
+  return -1;
+}
+
 static int f2e_cli_mkdir_p(const char *path) {
   if (!path || path[0] == '\0') {
     return 0;
@@ -594,6 +664,8 @@ static const char *f2e_cli_help_command_name(int argc, const char *const argv[])
       !f2e_cli_streq(argv[1], "completion") &&
       !f2e_cli_streq(argv[1], "completions") &&
       !f2e_cli_streq(argv[1], "autocomplete") &&
+      !f2e_cli_streq(argv[1], "context") &&
+      !f2e_cli_streq(argv[1], "terminal-context") &&
       !f2e_cli_streq(argv[1], "doctor") &&
       !f2e_cli_streq(argv[1], "diagnose") &&
       !f2e_cli_streq(argv[1], "env-audit") &&
@@ -637,6 +709,25 @@ static int f2e_cli_run_doctor(const char *config_path) {
   int ok = f2e_cli_stdout_line_locked(report);
   f2e_free(report);
   return ok ? status : 1;
+}
+
+/*
+ * `flags2env context` — print the terminal context this process sees.
+ *
+ * The detection already drives `requires_tty` and the help table width, but it
+ * was reachable only from C. Printing it is how someone answers "why did my
+ * CLI refuse to prompt" without attaching a debugger: run it in the same place
+ * the real command runs and read canPrompt.
+ */
+static int f2e_cli_run_context(void) {
+  char *report = f2e_terminal_context_json();
+  if (!report) {
+    f2e_cli_stderr_locked("%s", "flags2env: could not read the terminal context\n");
+    return 1;
+  }
+  int ok = f2e_cli_stdout_line_locked(report);
+  f2e_free(report);
+  return ok ? 0 : 1;
 }
 
 static int f2e_cli_run_env_audit(const char *config_path, const char *env_path) {
@@ -799,9 +890,24 @@ static int f2e_cli_run_shell_env(int argc, const char *const argv[]) {
     break;
   }
 
-  char *json = config_path ? f2e_parse_from_file(config_path, argc - arg_start, argv + arg_start)
-                           : f2e_parse(argc - arg_start, argv + arg_start);
-  int ok = f2e_cli_emit_shell_exports(json);
+  char *json = config_path
+                   ? f2e_parse_structured_from_file(config_path, argc - arg_start,
+                                                    argv + arg_start)
+                   : f2e_parse_structured(argc - arg_start, argv + arg_start);
+  if (!json) {
+    f2e_cli_stderr_locked("%s", "flags2env: could not parse flags\n");
+    return 1;
+  }
+
+  int errors = f2e_cli_emit_structured_errors(json);
+  if (errors > 0) {
+    f2e_free(json);
+    return 2;
+  }
+
+  const char flags_prefix[] = "{\"flags\":";
+  int ok = errors == 0 && strncmp(json, flags_prefix, sizeof(flags_prefix) - 1) == 0 &&
+           f2e_cli_emit_shell_exports(json + sizeof(flags_prefix) - 1);
   f2e_free(json);
   if (!ok) {
     f2e_cli_stderr_locked("%s", "flags2env: could not render shell exports\n");
@@ -834,6 +940,11 @@ int main(int argc, const char *const argv[]) {
       return f2e_cli_run_audit(argc >= 4 ? argv[3] : NULL);
     }
     return f2e_cli_run_audit(argc >= 3 ? argv[2] : NULL);
+  }
+
+  if (argc >= 2 && (f2e_cli_streq(argv[1], "context") ||
+                    f2e_cli_streq(argv[1], "terminal-context"))) {
+    return f2e_cli_run_context();
   }
 
   if (argc >= 2 && (f2e_cli_streq(argv[1], "doctor") ||

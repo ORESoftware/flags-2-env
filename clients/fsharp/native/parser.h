@@ -68,6 +68,31 @@ const char *f2e_version(void);
  */
 
 /*
+ * [flags.*] requires_tty declares that a flag only means something with a
+ * terminal attached:
+ *
+ *   requires_tty = true      stdin and stderr, outside CI, TERM not "dumb"
+ *   requires_tty = "stdin"   that stream specifically
+ *   requires_tty = "stdout"
+ *   requires_tty = "stderr"
+ *
+ * When argv sets such a flag and the requirement is unmet, the flag is not
+ * applied and the reason is appended to the errors channel, so callers fail
+ * closed on it the same way they do on an invalid value. Setting a boolean to
+ * false (--no-interactive) never requires a terminal: that is how a caller
+ * says "do not prompt".
+ *
+ * Enforcement is argv-only. A value from the environment or a .env is ambient
+ * configuration rather than someone asking for a prompt now, and failing on an
+ * inherited variable would be worse than the problem it prevents; f2e_doctor
+ * reports .env values for these flags instead.
+ *
+ * The detection lives in parser.c rather than terminal_context.c because this
+ * file must stay compilable as a single translation unit. The two agree, and
+ * tests/run.sh asserts it under the same F2E_FORCE_* overrides.
+ */
+
+/*
  * Parses argv using the nearest .cli-flags.toml found by walking upward from
  * the current working directory. Refuses to use $HOME/.cli-flags.toml. Returns
  * a heap-allocated JSON object string. Call f2e_free() with the returned pointer.

@@ -25,6 +25,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #elif defined(_WIN32)
+#include <io.h>
 #include <windows.h>
 #include <shellapi.h>
 #endif
@@ -49,6 +50,13 @@
 #define F2E_SCOPE_LENIENT (-2)
 #define F2E_MAX_PAIRS (F2E_MAX_FLAGS + F2E_MAX_META_PAIRS + F2E_MAX_COMMANDS)
 #define F2E_MAX_ENV_FILE_KEYS 512
+/* [flags.*] requires_tty */
+#define F2E_TTY_NONE 0
+#define F2E_TTY_PROMPT 1
+#define F2E_TTY_STDIN 2
+#define F2E_TTY_STDOUT 3
+#define F2E_TTY_STDERR 4
+
 #define F2E_MAX_DOTENV_FILES 16
 #define F2E_MAX_ENV_FILE_PATH 256
 #define F2E_DEFAULT_COMMAND_ENV "FLAGS2ENV_COMMAND"
@@ -113,6 +121,13 @@ typedef struct {
   char help[F2E_MAX_VALUE];
   int dotenv_override;     /* this key's .env value outranks the live environment */
   int dotenv_override_set; /* the flag declared it, so [env] override does not apply */
+  /* requires_tty: the flag only means something with a terminal attached.
+     F2E_TTY_NONE when undeclared; otherwise the stream that must be a tty, or
+     F2E_TTY_PROMPT for "can actually prompt" (stdin + stderr, not CI, not
+     dumb). Enforced when the flag is set, so `--interactive` in CI is a parse
+     error rather than a process that blocks on input nobody can supply. */
+  int requires_tty;
+  int invalid_requires_tty;
   int command; /* index into F2EConfig.commands; F2E_SCOPE_ROOT for global flags */
 } F2EFlag;
 
@@ -1923,6 +1938,27 @@ static int f2e_load_config(const char *config_path, F2EConfig *config) {
         current->has_default = 1;
         f2e_strlcpy(current->default_value, parsed, sizeof(current->default_value));
       }
+    } else if (f2e_streq(key, "requires_tty") ||
+               f2e_streq(key, "requires_terminal") ||
+               f2e_streq(key, "needs_tty")) {
+      char parsed[F2E_MAX_VALUE];
+      if (!f2e_parse_bare_value(value, parsed, sizeof(parsed))) {
+        current->invalid_requires_tty = 1;
+      } else if (f2e_streq(parsed, "true") || f2e_streq(parsed, "prompt")) {
+        /* The useful default: `--interactive` wants to ask a question, which
+           needs somewhere to ask and someone to answer. */
+        current->requires_tty = F2E_TTY_PROMPT;
+      } else if (f2e_streq(parsed, "false")) {
+        current->requires_tty = F2E_TTY_NONE;
+      } else if (f2e_streq(parsed, "stdin")) {
+        current->requires_tty = F2E_TTY_STDIN;
+      } else if (f2e_streq(parsed, "stdout")) {
+        current->requires_tty = F2E_TTY_STDOUT;
+      } else if (f2e_streq(parsed, "stderr")) {
+        current->requires_tty = F2E_TTY_STDERR;
+      } else {
+        current->invalid_requires_tty = 1;
+      }
     } else if (f2e_streq(key, "dotenv_override") ||
                f2e_streq(key, "env_file_override") ||
                f2e_streq(key, "env_file_wins")) {
@@ -2588,23 +2624,204 @@ static void f2e_report_invalid_value(F2EJsonList *errors, const F2EFlag *flag, c
   f2e_json_list_append(errors, message);
 }
 
+/*
+ * TTY detection for requires_tty.
+ *
+ * Deliberately implemented here rather than called from terminal_context.c:
+ * parser.c is compiled on its own by the Rust build script, the README
+ * snippet tests, and the other client bindings, so it cannot depend on a
+ * second translation unit. The two must agree, and tests/run.sh asserts they
+ * do under the same F2E_FORCE_* settings rather than trusting them to.
+ */
+static int f2e_tty_ascii_equal_ci(const char *left, const char *right) {
+  if (!left || !right) {
+    return 0;
+  }
+  while (*left && *right) {
+    if (tolower((unsigned char)*left) != tolower((unsigned char)*right)) {
+      return 0;
+    }
+    left++;
+    right++;
+  }
+  return *left == '\0' && *right == '\0';
+}
+
+static int f2e_tty_value_truthy(const char *value) {
+  if (!value || !*value) {
+    return 0;
+  }
+  return !(f2e_tty_ascii_equal_ci(value, "0") ||
+           f2e_tty_ascii_equal_ci(value, "false") ||
+           f2e_tty_ascii_equal_ci(value, "no") ||
+           f2e_tty_ascii_equal_ci(value, "off") ||
+           f2e_tty_ascii_equal_ci(value, "never"));
+}
+
+static int f2e_tty_forced(const char *name, int detected) {
+  const char *value = getenv(name);
+  if (!value || value[0] == '\0' || f2e_tty_ascii_equal_ci(value, "auto")) {
+    return detected;
+  }
+  return f2e_tty_value_truthy(value);
+}
+
+#if defined(_WIN32)
+#define F2E_STDIN_FD 0
+#define F2E_STDOUT_FD 1
+#define F2E_STDERR_FD 2
+#else
+#define F2E_STDIN_FD STDIN_FILENO
+#define F2E_STDOUT_FD STDOUT_FILENO
+#define F2E_STDERR_FD STDERR_FILENO
+#endif
+
+static int f2e_tty_fd_is_tty(int fd) {
+#if defined(_WIN32)
+  return _isatty(fd) != 0;
+#elif defined(__unix__) || defined(__APPLE__)
+  return isatty(fd) != 0;
+#else
+  (void)fd;
+  return 0;
+#endif
+}
+
+static int f2e_tty_stdin(void) {
+  return f2e_tty_forced("F2E_FORCE_STDIN_TTY", f2e_tty_fd_is_tty(F2E_STDIN_FD));
+}
+
+static int f2e_tty_stdout(void) {
+  return f2e_tty_forced("F2E_FORCE_STDOUT_TTY", f2e_tty_fd_is_tty(F2E_STDOUT_FD));
+}
+
+static int f2e_tty_stderr(void) {
+  return f2e_tty_forced("F2E_FORCE_STDERR_TTY", f2e_tty_fd_is_tty(F2E_STDERR_FD));
+}
+
+/* Mirrors terminal_context.c, including false-like marker values. */
+static int f2e_tty_ci(void) {
+  static const char *names[] = {"CI", "CONTINUOUS_INTEGRATION", "BUILD_NUMBER",
+                                "GITHUB_ACTIONS", "GITLAB_CI", "BUILDKITE",
+                                "CIRCLECI", "TEAMCITY_VERSION", "TF_BUILD",
+                                "JENKINS_URL", "BUILD_BUILDID"};
+  for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+    if (f2e_tty_value_truthy(getenv(names[i]))) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int f2e_tty_dumb(void) {
+  return f2e_tty_ascii_equal_ci(getenv("TERM"), "dumb");
+}
+
+/* Terminal stdin and stderr, outside CI, not dumb. Stdout may be redirected:
+   data can be piped while the prompt stays on stderr. */
+static int f2e_tty_can_prompt(void) {
+  return f2e_tty_forced("F2E_FORCE_CI", f2e_tty_ci()) ? 0
+         : f2e_tty_dumb()                            ? 0
+                                                     : (f2e_tty_stdin() && f2e_tty_stderr());
+}
+
+/*
+ * Enforces [flags.*] requires_tty for a flag that argv actually set.
+ *
+ * The failure this prevents is a CLI that waits forever on input nobody can
+ * give: `--interactive` in a CI job, a cron entry, or the far side of a pipe.
+ * Reporting it through the same errors channel invalid values use means every
+ * client already fails closed on it -- no new plumbing, and no client that
+ * silently ignores the finding.
+ *
+ * Only a *truthy* boolean triggers it. `--no-interactive` is exactly how a
+ * caller says "do not prompt", so it must stay legal without a terminal.
+ */
+static int f2e_check_requires_tty(const F2EFlag *flag, const char *normalized,
+                                  F2EJsonList *errors) {
+  if (flag->requires_tty == F2E_TTY_NONE) {
+    return 1;
+  }
+  if (flag->type == F2E_TYPE_BOOL && normalized && f2e_streq(normalized, "false")) {
+    return 1;
+  }
+
+  const char *stream = NULL;
+  int available = 0;
+  switch (flag->requires_tty) {
+    case F2E_TTY_STDIN:
+      stream = "stdin";
+      available = f2e_tty_stdin();
+      break;
+    case F2E_TTY_STDOUT:
+      stream = "stdout";
+      available = f2e_tty_stdout();
+      break;
+    case F2E_TTY_STDERR:
+      stream = "stderr";
+      available = f2e_tty_stderr();
+      break;
+    default:
+      stream = NULL;
+      available = f2e_tty_can_prompt();
+      break;
+  }
+  if (available) {
+    return 1;
+  }
+
+  char message[512];
+  if (stream) {
+    snprintf(message, sizeof(message),
+             "flags.%s requires a terminal on %s, which is not attached",
+             f2e_audit_flag_name(flag), stream);
+  } else {
+    /* Deliberately vague about *which* precondition failed: stdin, stderr, CI,
+       and TERM=dumb all mean the same thing to the caller -- nobody is there
+       to answer -- and naming one invites working around it. */
+    snprintf(message, sizeof(message),
+             "flags.%s requires an interactive terminal; stdin and stderr must be a "
+             "terminal, outside CI, with TERM set",
+             f2e_audit_flag_name(flag));
+  }
+  f2e_json_list_append(errors, message);
+  return 0;
+}
+
 static int f2e_try_set_flag_value(F2EFlag *flag, F2EPair *pairs, size_t pair_count, const char *value, F2EJsonList *errors) {
   char normalized[F2E_MAX_VALUE];
   if (!f2e_normalize_flag_value(flag, value, normalized, sizeof(normalized))) {
     f2e_report_invalid_value(errors, flag, value);
     return 0;
   }
+  if (!f2e_check_requires_tty(flag, normalized, errors)) {
+    return 0;
+  }
   f2e_set_pair(pairs, pair_count, flag->env, normalized);
   return 1;
 }
 
-static int f2e_try_set_bool_value(F2EFlag *flag, F2EPair *pairs, size_t pair_count, const char *value) {
+static int f2e_try_set_bool_value(F2EFlag *flag, F2EPair *pairs, size_t pair_count,
+                                  const char *value, F2EJsonList *errors) {
   const char *canonical = NULL;
   if (!f2e_bool_value_alias(flag, value, &canonical)) {
     return 0;
   }
+  if (!f2e_check_requires_tty(flag, canonical, errors)) {
+    /* The token was consumed and reported; not setting the pair is the point. */
+    return 1;
+  }
   f2e_set_pair(pairs, pair_count, flag->env, canonical);
   return 1;
+}
+
+/* Sets a bare boolean (`--interactive`, `-i`) to true, subject to requires_tty. */
+static void f2e_set_bare_bool(F2EFlag *flag, F2EPair *pairs, size_t pair_count,
+                              F2EJsonList *errors) {
+  if (!f2e_check_requires_tty(flag, "true", errors)) {
+    return;
+  }
+  f2e_set_pair(pairs, pair_count, flag->env, "true");
 }
 
 static int f2e_token_looks_like_known_option(F2EConfig *config, int scope, const char *token) {
@@ -2797,11 +3014,12 @@ static int f2e_can_bundle_bool_shorts(F2EConfig *config, int scope, const char *
   return 1;
 }
 
-static void f2e_apply_bool_short_bundle(F2EConfig *config, int scope, F2EPair *pairs, size_t pair_count, const char *shorts) {
+static void f2e_apply_bool_short_bundle(F2EConfig *config, int scope, F2EPair *pairs, size_t pair_count, const char *shorts, F2EJsonList *errors) {
   for (const char *cursor = shorts; *cursor; cursor++) {
     F2EFlag *flag = f2e_find_flag_by_short(config, scope, *cursor);
     if (flag && flag->env[0] != '\0' && flag->type == F2E_TYPE_BOOL) {
-      f2e_set_pair(pairs, pair_count, flag->env, "true");
+      /* A bundled -i is still an -i, so requires_tty applies here too. */
+      f2e_set_bare_bool(flag, pairs, pair_count, errors);
     }
   }
 }
@@ -2854,10 +3072,10 @@ static void f2e_apply_long_arg(F2EConfig *config, int scope, F2EPair *pairs, siz
     } else if (config->allow_separated_values &&
                *index + 1 < argc &&
                f2e_can_consume_separated_value(flag, argv[*index + 1]) &&
-               f2e_try_set_bool_value(flag, pairs, pair_count, argv[*index + 1])) {
+               f2e_try_set_bool_value(flag, pairs, pair_count, argv[*index + 1], errors)) {
       (*index)++;
     } else {
-      f2e_set_pair(pairs, pair_count, flag->env, "true");
+      f2e_set_bare_bool(flag, pairs, pair_count, errors);
     }
     return;
   }
@@ -2911,16 +3129,16 @@ static void f2e_apply_short_arg(F2EConfig *config, int scope, F2EPair *pairs, si
     if (config->allow_separated_values &&
         *index + 1 < argc &&
         f2e_can_consume_separated_value(first, argv[*index + 1]) &&
-        f2e_try_set_bool_value(first, pairs, pair_count, argv[*index + 1])) {
+        f2e_try_set_bool_value(first, pairs, pair_count, argv[*index + 1], errors)) {
       (*index)++;
       return;
     }
-    f2e_set_pair(pairs, pair_count, first->env, "true");
+    f2e_set_bare_bool(first, pairs, pair_count, errors);
     return;
   }
 
   if (f2e_can_bundle_bool_shorts(config, scope, token + 1)) {
-    f2e_apply_bool_short_bundle(config, scope, pairs, pair_count, token + 1);
+    f2e_apply_bool_short_bundle(config, scope, pairs, pair_count, token + 1, errors);
     return;
   }
 
@@ -3180,6 +3398,13 @@ static void f2e_audit_config_semantics(const F2EConfig *config, F2EAudit *audit)
   }
   if (config->invalid_env_audit_ignore) {
     f2e_audit_add(audit, 1, "env.ignore must be a list of env var names");
+  }
+  for (size_t i = 0; i < config->flag_count; i++) {
+    if (config->flags[i].invalid_requires_tty) {
+      f2e_audit_add(audit, 1,
+                    "flags.%s requires_tty must be true, false, prompt, stdin, stdout, or stderr",
+                    f2e_audit_flag_name(&config->flags[i]));
+    }
   }
   if (config->invalid_dotenv_files) {
     /* An error, not a warning: the config asked for specific .env files and
@@ -8884,9 +9109,22 @@ static void f2e_doctor_scan_file(F2EAudit *audit, const F2EConfig *config,
       previous->line = line_number;
     }
 
+    /* Ambiguity: a .env value for a flag that needs a terminal. requires_tty
+       is enforced for argv only -- a value in a file is ambient configuration,
+       not someone asking for a prompt right now -- so this line switches the
+       flag on with no terminal check at all. */
+    const F2EFlag *declaring = f2e_flag_declaring_env(config, key);
+    if (declaring && declaring->requires_tty != F2E_TTY_NONE) {
+      f2e_audit_add(audit, 0,
+                    "%s:%d: %s is a requires_tty flag; requires_tty is enforced for "
+                    "command-line values only, so this file value is applied without "
+                    "a terminal check",
+                    relative_path, line_number, key);
+    }
+
     /* Ambiguity: a key nothing declares. The file says it is configuration;
        the parser will never look at it. */
-    if (!f2e_flag_declaring_env(config, key) && !f2e_doctor_is_ignored(config, key)) {
+    if (!declaring && !f2e_doctor_is_ignored(config, key)) {
       f2e_audit_add(audit, 0,
                     "%s:%d: %s is not declared by any [flags.*] env and is not in env.ignore, "
                     "so it is read by nothing",
