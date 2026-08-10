@@ -1,0 +1,94 @@
+name: Notify consumer fixtures
+
+# The flags-2-env-test organization exists to prove this library end-to-end in
+# real consumer repositories. Every fixture there already listens for
+#   repository_dispatch: types: [upstream-changed]
+# but nothing ever sent that event, so the fixtures only ever tested whatever
+# submodule commit happened to be pinned. This workflow is the missing sender.
+#
+# TOKEN: GITHUB_TOKEN cannot dispatch into another organization, so this needs a
+# PAT with `contents: write` on flags-2-env-test, stored as CONSUMER_DISPATCH_TOKEN.
+# Without it the job reports what it *would* have dispatched and succeeds, so a
+# missing secret never turns main red — it just stops fanning out, visibly.
+
+on:
+  push:
+    branches: [main]
+  # Validate on PRs too, but WITHOUT dispatching: a pull request must not fan
+  # work out to 13 live repositories. The resolve step still runs, so the YAML
+  # and the enumeration logic get exercised; the dispatch step is skipped.
+  pull_request:
+    paths:
+      - ".github/workflows/notify-consumer-fixtures.yml"
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Commit sha for fixtures to test (defaults to this ref)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fan-out:
+    name: Dispatch upstream-changed to every fixture
+    # The compatibility mirror carries an identical tree through 2026-08-19,
+    # but only the canonical repository owns downstream certification events.
+    # Pull requests in either repository still validate the workflow itself.
+    if: github.event_name == 'pull_request' || github.repository == 'flags-2-env/flags-2-env'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Resolve target fixtures
+        id: targets
+        env:
+          GH_TOKEN: ${{ secrets.CONSUMER_DISPATCH_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          # Enumerated live, not hard-coded: a fixture added to the org must be
+          # picked up without editing this file, which is the failure mode that
+          # left feature-matrix out of the fleet in the first place.
+          if ! gh repo list flags-2-env-test --limit 200 --json name,isArchived \
+                 --jq '.[] | select(.isArchived | not) | .name' > /tmp/targets.txt; then
+            echo "could not list flags-2-env-test (token lacks org read?)" >&2
+            : > /tmp/targets.txt
+          fi
+          count=$(wc -l < /tmp/targets.txt | tr -d ' ')
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "Fixtures discovered: $count"
+          sed 's/^/  /' /tmp/targets.txt
+
+      - name: Dispatch
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.CONSUMER_DISPATCH_TOKEN }}
+          SHA: ${{ inputs.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::warning::CONSUMER_DISPATCH_TOKEN is not set - no fixture was notified."
+            echo "Would have dispatched upstream-changed (sha=$SHA) to:"
+            sed 's/^/  /' /tmp/targets.txt
+            exit 0
+          fi
+          rc=0
+          while read -r repo; do
+            [ -n "$repo" ] || continue
+            if gh api "repos/flags-2-env-test/$repo/dispatches" \
+                 -f event_type=upstream-changed \
+                 -F "client_payload[sha]=$SHA" \
+                 -F "client_payload[repository]=${{ github.repository }}" >/dev/null 2>&1; then
+              echo "  dispatched -> $repo"
+            else
+              # A fixture with no matching listener is not a failure of this
+              # workflow; report every one rather than aborting on the first.
+              echo "::warning::dispatch failed for $repo"
+              rc=1
+            fi
+          done < /tmp/targets.txt
+          exit $rc
