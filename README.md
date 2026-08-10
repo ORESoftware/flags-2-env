@@ -400,7 +400,7 @@ native package manifest:
 
 ```sh
 zed install flags-2-env/flags-2-env@^0.3 \
-  --allow-no-manifest \
+  --do-not-write-new-manifest \
   --allow-build \
   --adapter none
 zed run flags2env -- audit .cli-flags.toml
@@ -423,7 +423,7 @@ adapter = "none"
 
 Then run `zed install --allow-build`. Both install forms retain the native
 project structure, write an integrity-pinned `.zpkg.lock`, and support frozen
-reinstallation with `zed install --frozen --allow-no-manifest --allow-build
+reinstallation with `zed install --frozen --do-not-write-new-manifest --allow-build
 --adapter none` for manifestless consumers.
 
 Until the end of 2026-08-19, the compatibility coordinate
