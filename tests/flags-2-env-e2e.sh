@@ -12,12 +12,6 @@ if [[ ! -x "$zed" ]]; then
   exit 2
 fi
 zed="$(cd -- "$(dirname -- "$zed")" && pwd -P)/$(basename -- "$zed")"
-manifestless_flag=--do-not-write-new-manifest
-if ! "$zed" install --help 2>&1 | grep -Fq -- "$manifestless_flag"; then
-  # Compatibility with the immutable pre-rename CLI used by older workflow
-  # pins. New CLI releases exercise the canonical spelling above.
-  manifestless_flag=--allow-no-manifest
-fi
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 if [[ ! -f "$repo_root/.zpkg.toml" ]]; then
@@ -201,7 +195,7 @@ install_layout() {
     ZED_PKG_HOME="$consumer_home" \
     ZED_PKG_REGISTRY="$registry_url" \
       "$zed" install "$package_ref" \
-        "$manifestless_flag" \
+        --allow-no-manifest \
         --allow-build \
         --adapter none \
         --install-mode "$mode"
@@ -290,7 +284,7 @@ install_layout() {
     ZED_PKG_REGISTRY="$registry_url" \
       "$zed" install \
         --frozen \
-        "$manifestless_flag" \
+        --allow-no-manifest \
         --allow-build \
         --adapter none \
         --install-mode "$mode"
