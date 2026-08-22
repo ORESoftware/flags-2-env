@@ -254,5 +254,9 @@ compare_ruby "ruby OptionParser bundle with separated value" \
   app -dvm dev
 compare_node "node util.parseArgs boolean-only bundle" \
   app -dv --mode production
+compare_node "node util.parseArgs bundle with separated value" \
+  app -dvp 7074
+compare_node "node util.parseArgs bundle with inline value" \
+  app -dvmproduction
 
 printf 'flags2env parity tests passed\n'

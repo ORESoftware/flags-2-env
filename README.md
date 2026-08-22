@@ -1603,12 +1603,14 @@ guarantees:
   (`-dvp8080` or `-dvp=8080`); a separated value stays positional, matching
   how a lone `-p 8080` behaves in that mode.
 
-`flags2env audit` warns when a single-character boolean value alias doubles as
-a sibling short flag, because a token like `-dt` then has two readings. The
-parser resolves it deterministically — an all-boolean token is a bundle, and
-otherwise the value-alias reading wins — but the warning names which reading
-applies so the ambiguity is a choice, not a surprise. Declare different
-characters if you want both spellings.
+`flags2env audit` warns when a single-character boolean value alias also
+resolves as a reachable short flag, because a token like `-dt` then has two
+readings. Reachability includes the active command's inherited/global flags
+and the parser's unique scoped-flag fallback when no command is selected. The
+parser resolves each context deterministically — an all-boolean token is a
+bundle, and otherwise the value-alias reading wins — and the warning names the
+command context when one is involved. Declare different characters if you want
+both spellings.
 
 ### Command aliases are canonicalized
 

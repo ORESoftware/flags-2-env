@@ -50,6 +50,17 @@ run_case() {
   fi
 }
 
+run_config_case() {
+  config_dir="$1"
+  expected="$2"
+  shift 2
+  actual="$(cd "$config_dir" && "$CLI" "$@")"
+  if [ "$actual" != "$expected" ]; then
+    printf 'Config:   %s\nExpected: %s\nActual:   %s\n' "$config_dir" "$expected" "$actual" >&2
+    exit 1
+  fi
+}
+
 run_case '{"PORT":"8080","DEBUG":"true","COLOR":"true","HOST":"127.0.0.1","VERBOSE":"true","NODE_ENV":"production"}' app --port 8080 --debug --host 127.0.0.1 -v -mproduction
 run_case '{"PORT":"9000","DEBUG":"false","COLOR":"false"}' app -p 9000 --no-color
 run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true"}' app --unknown value positional
@@ -73,6 +84,12 @@ run_case '{"PORT":"8080","DEBUG":"true","COLOR":"true","VERBOSE":"true"}' app -d
 run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true","VERBOSE":"true","NODE_ENV":"production"}' app -dvm production
 # the value flag ends the bundle: later characters are its value, never flags
 run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true","NODE_ENV":"vc"}' app -dmvc
+# Exact real-world bundle shapes from the public docs.
+run_config_case "$ROOT_DIR/tests/short-bundles" '{"LONG":"true","ALL":"true"}' app -la
+run_config_case "$ROOT_DIR/tests/short-bundles" '{"RECURSIVE":"true","FORCE":"true"}' app -rf
+run_config_case "$ROOT_DIR/tests/short-bundles" '{"ERREXIT":"true","SHELL_OPTION":"pipefail"}' app -eo pipefail
+# Node accepts -pe (print + eval); the value-taking -e must end the bundle.
+run_config_case "$ROOT_DIR/tests/node-short-bundle" '{"PRINT":"true","EVAL":""}' app -pe ''
 # a suffix that reads as a boolean value for the first flag keeps that meaning
 # (compatibility): -dt is debug=true via true_aliases, never a bundle
 run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true"}' app -dt
@@ -523,6 +540,18 @@ if [ "$actual" != "$expected" ]; then
   exit 1
 fi
 
+# Reachability is scope-sensitive: a global boolean alias can collide with a
+# short flag introduced by an active child command, and audit must not miss it.
+SCOPED_BUNDLE_ALIAS_CONFIG="$ROOT_DIR/tests/audit-bundle-command/.cli-flags.toml"
+actual="$("$CLI" audit "$SCOPED_BUNDLE_ALIAS_CONFIG")"
+expected='{"ok":true,"errorCount":0,"warningCount":1,"errors":[],"warnings":["flags.debug boolean value alias \"t\" doubles as short flag -t (flags.trace) when command \"commit\" is active; \"-dt\" parses as a bundle, not a value for flags.debug"]}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected command-scope bundle-alias warning:\n%s\nActual: %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+run_config_case "$ROOT_DIR/tests/audit-bundle-command" '{"FLAGS2ENV_COMMAND":"commit","DEBUG":"true","TRACE":"true"}' gitish commit -dt
+run_config_case "$ROOT_DIR/tests/audit-bundle-command" '{"FLAGS2ENV_COMMAND":"","DEBUG":"true","TRACE":"true"}' gitish -dt
+
 set +e
 "$CLI" completion bash mycli "$UNSAFE_CONFIG" >/dev/null 2>/dev/null
 status=$?
@@ -616,6 +645,10 @@ run_subcommand_case "{\"GITISH_COMMAND\":\"commit\",\"GITISH_VERBOSE\":\"false\"
 # commit command scope, plus an inherited global bool joining the bundle
 run_subcommand_case "{\"GITISH_COMMAND\":\"commit\",\"GITISH_VERBOSE\":\"false\",\"GITISH_COMMIT_ALL\":\"true\",\"GITISH_COMMIT_MESSAGE\":\"fix stuff\",$BASE_POSITIONALS}" gitish ci -am 'fix stuff'
 run_subcommand_case "{\"GITISH_COMMAND\":\"commit\",\"GITISH_VERBOSE\":\"true\",\"GITISH_COMMIT_ALL\":\"true\",\"GITISH_COMMIT_MESSAGE\":\"wip\",$BASE_POSITIONALS}" gitish ci -vam wip
+# The dry-run command resolver must consume a mixed bundle's separated value
+# exactly like the real pass, or it would mistake "Alex" for a positional and
+# fail to discover the following commit command.
+run_subcommand_case "{\"GITISH_COMMAND\":\"commit\",\"GITISH_VERBOSE\":\"true\",\"GITISH_AUTHOR\":\"Alex\",\"GITISH_COMMIT_ALL\":\"true\",\"GITISH_COMMIT_MESSAGE\":\"scoped\",$BASE_POSITIONALS}" gitish -vA Alex ci -am scoped
 run_subcommand_case "{\"GITISH_COMMAND\":\"remote add\",\"GITISH_CMD_REMOTE_ADD\":\"true\",\"GITISH_VERBOSE\":\"false\",\"GITISH_REMOTE_ADD_FETCH\":\"true\",\"GITISH_REMOTE_ADD_TRACK\":\"dev\",$BASE_POSITIONALS}" gitish remote add -f --track=dev
 run_subcommand_case "{\"GITISH_COMMAND\":\"remote\",\"GITISH_VERBOSE\":\"false\",\"GITISH_REMOTE_VERBOSE\":\"true\",$BASE_POSITIONALS}" gitish remote -v
 run_subcommand_case "{\"GITISH_COMMAND\":\"add\",\"GITISH_CMD_ADD\":\"true\",\"GITISH_VERBOSE\":\"false\",\"GITISH_POSITIONALS\":\"[\\\"$CLI\\\",\\\"gitish\\\",\\\"foo\\\",\\\"commit\\\"]\"}" gitish add foo commit

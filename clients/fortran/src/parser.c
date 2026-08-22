@@ -3402,6 +3402,41 @@ static void f2e_audit_command_semantics(const F2EConfig *config, F2EAudit *audit
   }
 }
 
+/* Find a short flag that can be read after `flag` in at least one parser
+   context. Checking only flag->command misses two real bundle contexts:
+
+   - a global flag followed by a short declared by an active child command;
+   - lenient lookup, where globally-unique scoped shorts remain available when
+     argv selects no command.
+
+   Requiring both shorts to resolve to the concrete flags in the same context
+   also avoids warning about child declarations that shadow the first short. */
+static const F2EFlag *f2e_find_reachable_bundle_alias(const F2EConfig *config,
+                                                       const F2EFlag *flag,
+                                                       char alias_short,
+                                                       int *scope_out) {
+  size_t context_count = config->command_count + 2;
+  for (size_t context = 0; context < context_count; context++) {
+    int scope = context == 0
+                    ? F2E_SCOPE_ROOT
+                    : context <= config->command_count
+                          ? (int)(context - 1)
+                          : F2E_SCOPE_LENIENT;
+    F2EFlag *resolved_flag = f2e_find_flag_by_short((F2EConfig *)config, scope, flag->short_name);
+    if (resolved_flag != flag) {
+      continue;
+    }
+    F2EFlag *other = f2e_find_flag_by_short((F2EConfig *)config, scope, alias_short);
+    if (other && other != flag) {
+      if (scope_out) {
+        *scope_out = scope;
+      }
+      return other;
+    }
+  }
+  return NULL;
+}
+
 static void f2e_audit_config_semantics(const F2EConfig *config, F2EAudit *audit) {
   if (config->flag_count == 0 && config->command_count == 0) {
     f2e_audit_add(audit, 1, "no [flags.*] or [commands.*] tables declared");
@@ -3445,8 +3480,8 @@ static void f2e_audit_config_semantics(const F2EConfig *config, F2EAudit *audit)
 
     /* A single-character boolean value alias that doubles as a reachable
        short flag makes `-<short><alias>` ambiguous between "value for the
-       boolean" and "short bundle". The parser keeps the historical reading
-       (the value), so surface the shadowing where it can be fixed. */
+       boolean" and "short bundle". Surface the shadowing in every kind of
+       lookup context where both flags can actually resolve together. */
     if (flag->type == F2E_TYPE_BOOL && flag->short_name != '\0') {
       for (size_t j = 0; j < flag->true_alias_count + flag->false_alias_count; j++) {
         const char *alias = j < flag->true_alias_count
@@ -3455,27 +3490,41 @@ static void f2e_audit_config_semantics(const F2EConfig *config, F2EAudit *audit)
         if (alias[0] == '\0' || alias[1] != '\0') {
           continue;
         }
-        const F2EFlag *other = f2e_find_flag_by_short((F2EConfig *)config, flag->command, alias[0]);
+        int collision_scope = F2E_SCOPE_ROOT;
+        const F2EFlag *other = f2e_find_reachable_bundle_alias(config, flag, alias[0], &collision_scope);
         if (other && other != flag) {
           /* Which reading wins matches the parser: an all-boolean token is a
              bundle; otherwise the value-alias reading is kept. */
+          char collision_context[F2E_MAX_VALUE + 64] = "";
+          if (collision_scope >= 0) {
+            char command_label[F2E_MAX_VALUE];
+            if (!f2e_command_path_label(config, collision_scope, command_label, sizeof(command_label))) {
+              f2e_strlcpy(command_label, config->commands[collision_scope].name, sizeof(command_label));
+            }
+            snprintf(collision_context, sizeof(collision_context),
+                     " when command \"%s\" is active", command_label);
+          } else if (collision_scope == F2E_SCOPE_LENIENT) {
+            f2e_strlcpy(collision_context, " when no command is selected", sizeof(collision_context));
+          }
           if (other->type == F2E_TYPE_BOOL) {
             f2e_audit_add(audit, 0,
-                          "flags.%s boolean value alias \"%s\" doubles as short flag -%c (flags.%s); \"-%c%c\" parses as a bundle, not a value for flags.%s",
+                          "flags.%s boolean value alias \"%s\" doubles as short flag -%c (flags.%s)%s; \"-%c%c\" parses as a bundle, not a value for flags.%s",
                           f2e_audit_flag_name(flag),
                           alias,
                           alias[0],
                           f2e_audit_flag_name(other),
+                          collision_context,
                           flag->short_name,
                           alias[0],
                           f2e_audit_flag_name(flag));
           } else {
             f2e_audit_add(audit, 0,
-                          "flags.%s boolean value alias \"%s\" doubles as short flag -%c (flags.%s); \"-%c%c\" parses as a value for flags.%s, not a bundle",
+                          "flags.%s boolean value alias \"%s\" doubles as short flag -%c (flags.%s)%s; \"-%c%c\" parses as a value for flags.%s, not a bundle",
                           f2e_audit_flag_name(flag),
                           alias,
                           alias[0],
                           f2e_audit_flag_name(other),
+                          collision_context,
                           flag->short_name,
                           alias[0],
                           f2e_audit_flag_name(flag));
