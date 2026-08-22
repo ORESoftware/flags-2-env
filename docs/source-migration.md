@@ -1,8 +1,9 @@
 # Source repository migration
 
 `https://github.com/flags-2-env/flags-2-env` is the canonical source
-repository. `https://github.com/ORESoftware/flags-2-env` is a supported,
-commit-identical compatibility mirror through 2026-08-19.
+repository. `https://github.com/ORESoftware/flags-2-env` was a supported,
+commit-identical compatibility mirror from 2026-08-09 through 2026-08-19. That
+window has closed; see [Cutoff status](#cutoff-status) for what is still owed.
 
 The machine-readable contract is `source-migration.json`; its JSON Schema is
 `source-migration.schema.json`. Validate the repository metadata and transition
@@ -65,7 +66,38 @@ New changes are reviewed against the canonical repository; open legacy work is
 rebased or replayed as an ordinary reviewed commit, never by rewriting either
 repository's public history.
 
-## Cutoff and rollback
+## Cutoff status
+
+The window closed at the end of 2026-08-19. `cutoff` in
+`source-migration.json` is the machine-readable record of what that leaves
+outstanding, and `verify-source-migration.py` compares it against the current
+date on every run:
+
+| `cutoff` field | Meaning |
+| --- | --- |
+| `state` | `pending` until every obligation is cleared, then `complete` |
+| `completedOn` | The date the last obligation was cleared; `null` while pending |
+| `mirrorDisposition` | `read-only-historical-source` — the mirror is kept, not deleted |
+| `pendingObligations` | The steps still owed, each named in `CUTOFF_OBLIGATIONS` |
+
+While the window is open the record is inert. Once it closes, a `pending`
+record is an error: the verifier reports how many days have elapsed and prints
+the action that clears each remaining obligation, and it refuses any document that still promises support
+through a date that has passed. The two obligations
+are deliberately outside this repository, because neither can be satisfied by a
+commit here:
+
+1. `mirror-notice-updated` — replace the present-tense notice at the top of the
+   mirror's `README.md` with the post-cutoff redirect notice. Because the
+   mirror is commit-identical, this lands as an ordinary reviewed commit on
+   canonical `main` that is then fast-forwarded, never as mirror-only drift.
+2. `mirror-archived` — archive the mirror on GitHub so it is read-only.
+
+Clearing them means setting `state` to `complete`, `completedOn` to that date,
+and emptying `pendingObligations`; the verifier then requires `completedOn` to
+fall after the window and not in the future.
+
+## Rollback
 
 Do not remove compatibility support before the end of 2026-08-19. After the
 cutoff, the original repository may remain as a read-only historical source and

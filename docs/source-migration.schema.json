@@ -9,6 +9,7 @@
     "schemaVersion",
     "canonical",
     "compatibility",
+    "cutoff",
     "zedPackage",
     "publicationOrder"
   ],
@@ -56,6 +57,44 @@
             "refs/heads/main",
             "refs/tags/*"
           ]
+        }
+      }
+    },
+    "cutoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "completedOn",
+        "mirrorDisposition",
+        "pendingObligations"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "pending",
+            "complete"
+          ]
+        },
+        "completedOn": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date"
+        },
+        "mirrorDisposition": {
+          "const": "read-only-historical-source"
+        },
+        "pendingObligations": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "mirror-notice-updated",
+              "mirror-archived"
+            ]
+          }
         }
       }
     },

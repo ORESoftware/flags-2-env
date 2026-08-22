@@ -7,20 +7,24 @@ The native core is C. Runtime clients bind to the same small ABI and convert the
 ## Source repository transition
 
 The canonical source repository is
-[`flags-2-env/flags-2-env`](https://github.com/flags-2-env/flags-2-env).
-The original
-[`ORESoftware/flags-2-env`](https://github.com/ORESoftware/flags-2-env)
-repository remains a supported, commit-identical compatibility source through
-2026-08-19. New source references should use the canonical repository; existing
-immutable references to the compatibility repository remain valid during the
-ten-day transition.
+[`flags-2-env/flags-2-env`](https://github.com/flags-2-env/flags-2-env). Use it
+for every source reference.
 
-The canonical Zed package is `flags-2-env/flags-2-env@0.3.0`. Zed currently
-treats `org/name` as immutable package identity and has no package-alias field,
-so `oresoftware/flags-2-env@0.3.0` is published separately from the exact same
-tagged source commit during the transition. See
-[`docs/source-migration.md`](docs/source-migration.md) for the machine-checked
-contract, publication order, and cutoff procedure.
+The ten-day compatibility window for the original
+[`ORESoftware/flags-2-env`](https://github.com/ORESoftware/flags-2-env)
+repository ran from 2026-08-09 and **ended on 2026-08-19**. That repository is
+no longer a supported source: it is kept as a read-only historical source and
+redirect notice, so existing immutable references to already-published commits
+and tags stay resolvable, while anything new — clones, submodules, package
+manifests, documentation links — must point at the canonical repository.
+
+The canonical Zed package is `flags-2-env/flags-2-env@0.3.0`. Zed treats
+`org/name` as immutable package identity and has no package-alias field, so
+`oresoftware/flags-2-env@0.3.0` was published separately from the exact same
+tagged source commit during the window; it remains installable but receives no
+new versions. See [`docs/source-migration.md`](docs/source-migration.md) for the
+machine-checked contract, publication order, and the cutoff procedure that
+`scripts/verify-source-migration.py` now enforces against the calendar.
 
 ## Config
 
