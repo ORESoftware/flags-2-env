@@ -3039,6 +3039,60 @@ static void f2e_apply_bool_short_bundle(F2EConfig *config, int scope, F2EPair *p
   }
 }
 
+/* getopt-style mixed bundle: one or more leading boolean shorts followed by
+   exactly one value-taking short, which consumes the rest of the token
+   (`-dvp8080`, `tar -xzf archive.tar`) or, when the token ends at the value
+   flag, the next argument (`set -eo pipefail`). Everything before the value
+   flag must be a declared boolean short with an env target; the caller has
+   already handled all-boolean bundles and tokens whose first short takes a
+   value. Returns 1 when the token matched this shape and was applied, 0 to
+   let the caller keep the historical fallback (an inline value for the first
+   flag), so no previously-valid spelling changes meaning. */
+static int f2e_apply_mixed_short_bundle(F2EConfig *config, int scope, F2EPair *pairs, size_t pair_count, const char *shorts, int *index, int argc, const char *const argv[], F2EJsonList *errors) {
+  size_t split = 0;
+  F2EFlag *value_flag = NULL;
+  for (size_t k = 0; shorts[k] != '\0'; k++) {
+    F2EFlag *flag = f2e_find_flag_by_short(config, scope, shorts[k]);
+    if (!flag || flag->env[0] == '\0') {
+      return 0;
+    }
+    if (flag->type == F2E_TYPE_BOOL) {
+      continue;
+    }
+    if (k == 0) {
+      return 0;
+    }
+    value_flag = flag;
+    split = k;
+    break;
+  }
+  if (!value_flag) {
+    return 0;
+  }
+  for (size_t k = 0; k < split; k++) {
+    F2EFlag *flag = f2e_find_flag_by_short(config, scope, shorts[k]);
+    if (flag && flag->env[0] != '\0' && flag->type == F2E_TYPE_BOOL) {
+      /* A bundled -i is still an -i, so requires_tty applies here too. */
+      f2e_set_bare_bool(flag, pairs, pair_count, errors);
+    }
+  }
+  const char *value = shorts + split + 1;
+  if (*value == '=') {
+    /* Mirrors the single-short spelling `-p=8080`, so `-dvp=8080` and
+       `-dvp8080` agree. */
+    value++;
+  }
+  if (*value != '\0') {
+    f2e_try_set_flag_value(value_flag, pairs, pair_count, value, errors);
+  } else if (config->allow_separated_values &&
+             *index + 1 < argc &&
+             f2e_can_consume_separated_value(value_flag, argv[*index + 1])) {
+    (*index)++;
+    f2e_try_set_flag_value(value_flag, pairs, pair_count, argv[*index], errors);
+  }
+  return 1;
+}
+
 static void f2e_apply_long_arg(F2EConfig *config, int scope, F2EPair *pairs, size_t pair_count, const char *token, int *index, int argc, const char *const argv[], F2EJsonList *errors) {
   char name[F2E_MAX_NAME];
   char inline_value[F2E_MAX_VALUE];
@@ -3154,6 +3208,22 @@ static void f2e_apply_short_arg(F2EConfig *config, int scope, F2EPair *pairs, si
 
   if (f2e_can_bundle_bool_shorts(config, scope, token + 1)) {
     f2e_apply_bool_short_bundle(config, scope, pairs, pair_count, token + 1, errors);
+    return;
+  }
+
+  /* Compatibility before bundling: a suffix that reads as a boolean value for
+     the first flag keeps meaning exactly that (`-dtrue`, `-d1`, `-dt` with a
+     `t` alias), even if its characters could also spell a mixed bundle. Only
+     tokens that were previously parse errors gain the bundle reading below. */
+  {
+    const char *canonical = NULL;
+    if (f2e_bool_value_alias(first, rest, &canonical)) {
+      f2e_try_set_flag_value(first, pairs, pair_count, rest, errors);
+      return;
+    }
+  }
+
+  if (f2e_apply_mixed_short_bundle(config, scope, pairs, pair_count, token + 1, index, argc, argv, errors)) {
     return;
   }
 
@@ -3372,6 +3442,47 @@ static void f2e_audit_config_semantics(const F2EConfig *config, F2EAudit *audit)
                     flag->type_value);
     }
     f2e_audit_bool_value_aliases(flag, audit);
+
+    /* A single-character boolean value alias that doubles as a reachable
+       short flag makes `-<short><alias>` ambiguous between "value for the
+       boolean" and "short bundle". The parser keeps the historical reading
+       (the value), so surface the shadowing where it can be fixed. */
+    if (flag->type == F2E_TYPE_BOOL && flag->short_name != '\0') {
+      for (size_t j = 0; j < flag->true_alias_count + flag->false_alias_count; j++) {
+        const char *alias = j < flag->true_alias_count
+                                ? flag->true_aliases[j]
+                                : flag->false_aliases[j - flag->true_alias_count];
+        if (alias[0] == '\0' || alias[1] != '\0') {
+          continue;
+        }
+        const F2EFlag *other = f2e_find_flag_by_short((F2EConfig *)config, flag->command, alias[0]);
+        if (other && other != flag) {
+          /* Which reading wins matches the parser: an all-boolean token is a
+             bundle; otherwise the value-alias reading is kept. */
+          if (other->type == F2E_TYPE_BOOL) {
+            f2e_audit_add(audit, 0,
+                          "flags.%s boolean value alias \"%s\" doubles as short flag -%c (flags.%s); \"-%c%c\" parses as a bundle, not a value for flags.%s",
+                          f2e_audit_flag_name(flag),
+                          alias,
+                          alias[0],
+                          f2e_audit_flag_name(other),
+                          flag->short_name,
+                          alias[0],
+                          f2e_audit_flag_name(flag));
+          } else {
+            f2e_audit_add(audit, 0,
+                          "flags.%s boolean value alias \"%s\" doubles as short flag -%c (flags.%s); \"-%c%c\" parses as a value for flags.%s, not a bundle",
+                          f2e_audit_flag_name(flag),
+                          alias,
+                          alias[0],
+                          f2e_audit_flag_name(other),
+                          flag->short_name,
+                          alias[0],
+                          f2e_audit_flag_name(flag));
+          }
+        }
+      }
+    }
 
     if (config->positionals_env[0] != '\0' && f2e_streq(config->positionals_env, flag->env)) {
       f2e_audit_add(audit, 1, "parse.positionals_env collides with flags.%s env \"%s\"",

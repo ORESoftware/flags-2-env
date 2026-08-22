@@ -1553,6 +1553,63 @@ Unknown flags and positional tokens are ignored unless `[parse]` declares `unkno
 
 When `[commands.*]` tables are declared, the parser resolves the subcommand path in a dry-run pass before applying defaults, so defaults are only emitted for global flags and the selected commands, and flag lookups always prefer the innermost command scope. The resolved path is reported under `parse.command_env` (default `FLAGS2ENV_COMMAND`, emitted as an empty string when no command is selected), and matched command tokens are consumed rather than recorded as positionals. While no command has matched yet, leading positionals such as the program name are skipped and do not trigger `stop_at_first_positional`.
 
+### Short flag bundles
+
+Single-dash flags combine the way `getopt` combines them, so the muscle-memory
+spellings from everyday tools parse the way their authors meant them:
+
+```console
+$ ls -la              # -l -a: two booleans in one token
+$ rm -rf tmp/         # -r -f
+$ set -eo pipefail    # -e is boolean, then -o consumes "pipefail"
+$ node -pe '1 + 1'    # -p is boolean, then -e consumes the script
+$ git commit -am wip  # -a is boolean, then -m consumes the message
+```
+
+A token of boolean shorts sets each of them to `true`. One value-taking short
+may end the bundle; it consumes the rest of the token as its value — with or
+without an `=` — or, when the token ends there, the next argument:
+
+```console
+$ flags2env app -dv           # DEBUG=true VERBOSE=true
+$ flags2env app -dvp 8080     # DEBUG=true VERBOSE=true PORT=8080
+$ flags2env app -dvp8080      # same, inline value
+$ flags2env app -dvp=8080     # same, inline value with equals
+```
+
+The rules, all of them the classic getopt ones plus this parser's existing
+guarantees:
+
+- Every character before the value flag must be a declared boolean short with
+  an env target. A token containing an undeclared character is not a bundle;
+  it falls back to the historical single-flag reading and never silently
+  half-applies.
+- The value flag ends the bundle: characters after it belong to its value,
+  never to more flags. Put the value-taking flag last — `node -pe '1 + 1'`
+  works, while `-ep '1 + 1'` reads `p` as `-e`'s inline value, exactly as
+  getopt would.
+- A suffix that reads as a boolean value for the first flag keeps that
+  meaning. With `true_aliases = ["t", "1"]`, `-dt` and `-d1` stay
+  `DEBUG=true`, and `-dtrue` stays the canonical spelling — mixed bundling
+  never reinterprets a previously valid token. (An all-boolean token such as
+  `-dt` with `-t` itself a declared boolean short was already a bundle, and
+  stays one.)
+- `requires_tty` applies to every flag in a bundle: `-qi` checks the `i` just
+  as `--interactive` would.
+- Bundles resolve in the active command scope first, then its ancestors, so
+  `gitish ci -am 'fix stuff'` applies the `commit` scope's `-a` and `-m`, and
+  an inherited global `-v` may join the same bundle (`gitish ci -vam wip`).
+- With `[parse] require_equals = true`, the value must be inline
+  (`-dvp8080` or `-dvp=8080`); a separated value stays positional, matching
+  how a lone `-p 8080` behaves in that mode.
+
+`flags2env audit` warns when a single-character boolean value alias doubles as
+a sibling short flag, because a token like `-dt` then has two readings. The
+parser resolves it deterministically — an all-boolean token is a bundle, and
+otherwise the value-alias reading wins — but the warning names which reading
+applies so the ambiguity is a choice, not a surprise. Declare different
+characters if you want both spellings.
+
 ### Command aliases are canonicalized
 
 A command can declare one or more aliases at any nesting depth. The parser

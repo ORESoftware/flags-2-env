@@ -63,6 +63,27 @@ run_case '{"PORT":"+7","DEBUG":"false","COLOR":"true"}' app --port +7
 run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true"}' app --no-port=8181
 run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true","HOST":"-internal"}' app --host=-internal
 run_case '{"PORT":"4000","DEBUG":"true","COLOR":"true","VERBOSE":"true"}' app -dv --listen-port=4000
+# getopt-style short bundles: boolean-only groups ("ls -la", "rm -rf") and
+# groups ending in one value-taking flag ("set -eo pipefail", "git commit -am").
+run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true","VERBOSE":"true"}' app -dv
+run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true","VERBOSE":"true"}' app -vd
+run_case '{"PORT":"8080","DEBUG":"true","COLOR":"true","VERBOSE":"true"}' app -dvp 8080
+run_case '{"PORT":"8080","DEBUG":"true","COLOR":"true","VERBOSE":"true"}' app -dvp8080
+run_case '{"PORT":"8080","DEBUG":"true","COLOR":"true","VERBOSE":"true"}' app -dvp=8080
+run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true","VERBOSE":"true","NODE_ENV":"production"}' app -dvm production
+# the value flag ends the bundle: later characters are its value, never flags
+run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true","NODE_ENV":"vc"}' app -dmvc
+# a suffix that reads as a boolean value for the first flag keeps that meaning
+# (compatibility): -dt is debug=true via true_aliases, never a bundle
+run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true"}' app -dt
+run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true"}' app -df
+# an undeclared character anywhere in the token means it is not a bundle
+run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true"}' app -dvz
+run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true"}' app -zdv
+# a bundle whose value flag is last but has no consumable value sets the
+# booleans and leaves the value flag untouched, like a bare -p would
+run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true","VERBOSE":"true"}' app -dvp
+run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true","VERBOSE":"true"}' app -dvp --debug
 run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true"}' app --debug=t
 run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true"}' app --debug false
 run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true"}' app --debug 0
@@ -82,6 +103,21 @@ actual="$(cd "$ROOT_DIR/tests/equals-only" && FLAGS2ENV_ALLOW_UNKNOWN=1 "$CLI" a
 expected="{\"PORT\":\"3000\",\"DEBUG\":\"false\",\"F2E_POSITIONALS\":\"[\\\"$CLI\\\",\\\"app\\\",\\\"value\\\"]\"}"
 if [ "$actual" != "$expected" ]; then
   printf 'Expected env allow-unknown parse: %s\nActual:                           %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+
+# require_equals applies inside mixed short bundles exactly as it does to a
+# lone short flag: inline values pass, a separated value stays positional
+actual="$(cd "$ROOT_DIR/tests/equals-only" && "$CLI" app -dp=8080)"
+expected="{\"PORT\":\"8080\",\"DEBUG\":\"true\",\"F2E_POSITIONALS\":\"[\\\"$CLI\\\",\\\"app\\\"]\"}"
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected equals-only bundle parse: %s\nActual:                           %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+actual="$(cd "$ROOT_DIR/tests/equals-only" && "$CLI" app -dp 8080)"
+expected="{\"PORT\":\"3000\",\"DEBUG\":\"true\",\"F2E_POSITIONALS\":\"[\\\"$CLI\\\",\\\"app\\\",\\\"8080\\\"]\"}"
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected equals-only bundle to leave separated value positional: %s\nActual: %s\n' "$expected" "$actual" >&2
   exit 1
 fi
 
@@ -425,6 +461,68 @@ if [ "$status" -eq 0 ] || [ "$actual" != "$expected" ]; then
   exit 1
 fi
 
+# a single-char boolean value alias that doubles as a sibling short flag makes
+# "-dt" ambiguous between "value for -d" and "bundle"; the audit must say so
+BUNDLE_ALIAS_DIR="$TMP_TEST_DIR/audit-bundle-alias"
+mkdir -p "$BUNDLE_ALIAS_DIR"
+cat > "$BUNDLE_ALIAS_DIR/.cli-flags.toml" <<'EOF'
+[flags.debug]
+env = "DEBUG"
+aliases = ["debug"]
+short = "d"
+type = "bool"
+true_aliases = ["t"]
+
+[flags.trace]
+env = "TRACE"
+aliases = ["trace"]
+short = "t"
+type = "bool"
+EOF
+actual="$("$CLI" audit "$BUNDLE_ALIAS_DIR/.cli-flags.toml")"
+expected='{"ok":true,"errorCount":0,"warningCount":1,"errors":[],"warnings":["flags.debug boolean value alias \"t\" doubles as short flag -t (flags.trace); \"-dt\" parses as a bundle, not a value for flags.debug"]}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected bundle-alias shadowing warning:\n%s\nActual: %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+# and the parser indeed reads the all-boolean token as a bundle
+actual="$(cd "$BUNDLE_ALIAS_DIR" && "$CLI" app -dt)"
+expected='{"DEBUG":"true","TRACE":"true"}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected -dt to parse as a bundle: %s\nActual: %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+
+# same collision against a value-taking short: the value-alias reading wins
+BUNDLE_ALIAS_VALUE_DIR="$TMP_TEST_DIR/audit-bundle-alias-value"
+mkdir -p "$BUNDLE_ALIAS_VALUE_DIR"
+cat > "$BUNDLE_ALIAS_VALUE_DIR/.cli-flags.toml" <<'EOF'
+[flags.debug]
+env = "DEBUG"
+aliases = ["debug"]
+short = "d"
+type = "bool"
+true_aliases = ["t"]
+
+[flags.tag]
+env = "TAG"
+aliases = ["tag"]
+short = "t"
+type = "string"
+EOF
+actual="$("$CLI" audit "$BUNDLE_ALIAS_VALUE_DIR/.cli-flags.toml")"
+expected='{"ok":true,"errorCount":0,"warningCount":1,"errors":[],"warnings":["flags.debug boolean value alias \"t\" doubles as short flag -t (flags.tag); \"-dt\" parses as a value for flags.debug, not a bundle"]}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected bundle-alias value shadowing warning:\n%s\nActual: %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+actual="$(cd "$BUNDLE_ALIAS_VALUE_DIR" && "$CLI" app -dt)"
+expected='{"DEBUG":"true"}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected -dt to stay a boolean value: %s\nActual: %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+
 set +e
 "$CLI" completion bash mycli "$UNSAFE_CONFIG" >/dev/null 2>/dev/null
 status=$?
@@ -514,6 +612,10 @@ run_subcommand_case "{\"GITISH_COMMAND\":\"\",\"GITISH_VERBOSE\":\"false\",\"GIT
 run_subcommand_case "{\"GITISH_COMMAND\":\"add\",\"GITISH_CMD_ADD\":\"true\",\"GITISH_VERBOSE\":\"false\",\"GITISH_ADD_ALL\":\"true\",$BASE_POSITIONALS}" gitish add -A
 run_subcommand_case "{\"GITISH_COMMAND\":\"add\",\"GITISH_CMD_ADD\":\"true\",\"GITISH_VERBOSE\":\"true\",$BASE_POSITIONALS}" gitish add --verbose
 run_subcommand_case "{\"GITISH_COMMAND\":\"commit\",\"GITISH_VERBOSE\":\"false\",\"GITISH_COMMIT_ALL\":\"true\",\"GITISH_COMMIT_MESSAGE\":\"fix stuff\",$BASE_POSITIONALS}" gitish ci -a -m 'fix stuff'
+# the git-style mixed bundle spelling of the same invocation, resolved in the
+# commit command scope, plus an inherited global bool joining the bundle
+run_subcommand_case "{\"GITISH_COMMAND\":\"commit\",\"GITISH_VERBOSE\":\"false\",\"GITISH_COMMIT_ALL\":\"true\",\"GITISH_COMMIT_MESSAGE\":\"fix stuff\",$BASE_POSITIONALS}" gitish ci -am 'fix stuff'
+run_subcommand_case "{\"GITISH_COMMAND\":\"commit\",\"GITISH_VERBOSE\":\"true\",\"GITISH_COMMIT_ALL\":\"true\",\"GITISH_COMMIT_MESSAGE\":\"wip\",$BASE_POSITIONALS}" gitish ci -vam wip
 run_subcommand_case "{\"GITISH_COMMAND\":\"remote add\",\"GITISH_CMD_REMOTE_ADD\":\"true\",\"GITISH_VERBOSE\":\"false\",\"GITISH_REMOTE_ADD_FETCH\":\"true\",\"GITISH_REMOTE_ADD_TRACK\":\"dev\",$BASE_POSITIONALS}" gitish remote add -f --track=dev
 run_subcommand_case "{\"GITISH_COMMAND\":\"remote\",\"GITISH_VERBOSE\":\"false\",\"GITISH_REMOTE_VERBOSE\":\"true\",$BASE_POSITIONALS}" gitish remote -v
 run_subcommand_case "{\"GITISH_COMMAND\":\"add\",\"GITISH_CMD_ADD\":\"true\",\"GITISH_VERBOSE\":\"false\",\"GITISH_POSITIONALS\":\"[\\\"$CLI\\\",\\\"gitish\\\",\\\"foo\\\",\\\"commit\\\"]\"}" gitish add foo commit

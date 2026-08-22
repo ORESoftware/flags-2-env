@@ -233,4 +233,26 @@ compare_ruby "ruby OptionParser scans after subcommand positionals" \
 compare_bash_getopts "bash getopts short option parity" \
   app -p 7070 -d -h shell.local -v -c -m shell
 
+# Short bundles ("ls -la", "rm -rf", "set -eo pipefail"): boolean-only groups
+# and groups whose final flag consumes a value, inline or separated. Every
+# reference parser below implements the same getopt rule.
+compare_bash_getopts "bash getopts boolean-only bundle" \
+  app -dv
+compare_bash_getopts "bash getopts bundle with separated value" \
+  app -dvp 7071 -m shell
+compare_bash_getopts "bash getopts bundle with inline value" \
+  app -dvp7072
+compare_python "python argparse boolean-only bundle" \
+  app -vd --env staging
+compare_python "python argparse bundle with separated value" \
+  app -dvp 7073
+compare_python "python argparse bundle with inline value" \
+  app -dvm production
+compare_ruby "ruby OptionParser boolean-only bundle" \
+  app -dv --env dev
+compare_ruby "ruby OptionParser bundle with separated value" \
+  app -dvm dev
+compare_node "node util.parseArgs boolean-only bundle" \
+  app -dv --mode production
+
 printf 'flags2env parity tests passed\n'
