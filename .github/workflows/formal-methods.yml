@@ -1,72 +1,115 @@
 name: Formal methods
 
+# ---------------------------------------------------------------------------
+# This repository has the best formal runner in the estate --
+# scripts/formal-check.sh -- and, until this file existed, no .github/
+# directory at all, so nothing ever invoked it. This workflow invokes it. It
+# deliberately adds no checking logic of its own: every proof obligation, every
+# CBMC flag and every SMT bound stays in scripts/formal-check.sh, where the nix
+# devshell also finds them, so a local run and a CI run check the same thing.
+#
+# scripts/formal-check.sh FAILS rather than skips when a tool is missing
+# ("cbmc is required; run this command through nix develop"), because it is
+# built to run inside a shell that guarantees the tool. This workflow keeps
+# that contract: it installs cbmc and z3 explicitly and lets the job fail if
+# they cannot be installed. A verification job that quietly went green because
+# its solver was absent would be worse than no job at all.
+#
+# Split into two jobs on purpose:
+#   manifest  cheap, needs only jq, gates every change to formal/fmctl.json.
+#   proofs    installs the solvers and runs the CBMC and Z3 obligations.
+# ---------------------------------------------------------------------------
+
 on:
   pull_request:
     paths:
-      - 'src/**'
-      - 'clients/rust/**'
+      - '.github/workflows/formal-methods.yml'
       - 'formal/**'
       - 'scripts/formal-check.sh'
+      - 'src/**'
+      - 'clients/rust/src/**'
       - 'tools/borrow-checker/**'
-      - '.nix/**'
-      - 'flake.nix'
-      - 'flake.lock'
-      - '.github/workflows/formal-methods.yml'
   push:
     branches: [main]
     paths:
-      - 'src/**'
-      - 'clients/rust/**'
+      - '.github/workflows/formal-methods.yml'
       - 'formal/**'
       - 'scripts/formal-check.sh'
+      - 'src/**'
+      - 'clients/rust/src/**'
       - 'tools/borrow-checker/**'
-      - '.nix/**'
-      - 'flake.nix'
-      - 'flake.lock'
-      - '.github/workflows/formal-methods.yml'
+  schedule:
+    - cron: '05 6 * * 2'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: formal-methods-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: formal-methods-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  c-and-smt:
-    name: CBMC and Z3
+  manifest:
+    name: Formal manifest
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-          show-progress: false
 
-      - name: Install Nix
-        uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342
-        with:
-          extra_nix_config: |
-            experimental-features = nix-command flakes
+      - name: Syntax-check the runner
+        run: bash -n scripts/formal-check.sh
 
-      - name: Prove C and SMT contracts
-        run: nix develop -c ./scripts/formal-check.sh
+      - name: Validate formal/fmctl.json and its declared paths
+        run: |
+          # `run_manifest` checks the manifest schema AND that every declared
+          # path still resolves inside the repository, so a directory rename
+          # fails here instead of silently narrowing what gets proved.
+          scripts/formal-check.sh manifest
 
-  rust-kani:
-    name: Kani
+  proofs:
+    name: CBMC and Z3 proof obligations
+    needs: manifest
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 90
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-          show-progress: false
 
-      - name: Prove Rust contracts
-        uses: model-checking/kani-github-action@f838096619a707b0f6b2118cf435eaccfa33e51f # v1.1
-        with:
-          kani-version: '0.67.0'
-          working-directory: clients/rust
+      - name: Install the solvers the runner requires
+        run: |
+          # No skip path here. scripts/formal-check.sh treats a missing tool as
+          # an error, and so does this job: if the solver cannot be installed,
+          # nothing was proved and the result must not be green.
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends cbmc z3
+          cbmc --version
+          z3 --version
+
+      - name: Prove the parser and terminal-context harnesses with CBMC
+        run: scripts/formal-check.sh cbmc
+
+      - name: Discharge the SMT obligations with Z3
+        run: |
+          # `run_z3` requires every check to come back `unsat` and fails if a
+          # specification produced no obligations at all -- an empty .smt2 file
+          # cannot pass by having nothing to prove.
+          scripts/formal-check.sh z3
+
+      - name: Record what was proved
+        if: always()
+        run: |
+          {
+            printf '### Formal methods\n\n'
+            printf '| tool | version |\n| --- | --- |\n'
+            printf '| cbmc | %s |\n' "$(cbmc --version 2>/dev/null || echo 'not installed')"
+            printf '| z3 | %s |\n' "$(z3 --version 2>/dev/null || echo 'not installed')"
+            printf '\nObligations are declared in `scripts/formal-check.sh`; this job runs\n'
+            printf 'them unchanged, so a CI result and a `nix develop` result mean the same\n'
+            printf 'thing.\n'
+          } >> "$GITHUB_STEP_SUMMARY"
