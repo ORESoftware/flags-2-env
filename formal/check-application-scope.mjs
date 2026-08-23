@@ -69,6 +69,10 @@ assert.equal(
 );
 await access(assertRepositoryPath(manifest.desktopBoundary.sharedRuntime));
 await access(assertRepositoryPath(manifest.desktopBoundary.scopeGate));
+assert.equal(
+  manifest.desktopBoundary.scopeGate,
+  "formal/check-application-scope.mjs",
+);
 assert.ok(
   Array.isArray(manifest.nonApplicationBoundaries) &&
     manifest.nonApplicationBoundaries.length > 0,
@@ -101,6 +105,9 @@ function isCovered(path) {
 
 const discovered = new Set();
 for (const path of tracked) {
+  // The scope gate necessarily names every desktop marker it detects.
+  if (path === manifest.desktopBoundary.scopeGate) continue;
+
   if (
     path.startsWith("apps/") ||
     path.includes("/src-tauri/") ||
