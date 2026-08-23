@@ -88,6 +88,20 @@ run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true","NODE_ENV":"vc"}' app -dm
 run_config_case "$ROOT_DIR/tests/short-bundles" '{"LONG":"true","ALL":"true"}' app -la
 run_config_case "$ROOT_DIR/tests/short-bundles" '{"RECURSIVE":"true","FORCE":"true"}' app -rf
 run_config_case "$ROOT_DIR/tests/short-bundles" '{"ERREXIT":"true","SHELL_OPTION":"pipefail"}' app -eo pipefail
+run_config_case "$ROOT_DIR/tests/short-bundles" '{"ERREXIT":"true","SHELL_OPTION":"pipefail"}' app -eo=pipefail
+# "tar -xvf archive.tar" shape: several leading bools, then a value flag
+run_config_case "$ROOT_DIR/tests/short-bundles" '{"LONG":"true","ALL":"true","RECURSIVE":"true","FORCE":"true"}' app -larf
+run_config_case "$ROOT_DIR/tests/short-bundles" '{"LONG":"true","ALL":"true","ERREXIT":"true","SHELL_OPTION":"pipefail"}' app -laeo pipefail
+# ...and an all-bool bundle never mistakes a following word for a value: -lae
+# ends in a bool, so "pipefail" stays a positional
+run_config_case "$ROOT_DIR/tests/short-bundles" '{"LONG":"true","ALL":"true","ERREXIT":"true"}' app -lae pipefail
+# The trailing bool of an all-bool bundle consumes a separated boolean value,
+# exactly as the lone spelling does. This is why "rm -rf false" sets FORCE
+# false rather than treating "false" as a filename - identical to "rm -r -f
+# false" today, and suppressed by require_equals (see the equals-only cases).
+run_config_case "$ROOT_DIR/tests/short-bundles" '{"RECURSIVE":"true","FORCE":"false"}' app -rf false
+run_config_case "$ROOT_DIR/tests/short-bundles" '{"RECURSIVE":"true","FORCE":"false"}' app -r -f false
+run_config_case "$ROOT_DIR/tests/short-bundles" '{"RECURSIVE":"true","FORCE":"true"}' app -rf archive.tar
 # Node accepts -pe (print + eval); the value-taking -e must end the bundle.
 run_config_case "$ROOT_DIR/tests/node-short-bundle" '{"PRINT":"true","EVAL":""}' app -pe ''
 # a suffix that reads as a boolean value for the first flag keeps that meaning
@@ -101,6 +115,36 @@ run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true"}' app -zdv
 # booleans and leaves the value flag untouched, like a bare -p would
 run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true","VERBOSE":"true"}' app -dvp
 run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true","VERBOSE":"true"}' app -dvp --debug
+
+# A bundle is shorthand for the same shorts written separately, so `-dv` must
+# mean exactly `-d -v` - including for the trailing short, the only one
+# adjacent to the next argv element and so the only one that can consume a
+# separated boolean value. Each pair below asserts that equivalence directly.
+run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true","VERBOSE":"false"}' app -dv false
+run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true","VERBOSE":"false"}' app -d -v false
+run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true","VERBOSE":"true"}' app -vd false
+run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true","VERBOSE":"true"}' app -v -d false
+# only a value the trailing flag would itself accept is consumed: "0" is a
+# false_alias of -d, never of -v, so it stays a positional either way
+run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true","VERBOSE":"true"}' app -dv 0
+run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true","VERBOSE":"true"}' app -d -v 0
+run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true","VERBOSE":"true"}' app -vd 0
+run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true","VERBOSE":"true"}' app -v -d 0
+# a non-boolean word is never consumed by a bundle's trailing bool
+run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true","VERBOSE":"true"}' app -dv notabool
+# a repeated short is still just its last occurrence, and the trailing one
+# still owns the separated value
+run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true","VERBOSE":"false"}' app -vv false
+# an explicit "=" makes an empty remainder a real assignment, so every
+# spelling of "set this to the empty string" agrees
+run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true","NODE_ENV":""}' app --mode=
+run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true","NODE_ENV":""}' app -m=
+run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true","VERBOSE":"true","NODE_ENV":""}' app -dvm=
+run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true","HOST":""}' app -h=
+run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true","VERBOSE":"true","HOST":""}' app -dvh=
+# an empty remainder with no "=" is still not a value: -dvm alone leaves the
+# value flag untouched rather than setting it to ""
+run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true","VERBOSE":"true"}' app -dvm
 run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true"}' app --debug=t
 run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true"}' app --debug false
 run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true"}' app --debug 0
@@ -135,6 +179,39 @@ actual="$(cd "$ROOT_DIR/tests/equals-only" && "$CLI" app -dp 8080)"
 expected="{\"PORT\":\"3000\",\"DEBUG\":\"true\",\"F2E_POSITIONALS\":\"[\\\"$CLI\\\",\\\"app\\\",\\\"8080\\\"]\"}"
 if [ "$actual" != "$expected" ]; then
   printf 'Expected equals-only bundle to leave separated value positional: %s\nActual: %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+
+# require_equals also suppresses the trailing bool's separated value, so a
+# bundle and its separated spelling stay equivalent under that setting too
+actual="$(cd "$ROOT_DIR/tests/equals-only" && "$CLI" app -d false)"
+expected="{\"PORT\":\"3000\",\"DEBUG\":\"true\",\"F2E_POSITIONALS\":\"[\\\"$CLI\\\",\\\"app\\\",\\\"false\\\"]\"}"
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected equals-only lone bool to leave separated value positional: %s\nActual: %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+
+# An undeclared character in a bundle-shaped token must be reported no matter
+# where it sits. Reporting used to depend on position: "-zd" failed the
+# token[1] lookup and was recorded, while "-dz" reached the parser's fallback
+# and vanished with no entry in any channel - the exact shape of a typo like
+# "rm -rF".
+for bundle_unknown in -zd -dz -dvz -zdv; do
+  actual="$(cd "$ROOT_DIR/tests/equals-only" && "$CLI" app "$bundle_unknown")"
+  expected="{\"PORT\":\"3000\",\"DEBUG\":\"false\",\"F2E_POSITIONALS\":\"[\\\"$CLI\\\",\\\"app\\\"]\",\"F2E_UNKNOWN_OPTIONS\":\"[\\\"$bundle_unknown\\\"]\"}"
+  if [ "$actual" != "$expected" ]; then
+    printf 'Expected %s to be reported as an unknown option: %s\nActual: %s\n' "$bundle_unknown" "$expected" "$actual" >&2
+    exit 1
+  fi
+done
+
+# ...but a character that is a *value* for the bundle's value-taking flag is
+# not an unknown option: "z" is -p's (invalid) value, reported through the
+# error channel instead, and the leading bools still apply
+actual="$(cd "$ROOT_DIR/tests/equals-only" && "$CLI" app -dpz)"
+expected="{\"PORT\":\"3000\",\"DEBUG\":\"true\",\"F2E_POSITIONALS\":\"[\\\"$CLI\\\",\\\"app\\\"]\"}"
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected mixed-bundle invalid value not to report an unknown option: %s\nActual: %s\n' "$expected" "$actual" >&2
   exit 1
 fi
 
@@ -1618,6 +1695,16 @@ wide_help="$(COLUMNS=140 "$CLI" --help | head -1)"
 if [ "${#wide_help}" -ne 140 ]; then
   printf 'COLUMNS=140 should widen piped --help, got %s\n' "${#wide_help}" >&2
   exit 1
+fi
+
+# The shared short-bundle contract: one declarative case list that both this
+# suite and the language clients assert against, so a binding cannot be green
+# without having actually parsed a bundle. See
+# scripts/verify-bundle-contract.py for why it exists.
+if command -v python3 >/dev/null 2>&1; then
+  python3 "$ROOT_DIR/scripts/verify-bundle-contract.py" --cli "$CLI" || exit 1
+else
+  printf 'bundle contract: no python3; skipped\n'
 fi
 
 printf 'flags2env tests passed\n'

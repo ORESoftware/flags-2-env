@@ -3029,13 +3029,32 @@ static int f2e_can_bundle_bool_shorts(F2EConfig *config, int scope, const char *
   return 1;
 }
 
-static void f2e_apply_bool_short_bundle(F2EConfig *config, int scope, F2EPair *pairs, size_t pair_count, const char *shorts, F2EJsonList *errors) {
-  for (const char *cursor = shorts; *cursor; cursor++) {
-    F2EFlag *flag = f2e_find_flag_by_short(config, scope, *cursor);
-    if (flag && flag->env[0] != '\0' && flag->type == F2E_TYPE_BOOL) {
-      /* A bundled -i is still an -i, so requires_tty applies here too. */
-      f2e_set_bare_bool(flag, pairs, pair_count, errors);
+/* An all-boolean bundle is shorthand for the same shorts written separately:
+   `-dv` must mean exactly `-d -v`. That equivalence was broken for the
+   trailing short, which alone is adjacent to the next argv element and so is
+   the only one that can consume a separated boolean value. `-d -v false` set
+   VERBOSE=false while `-dv false` set VERBOSE=true and left "false" as a
+   positional, so adding one character to a token silently changed the meaning
+   of the *next* argument. Only the last short gets the separated-value
+   reading, and only under the same guards as the lone spelling: the value
+   must be one this flag would itself accept. */
+static void f2e_apply_bool_short_bundle(F2EConfig *config, int scope, F2EPair *pairs, size_t pair_count, const char *shorts, int *index, int argc, const char *const argv[], F2EJsonList *errors) {
+  size_t count = shorts ? strlen(shorts) : 0;
+  for (size_t k = 0; k < count; k++) {
+    F2EFlag *flag = f2e_find_flag_by_short(config, scope, shorts[k]);
+    if (!flag || flag->env[0] == '\0' || flag->type != F2E_TYPE_BOOL) {
+      continue;
     }
+    if (k + 1 == count &&
+        config->allow_separated_values &&
+        index && *index + 1 < argc &&
+        f2e_can_consume_separated_value(flag, argv[*index + 1]) &&
+        f2e_try_set_bool_value(flag, pairs, pair_count, argv[*index + 1], errors)) {
+      (*index)++;
+      continue;
+    }
+    /* A bundled -i is still an -i, so requires_tty applies here too. */
+    f2e_set_bare_bool(flag, pairs, pair_count, errors);
   }
 }
 
@@ -3077,12 +3096,16 @@ static int f2e_apply_mixed_short_bundle(F2EConfig *config, int scope, F2EPair *p
     }
   }
   const char *value = shorts + split + 1;
+  int explicit_value = 0;
   if (*value == '=') {
     /* Mirrors the single-short spelling `-p=8080`, so `-dvp=8080` and
-       `-dvp8080` agree. */
+       `-dvp8080` agree. An explicit `=` also makes an *empty* remainder a
+       real value: `--mode=` sets the env var to "", so `-dvm=` must too
+       rather than silently dropping the assignment. */
     value++;
+    explicit_value = 1;
   }
-  if (*value != '\0') {
+  if (explicit_value || *value != '\0') {
     f2e_try_set_flag_value(value_flag, pairs, pair_count, value, errors);
   } else if (config->allow_separated_values &&
              *index + 1 < argc &&
@@ -3159,15 +3182,27 @@ static void f2e_apply_long_arg(F2EConfig *config, int scope, F2EPair *pairs, siz
   }
 }
 
-static void f2e_apply_short_arg(F2EConfig *config, int scope, F2EPair *pairs, size_t pair_count, const char *token, int *index, int argc, const char *const argv[], F2EJsonList *errors) {
+/* Returns 1 when the token was handled, 0 only for a bundle-shaped token that
+   no reading could apply; the caller then reports it in `unknown_options_env`.
+   That channel used to depend on *where* the undeclared character sat: `-zd`
+   was reported because `f2e_token_looks_like_known_option` failed on token[1]
+   before this function ran, while `-dz` and `-rF` reached the fallback below
+   and vanished with no entry anywhere - the exact shape of a mistyped bundle.
+
+   The early bails below stay 1 on purpose. A short that resolves to no flag
+   here has already been screened by the caller, so reaching this point means
+   it is declared but deliberately not applicable in this scope - an ambiguous
+   short under F2E_SCOPE_LENIENT, or a flag with no env target. Those are
+   accepted and not applied, never reported as unknown. */
+static int f2e_apply_short_arg(F2EConfig *config, int scope, F2EPair *pairs, size_t pair_count, const char *token, int *index, int argc, const char *const argv[], F2EJsonList *errors) {
   if (token[1] == '\0') {
-    return;
+    return 1;
   }
 
   char short_name = token[1];
   F2EFlag *first = f2e_find_flag_by_short(config, scope, short_name);
   if (!first || first->env[0] == '\0') {
-    return;
+    return 1;
   }
 
   const char *rest = token + 2;
@@ -3178,7 +3213,10 @@ static void f2e_apply_short_arg(F2EConfig *config, int scope, F2EPair *pairs, si
   }
 
   if (first->type != F2E_TYPE_BOOL) {
-    if (*rest) {
+    /* `has_inline_value` marks an explicit `=`, which makes even an empty
+       remainder a real assignment. Ignoring it made `-m=` a no-op while
+       `--mode=` set "" - the same flag, two spellings, two meanings. */
+    if (has_inline_value || *rest) {
       f2e_try_set_flag_value(first, pairs, pair_count, rest, errors);
     } else if (config->allow_separated_values &&
                *index + 1 < argc &&
@@ -3186,12 +3224,12 @@ static void f2e_apply_short_arg(F2EConfig *config, int scope, F2EPair *pairs, si
       (*index)++;
       f2e_try_set_flag_value(first, pairs, pair_count, argv[*index], errors);
     }
-    return;
+    return 1;
   }
 
   if (has_inline_value) {
     f2e_try_set_flag_value(first, pairs, pair_count, rest, errors);
-    return;
+    return 1;
   }
 
   if (*rest == '\0') {
@@ -3200,15 +3238,15 @@ static void f2e_apply_short_arg(F2EConfig *config, int scope, F2EPair *pairs, si
         f2e_can_consume_separated_value(first, argv[*index + 1]) &&
         f2e_try_set_bool_value(first, pairs, pair_count, argv[*index + 1], errors)) {
       (*index)++;
-      return;
+      return 1;
     }
     f2e_set_bare_bool(first, pairs, pair_count, errors);
-    return;
+    return 1;
   }
 
   if (f2e_can_bundle_bool_shorts(config, scope, token + 1)) {
-    f2e_apply_bool_short_bundle(config, scope, pairs, pair_count, token + 1, errors);
-    return;
+    f2e_apply_bool_short_bundle(config, scope, pairs, pair_count, token + 1, index, argc, argv, errors);
+    return 1;
   }
 
   /* Compatibility before bundling: a suffix that reads as a boolean value for
@@ -3219,15 +3257,22 @@ static void f2e_apply_short_arg(F2EConfig *config, int scope, F2EPair *pairs, si
     const char *canonical = NULL;
     if (f2e_bool_value_alias(first, rest, &canonical)) {
       f2e_try_set_flag_value(first, pairs, pair_count, rest, errors);
-      return;
+      return 1;
     }
   }
 
   if (f2e_apply_mixed_short_bundle(config, scope, pairs, pair_count, token + 1, index, argc, argv, errors)) {
-    return;
+    return 1;
   }
 
+  /* Every bundle reading failed, so the historical fallback applies: the
+     suffix is an inline value for the first flag. For a boolean that value is
+     invalid by construction (a valid one was already taken by the alias check
+     above), so the token sets nothing. Report the error for callers watching
+     `errors_env`, and return 0 so the token also surfaces in
+     `unknown_options_env` instead of disappearing. */
   f2e_try_set_flag_value(first, pairs, pair_count, rest, errors);
+  return 0;
 }
 
 static const char *f2e_audit_flag_name(const F2EFlag *flag) {
@@ -7518,8 +7563,11 @@ static void f2e_scan_argv(F2EConfig *config,
     }
     if (token[1] == '-') {
       f2e_apply_long_arg(config, scope, pairs, pair_count, token, &i, argc, argv, errors);
-    } else {
-      f2e_apply_short_arg(config, scope, pairs, pair_count, token, &i, argc, argv, errors);
+    } else if (!f2e_apply_short_arg(config, scope, pairs, pair_count, token, &i, argc, argv, errors)) {
+      /* Bundle-shaped token whose characters do not spell a usable option. */
+      if (!allow_unknown && unknown_options) {
+        f2e_json_list_append(unknown_options, token);
+      }
     }
   }
 }

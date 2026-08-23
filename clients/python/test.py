@@ -1,6 +1,10 @@
+import json
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
+
+# Resolved before the chdir dance below, so the shared contract stays findable.
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 from flags2env import Flags2Env
 from lib import _default_library_name, _resolve_library_path
@@ -36,6 +40,17 @@ assert parsed["COLOR"] == "true", parsed
 explicit = sdk.parse(["app", "--debug=f"], "../../.cli-flags.toml")
 assert explicit["DEBUG"] == "false", explicit
 assert explicit["PORT"] == "3000", explicit
+
+# Shared short-bundle contract. Combined single-character flags ("rm -rf",
+# "set -eo pipefail", "node -pe") are the densest corner of the parser, and a
+# binding that never parses one is green without having exercised the library.
+# The case list is generated from the reference parser; see
+# scripts/verify-bundle-contract.py.
+_contract = json.loads((REPO_ROOT / "tests/fixtures/bundle-contract.json").read_text())
+for _case in _contract["cases"]:
+    _actual = sdk.parse(_case["argv"])
+    assert _actual == _case["expect"], (_case["name"], _case["argv"], _actual)
+assert len(_contract["cases"]) >= 19, _contract
 
 combined = sdk.apply({"PORT": "env", "KEEP": "1"}, ["app", "--port", "8181"])
 assert combined["PORT"] == "8181", combined

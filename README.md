@@ -1584,10 +1584,23 @@ $ flags2env app -dvp=8080     # same, inline value with equals
 The rules, all of them the classic getopt ones plus this parser's existing
 guarantees:
 
+- A bundle is exactly its separated spelling: `-dv` means `-d -v`, and the two
+  must agree in every case. That includes the trailing short, the only one
+  adjacent to the next argument and so the only one that can consume a
+  separated boolean value — `-dv false` sets `VERBOSE=false` just as
+  `-d -v false` does. Only a value the trailing flag would itself accept is
+  consumed, so a word like `archive.tar` stays a positional. `require_equals`
+  suppresses this for bundles and lone shorts alike.
 - Every character before the value flag must be a declared boolean short with
   an env target. A token containing an undeclared character is not a bundle;
   it falls back to the historical single-flag reading and never silently
-  half-applies.
+  half-applies. Such a token is reported through `unknown_options_env`
+  wherever the undeclared character sits, so a typo like `rm -rF` surfaces
+  the same way `rm -Fr` does rather than vanishing.
+- An explicit `=` makes an empty remainder a real value, so every spelling of
+  "set this to the empty string" agrees: `--mode=`, `-m=` and `-dvm=` all
+  export `NODE_ENV=""`. Without the `=`, a bundle ending at its value flag
+  leaves that flag untouched.
 - The value flag ends the bundle: characters after it belong to its value,
   never to more flags. Put the value-taking flag last — `node -pe '1 + 1'`
   works, while `-ep '1 + 1'` reads `p` as `-e`'s inline value, exactly as
