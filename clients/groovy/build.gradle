@@ -47,10 +47,10 @@ publishing {
       pom {
         name = 'flags2env Groovy'
         description = 'Groovy facade for the flags2env Java native bridge.'
-        url = 'https://github.com/ORESoftware/flags-2-env'
+        url = 'https://github.com/flags-2-env/flags-2-env'
         licenses { license { name = 'MIT'; url = 'https://opensource.org/license/mit' } }
         developers { developer { id = 'oresoftware'; name = 'ORESoftware' } }
-        scm { url = 'https://github.com/ORESoftware/flags-2-env' }
+        scm { url = 'https://github.com/flags-2-env/flags-2-env' }
       }
     }
   }

@@ -34,6 +34,8 @@ unsafe extern "C" {
     ) -> *mut c_char;
     fn f2e_audit_config_status() -> i32;
     fn f2e_audit_config_status_from_file(config_path: *const c_char) -> i32;
+    fn f2e_doctor_from_file(config_path: *const c_char) -> *mut c_char;
+    fn f2e_doctor_status_from_file(config_path: *const c_char) -> i32;
     fn f2e_free(value: *mut c_char);
 }
 
@@ -128,6 +130,9 @@ impl BundledFlags2Env {
                 report.get("providedFlags"),
                 "bundled flags2env parser did not return argv-only overrides",
             )?,
+            dotenv: json_string_map(report.get("dotenv")),
+            dotenv_overrides: json_string_map(report.get("dotenvOverrides")),
+            source_order: json_string_vec_map(report.get("sourceOrder")),
             command: report
                 .get("command")
                 .and_then(serde_json::Value::as_str)
@@ -179,6 +184,38 @@ impl BundledFlags2Env {
             Ok(())
         } else {
             Err(format!("flags2env config audit failed with status {status}").into())
+        }
+    }
+
+    /// Diagnoses the `.env` files `config_path` reads: every file in
+    /// `[env] files`, or `./.env` when that key is absent.
+    ///
+    /// Returns the JSON report as a string — the same
+    /// `{"ok", "errorCount", "warningCount", "errors", "warnings"}` shape
+    /// [`Self::audit_config`] produces — so a caller can print it, or parse it
+    /// to render findings its own way. Values from the `.env` are never
+    /// included, only key names and positions.
+    pub fn doctor(&self, config_path: &str) -> Result<String, Box<dyn std::error::Error>> {
+        let config_path = CString::new(config_path)?;
+        // SAFETY: the CString is valid for the duration of the call; the
+        // returned pointer is owned by the caller and released by
+        // `take_owned_string`.
+        let result = unsafe { f2e_doctor_from_file(config_path.as_ptr()) };
+        take_owned_string(result)
+            .ok_or_else(|| "flags2env could not run doctor; check the config path".into())
+    }
+
+    /// `Ok(())` when `doctor` found no error-level problem. Warnings —
+    /// ambiguity, permissions — do not fail, matching the CLI's exit code, so
+    /// this is usable as a build-script or test gate.
+    pub fn doctor_status(&self, config_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let config_path = CString::new(config_path)?;
+        // SAFETY: the CString is valid for the duration of the call.
+        let status = unsafe { f2e_doctor_status_from_file(config_path.as_ptr()) };
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(format!("flags2env doctor reported {status} error-level finding(s)").into())
         }
     }
 
@@ -250,6 +287,18 @@ fn json_string_map(value: Option<&serde_json::Value>) -> HashMap<String, String>
             object
                 .iter()
                 .filter_map(|(key, item)| item.as_str().map(|text| (key.clone(), text.to_string())))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn json_string_vec_map(value: Option<&serde_json::Value>) -> HashMap<String, Vec<String>> {
+    value
+        .and_then(|value| value.as_object())
+        .map(|object| {
+            object
+                .iter()
+                .map(|(key, item)| (key.clone(), json_string_vec(Some(item))))
                 .collect()
         })
         .unwrap_or_default()

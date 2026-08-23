@@ -1,0 +1,304 @@
+name: Downstream consumer fixtures
+
+# The twelve repositories in github.com/flags-2-env-test are real consumers of
+# this library: each declares the dependency in .zpkg.toml, vendors this repo at
+# .vendor/.zed/oresoftware/flags-2-env, and asserts the same six parse results
+# from its own runtime. This workflow rebuilds each of them against the commit
+# under review rather than against the commit they have pinned, so a change to
+# src/parser.c that silently alters the environment map fails here before it
+# reaches a release.
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/downstream-consumers.yml"
+      - "Makefile"
+      - "clients/**"
+      - "src/**"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/downstream-consumers.yml"
+      - "Makefile"
+      - "clients/**"
+      - "src/**"
+  schedule:
+    - cron: "43 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    name: Pin the commit under review
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      tooling_ref: ${{ steps.source.outputs.tooling_ref }}
+    steps:
+      - name: Check out this repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Validate GitHub Actions syntax
+        uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+        with:
+          args: .github/workflows/downstream-consumers.yml
+
+      - name: Select the exact canonical commit under review
+        id: source
+        env:
+          SOURCE_REF: ${{ github.event.pull_request.head.sha || github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_REF" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "source is not an immutable full commit: $SOURCE_REF" >&2
+            exit 1
+          }
+          echo "tooling_ref=$SOURCE_REF" >> "$GITHUB_OUTPUT"
+
+  # Each fixture checks its own .cli-flags.toml against a digest it carries, so
+  # a single repository cannot drift unnoticed. That is not enough on its own:
+  # the fixtures could be edited together and stay self-consistent while
+  # the constant they all agree on no longer describes anything. This job is the
+  # cross-repository half -- it fetches them all and proves the contract is one file.
+  conformance:
+    name: The fixtures share one contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Fetch and compare every fixture contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$(mktemp -d)"
+
+          # Every fixture in the fleet declares the same flag contract. That
+          # includes feature-matrix, which deliberately adopted the identical
+          # .cli-flags.toml so its wider surface is measured against the same
+          # declarations the argv fixtures use.
+          argv_fixtures=(
+            bun-app cpp-app dart-app deno-app gleam-app golang-app
+            java-app nodejs-app php-app python-app ruby-app rust-app
+          )
+
+          # feature-matrix is in the fleet but is not an argv fixture. It shares
+          # the contract, and is compared on it, but asserts a different and
+          # larger surface -- value sources, ordering, subcommands, audits,
+          # codegen, completion -- so its EXPECTED.md is legitimately its own
+          # document. Holding it to the argv one would fail a repository that is
+          # behaving correctly.
+          contract_repos=("${argv_fixtures[@]}" feature-matrix)
+
+          fetch() {
+            local prefix="$1" repo="$2" file="$3"
+            curl --fail-with-body --silent --show-error --location \
+              --output "$work/$prefix--$repo--$file" \
+              "https://raw.githubusercontent.com/flags-2-env-test/$repo/main/$file"
+          }
+
+          for repo in "${contract_repos[@]}"; do fetch contract "$repo" .cli-flags.toml; done
+          for repo in "${argv_fixtures[@]}";  do fetch expected "$repo" EXPECTED.md;   done
+
+          fail=0
+          compare() {
+            local label="$1" prefix="$2" file="$3" want="$4"
+            local digests count
+            echo "### $label"
+            digests="$(sha256sum "$work/$prefix"--*--"$file" | awk '{print $1}' | sort -u)"
+            count="$(printf '%s\n' "$digests" | wc -l)"
+            if [ "$count" -ne 1 ]; then
+              echo "::error::$file differs across $label; $count distinct versions" >&2
+              sha256sum "$work/$prefix"--*--"$file" >&2
+              fail=1
+              return
+            fi
+            echo "all $want agree: $digests"
+          }
+
+          compare "the whole fleet (.cli-flags.toml)" contract .cli-flags.toml \
+            "${#contract_repos[@]}"
+          compare "the argv fixtures (EXPECTED.md)" expected EXPECTED.md \
+            "${#argv_fixtures[@]}"
+
+          # The contract each fixture asserts against locally must be the same
+          # file this repository's own consumers are held to.
+          canonical="$(sha256sum "$work/contract--rust-app--.cli-flags.toml" | awk '{print $1}')"
+          echo "canonical_contract=$canonical"
+          {
+            echo "### Fixture contract conformance"
+            echo
+            echo "- Contract compared across: ${#contract_repos[@]} repositories"
+            echo "- EXPECTED.md compared across: ${#argv_fixtures[@]} argv fixtures"
+            echo "- Shared \`.cli-flags.toml\`: \`$canonical\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          exit "$fail"
+
+  fixture:
+    name: ${{ matrix.repository }}
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        repository:
+          - bun-app
+          - cpp-app
+          - dart-app
+          - deno-app
+          - gleam-app
+          - golang-app
+          - java-app
+          - nodejs-app
+          - php-app
+          - python-app
+          - ruby-app
+          - rust-app
+          # Not an argv fixture: feature-matrix covers value sources, ordering,
+          # subcommands, audits, codegen, and completion. It follows the same
+          # conventions as the twelve -- same vendor path, same self-asserting
+          # container -- so it runs through this matrix unchanged.
+          - feature-matrix
+    steps:
+      - name: Check out the consumer fixture without credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: flags-2-env-test/${{ matrix.repository }}
+          path: fixture
+          persist-credentials: false
+
+      - name: Check out the canonical library at the commit under review
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: flags-2-env/flags-2-env
+          ref: ${{ needs.prepare.outputs.tooling_ref }}
+          path: library
+          persist-credentials: false
+
+      # The fixture's .zpkg.toml is the declaration of record. Deriving the
+      # vendor path from it -- rather than hardcoding it here -- is what makes
+      # this step able to catch the failure mode where a manifest names one
+      # directory and the build reads from another, which resolves fine and
+      # tests nothing.
+      - name: Derive the vendor path from the fixture manifest
+        id: manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import pathlib
+          import sys
+          import tomllib
+
+          zed = tomllib.loads(pathlib.Path("fixture/.zpkg.toml").read_text())
+
+          # The compatibility window closed on 2026-08-19, so a fixture may
+          # declare either coordinate: the canonical one it should migrate to,
+          # or the legacy one it has not migrated yet. Pinning this to the
+          # legacy spelling alone made the migration itself a CI failure, which
+          # is the opposite of what the cutoff asks fixtures to do.
+          CANONICAL = "flags-2-env/flags-2-env"
+          LEGACY = "oresoftware/flags-2-env"
+
+          declared = list(zed["dependencies"])
+          if declared not in ([CANONICAL], [LEGACY]):
+              raise SystemExit(
+                  f"unexpected dependency set: {declared}; expected exactly "
+                  f"[{CANONICAL!r}] or [{LEGACY!r}]"
+              )
+          if declared == [LEGACY]:
+              print(
+                  f"::warning::fixture still pins {LEGACY}; migrate it to {CANONICAL}",
+                  file=sys.stderr,
+              )
+
+          install_dir = zed["install"]["dir"]
+          vendor = pathlib.PurePosixPath(install_dir) / pathlib.PurePosixPath(declared[0])
+          print(f"vendor={vendor}")
+          print(f"install_dir={install_dir}")
+          PY
+
+      - name: Replace the pinned dependency with the commit under review
+        env:
+          VENDOR: ${{ steps.manifest.outputs.vendor }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="fixture/$VENDOR"
+          rm -rf "$target"
+          mkdir -p "$target"
+          # --exclude .git: the fixture pins this repo as a submodule, so the
+          # checkout carries a .git directory that must not land in the Docker
+          # build context.
+          rsync -a --exclude '.git' library/ "$target/"
+          test -f "$target/src/parser.c"
+          test -f "$target/Makefile"
+
+      - name: Build the fixture image
+        working-directory: fixture
+        shell: bash
+        run: docker build --tag "f2e-fixture-${{ matrix.repository }}" .
+
+      - name: Assert the shared contract
+        shell: bash
+        run: |
+          set -o pipefail
+          log="$RUNNER_TEMP/${{ matrix.repository }}.log"
+          docker run --rm "f2e-fixture-${{ matrix.repository }}" 2>&1 | tee "$log"
+
+      # A green fixture only means something if a red one is reachable. Mount a
+      # contract with one altered default over the real one and require the
+      # container to fail. If it still passes, the assertions are not reaching
+      # the parser and the step above proved nothing about this commit.
+      - name: Prove the fixture can still fail
+        shell: bash
+        run: |
+          set -euo pipefail
+          mutant="$(mktemp -d)/.cli-flags.toml"
+          sed 's/^default = 3000$/default = 3001/' fixture/.cli-flags.toml > "$mutant"
+          cmp -s fixture/.cli-flags.toml "$mutant" && {
+            echo "::error::mutation was a no-op; the vacuity check is itself broken" >&2
+            exit 1
+          }
+          if docker run --rm -v "$mutant:/app/.cli-flags.toml:ro" \
+               "f2e-fixture-${{ matrix.repository }}" >/dev/null 2>&1; then
+            echo "::error::${{ matrix.repository }} passes against a mutated contract" >&2
+            exit 1
+          fi
+          echo "${{ matrix.repository }} correctly rejects a mutated contract"
+
+      - name: Upload fixture output
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ${{ matrix.repository }}-output
+          path: ${{ runner.temp }}/${{ matrix.repository }}.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Record what was verified
+        if: ${{ always() }}
+        env:
+          TOOLING_REF: ${{ needs.prepare.outputs.tooling_ref }}
+          VENDOR: ${{ steps.manifest.outputs.vendor }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture_sha="$(git -C fixture rev-parse HEAD)"
+          {
+            echo "### flags-2-env-test/${{ matrix.repository }}"
+            echo
+            echo "- Fixture commit: \`$fixture_sha\`"
+            echo "- Library under review: \`$TOOLING_REF\`"
+            echo "- Vendored at: \`$VENDOR\` (from the fixture's own \`[install].dir\`)"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -4,7 +4,7 @@ Gem::Specification.new do |spec|
   spec.summary = "Ruby bindings for flags2env"
   spec.authors = ["ORESoftware"]
   spec.license = "MIT"
-  spec.homepage = "https://github.com/ORESoftware/flags-2-env"
+  spec.homepage = "https://github.com/flags-2-env/flags-2-env"
   spec.required_ruby_version = ">= 3.0"
   spec.files = [
     "LICENSE",

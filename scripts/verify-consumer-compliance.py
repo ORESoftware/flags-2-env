@@ -15,6 +15,7 @@ import re
 import sys
 import tomllib
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -80,7 +81,9 @@ EXACT_SECRET_ENVS = {
     "OTEL_EXPORTER_OTLP_HEADERS",
     "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
 }
-UPSTREAM_GIT = "https://github.com/ORESoftware/flags-2-env.git"
+CANONICAL_UPSTREAM_GIT = "https://github.com/flags-2-env/flags-2-env.git"
+COMPATIBILITY_UPSTREAM_GIT = "https://github.com/ORESoftware/flags-2-env.git"
+COMPATIBILITY_SUPPORT_END = date(2026, 8, 19)
 
 
 @dataclass(frozen=True)
@@ -172,8 +175,19 @@ def find_flags2env_dependency(manifest: dict[str, Any]) -> Any:
     return None
 
 
+def supported_upstream_git(policy_date: date) -> frozenset[str]:
+    sources = {CANONICAL_UPSTREAM_GIT}
+    if policy_date <= COMPATIBILITY_SUPPORT_END:
+        sources.add(COMPATIBILITY_UPSTREAM_GIT)
+    return frozenset(sources)
+
+
 def check_rust_pin(
-    root: Path, manifest_path: str, lock_path: str, parser_ref: str
+    root: Path,
+    manifest_path: str,
+    lock_path: str,
+    parser_ref: str,
+    policy_date: date,
 ) -> list[str]:
     errors: list[str] = []
     try:
@@ -190,8 +204,14 @@ def check_rust_pin(
             "Cargo.toml must declare flags2env as a git table with an immutable rev"
         )
     else:
-        if dependency.get("git") != UPSTREAM_GIT:
-            errors.append(f"flags2env git source must be {UPSTREAM_GIT}")
+        upstream_git = dependency.get("git")
+        supported_sources = supported_upstream_git(policy_date)
+        if upstream_git not in supported_sources:
+            errors.append(
+                f"flags2env git source must be {CANONICAL_UPSTREAM_GIT}; "
+                f"the compatibility source is accepted only through "
+                f"{COMPATIBILITY_SUPPORT_END.isoformat()}"
+            )
         if dependency.get("rev") != parser_ref:
             errors.append("flags2env Cargo rev must exactly match parser_ref")
         if any(key in dependency for key in ("branch", "tag", "version")):
@@ -200,7 +220,11 @@ def check_rust_pin(
             )
 
     lock_text = lock_file.read_text(encoding="utf-8")
-    if UPSTREAM_GIT not in lock_text or parser_ref not in lock_text:
+    if (
+        not isinstance(dependency, dict)
+        or dependency.get("git") not in lock_text
+        or parser_ref not in lock_text
+    ):
         errors.append("Cargo.lock does not contain the exact flags2env git revision")
     return errors
 
@@ -469,10 +493,20 @@ def main() -> int:
     )
     parser.add_argument("--rust-manifest")
     parser.add_argument("--cargo-lock", default="Cargo.lock")
+    parser.add_argument(
+        "--policy-date",
+        default=date.today().isoformat(),
+        help="UTC policy date in YYYY-MM-DD form; defaults to today",
+    )
     args = parser.parse_args()
 
     root = Path(args.root).resolve()
     errors: list[str] = []
+    try:
+        policy_date = date.fromisoformat(args.policy_date)
+    except ValueError:
+        fail("policy-date must use YYYY-MM-DD")
+        return 1
     if not PIN_RE.fullmatch(args.parser_ref):
         errors.append("parser_ref must be a full 40-character lowercase commit SHA")
 
@@ -534,7 +568,13 @@ def main() -> int:
 
     if args.rust_manifest:
         errors.extend(
-            check_rust_pin(root, args.rust_manifest, args.cargo_lock, args.parser_ref)
+            check_rust_pin(
+                root,
+                args.rust_manifest,
+                args.cargo_lock,
+                args.parser_ref,
+                policy_date,
+            )
         )
         errors.extend(check_trusted_contract_resolution(root, args.kind))
 

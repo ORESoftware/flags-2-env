@@ -5,6 +5,7 @@ import importlib.util
 import sys
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,6 +18,20 @@ SPEC.loader.exec_module(MODULE)
 
 
 class ConsumerCompliancePolicyTests(unittest.TestCase):
+    def test_compatibility_source_expires_after_ten_day_window(self) -> None:
+        self.assertIn(
+            MODULE.COMPATIBILITY_UPSTREAM_GIT,
+            MODULE.supported_upstream_git(date(2026, 8, 19)),
+        )
+        self.assertNotIn(
+            MODULE.COMPATIBILITY_UPSTREAM_GIT,
+            MODULE.supported_upstream_git(date(2026, 8, 20)),
+        )
+        self.assertIn(
+            MODULE.CANONICAL_UPSTREAM_GIT,
+            MODULE.supported_upstream_git(date(2030, 1, 1)),
+        )
+
     def test_token_metadata_is_not_secret_material(self) -> None:
         for env in [
             "AUTH_TOKEN_TTL_SECS",

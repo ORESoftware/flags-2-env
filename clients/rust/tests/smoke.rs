@@ -5,6 +5,9 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 struct CwdGuard(PathBuf);
 
@@ -255,7 +258,11 @@ default = "true"
 }
 
 fn temp_dir(label: &str) -> PathBuf {
-    let path = env::temp_dir().join(format!("flags2env-rust-{label}-{}", std::process::id()));
+    let sequence = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let path = env::temp_dir().join(format!(
+        "flags2env-rust-{label}-{}-{sequence}",
+        std::process::id()
+    ));
     let _ = fs::remove_dir_all(&path);
     fs::create_dir_all(&path).unwrap();
     path
@@ -269,4 +276,39 @@ fn default_library_name() -> &'static str {
     } else {
         "libflags2env.so"
     }
+}
+
+#[test]
+fn doctor_binding_returns_a_report_and_a_status() {
+    // Deliberately does not chdir: doctor resolves .env against the process
+    // working directory, and these tests share one process, so changing it
+    // would break whichever sibling test happened to run alongside. The
+    // finding logic is covered by the C suite (tests/doctor-findings); what is
+    // worth proving here is the binding — that the symbols resolve, the owned
+    // string comes back intact, and the status maps the way the CLI does.
+    let directory = tempfile::tempdir().expect("temp dir");
+    let config = directory.path().join(".cli-flags.toml");
+    std::fs::write(
+        &config,
+        "[env]\nfiles = [\"absent.env\"]\n\n[flags.kept]\nenv = \"SMOKE_KEPT\"\naliases = [\"kept\"]\ntype = \"string\"\n",
+    )
+    .expect("config");
+
+    let parser = flags2env::BundledFlags2Env::new();
+    let report = parser
+        .doctor(config.to_str().expect("utf-8 path"))
+        .expect("doctor runs");
+
+    assert!(report.contains("\"ok\""), "{report}");
+    assert!(
+        report.contains("listed in env.files but was not readable"),
+        "{report}"
+    );
+    // A missing file is a warning, not an error, so the gate still passes.
+    assert!(
+        parser
+            .doctor_status(config.to_str().expect("utf-8 path"))
+            .is_ok(),
+        "{report}"
+    );
 }

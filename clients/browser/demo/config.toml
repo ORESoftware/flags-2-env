@@ -4,7 +4,7 @@ errors_env = "TOOL_ERRORS"
 unknown_options_env = "TOOL_UNKNOWN_OPTIONS"
 
 [help]
-url = "https://github.com/ORESoftware/flags-2-env"
+url = "https://github.com/flags-2-env/flags-2-env"
 columns = ["options", "env", "type", "default", "description"]
 
 [flags.verbose]

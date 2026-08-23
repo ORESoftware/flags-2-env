@@ -32,7 +32,7 @@ run_manifest() {
       "schemaVersion"
     ] | sort))
     and .schemaVersion == "formal-methods.v1"
-    and .repoUrl == "https://github.com/ORESoftware/flags-2-env.git"
+    and .repoUrl == "https://github.com/flags-2-env/flags-2-env.git"
     and (.gitRef | type == "string"
       and test("^[A-Za-z0-9][A-Za-z0-9._/-]{0,179}$")
       and contains("..") == false
@@ -100,6 +100,39 @@ run_cbmc() {
       --signed-overflow-check \
       --unsigned-overflow-check \
       --conversion-check \
+      --div-by-zero-check \
+      --unwind 10 \
+      --unwinding-assertions \
+      --trace \
+      --verbosity 3
+  done
+
+  # terminal_context proofs run without --conversion-check: the scanner's
+  # (unsigned char) casts feeding tolower are the C-mandated idiom for
+  # high-bit bytes, and that defined, deliberate value-changing conversion
+  # is exactly what --conversion-check lints against. Every segfault-class
+  # check (bounds, pointer, overflow, unwinding) stays on.
+  local terminal_harness="$repo_root/formal/cbmc/terminal_context_harness.c"
+  for proof in \
+    harness_ascii_equal_ci \
+    harness_ascii_contains_ci \
+    harness_path_basename \
+    harness_value_truthy \
+    harness_parse_columns; do
+    echo "==> CBMC: $proof"
+    timeout \
+      --signal=TERM \
+      --kill-after="${solver_kill_grace}s" \
+      "${proof_timeout}s" \
+      cbmc "$terminal_harness" \
+      --function "$proof" \
+      --drop-unused-functions \
+      --reachability-slice-fb \
+      --bounds-check \
+      --pointer-check \
+      --pointer-overflow-check \
+      --signed-overflow-check \
+      --unsigned-overflow-check \
       --div-by-zero-check \
       --unwind 10 \
       --unwinding-assertions \

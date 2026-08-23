@@ -1,0 +1,41 @@
+# Every source ranking the parser supports, one per key.
+[order-of-preference]
+F2E_ORDER_FILE_FIRST = (env_file, env_shell, flags)
+F2E_ORDER_SHELL_FIRST = (env_shell, flags)
+F2E_ORDER_FILE_OVER_FLAGS = (env_file, flags)
+F2E_ORDER_BRACKETS = [env_file, env_shell, flags]
+F2E_ORDER_QUOTED = ["env_file", "flags"]
+
+[env]
+ignore = ["F2E_ORDER_UNDECLARED"]
+
+[flags.file_first]
+env = "F2E_ORDER_FILE_FIRST"
+aliases = ["file-first"]
+type = "string"
+
+[flags.shell_first]
+env = "F2E_ORDER_SHELL_FIRST"
+aliases = ["shell-first"]
+type = "string"
+
+[flags.file_over_flags]
+env = "F2E_ORDER_FILE_OVER_FLAGS"
+aliases = ["file-over-flags"]
+type = "string"
+
+[flags.brackets]
+env = "F2E_ORDER_BRACKETS"
+aliases = ["brackets"]
+type = "string"
+
+[flags.quoted]
+env = "F2E_ORDER_QUOTED"
+aliases = ["quoted"]
+type = "string"
+
+# no entry, so this one keeps the default flags > env_shell > env_file
+[flags.default_order]
+env = "F2E_ORDER_DEFAULT"
+aliases = ["default-order"]
+type = "string"

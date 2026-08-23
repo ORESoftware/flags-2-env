@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-#define F2E_VERSION "0.1.0"
+#define F2E_VERSION "0.3.0"
 
 #if defined(__clang__) || defined(__GNUC__)
 #define F2E_WARN_UNUSED_RESULT __attribute__((warn_unused_result))
@@ -28,6 +28,69 @@ extern "C" {
 #endif
 
 const char *f2e_version(void);
+
+/*
+ * A value can come from three sources, ranked highest first by default:
+ *   flags      argv
+ *   env_shell  the live process environment
+ *   env_file   the .env files in the working directory ([env] files)
+ * Below all three sits the [flags.*] default declared in .cli-flags.toml.
+ *
+ * .cli-flags.toml can re-rank the sources per env key, including ranking argv
+ * last so a checked-in value cannot be overridden from the command line:
+ *
+ *   [order-of-preference]
+ *   MY_ENV_1 = (env_file, env_shell, flags)
+ *   MY_ENV_2 = (env_shell, flags)
+ *
+ * Brackets work as well as parentheses, and entries may be bare or quoted. A
+ * list that names only some sources is completed by appending the rest in
+ * default order, so (env_shell, flags) means env_shell > flags > env_file.
+ * Keys the table omits keep the default order. [env] order = (...) sets a
+ * config-wide default, and [flags.*] dotenv_override = true / [env] override
+ * = true remain as shorthands for lifting env_file over env_shell.
+ *
+ * ./.env is read by default: no upward walk, and no lookup next to an
+ * explicitly passed config path. [env] files = [".env", ".env.local"] replaces
+ * that default; the files are read in order, so a later one wins for a key both
+ * define. Paths are relative to the working directory and may name a
+ * subdirectory, but an absolute path or a ".." segment is an audit error rather
+ * than a silent fallback -- a list of files must not become a way out of the
+ * working directory. An empty list reads nothing. Symlinks named by an
+ * explicit list are followed only when their final target remains inside the
+ * physical working directory and is a regular file. Only [flags.*] env keys
+ * are taken from dotenv files. Parse-derived
+ * keys -- the command path, per-command markers, positionals, unknown options,
+ * and parse errors -- are never read from .env or the environment, so neither
+ * can forge them. Set FLAGS2ENV_DOTENV=0 or [env] load = false to skip .env
+ * entirely; the config declaration wins, because FLAGS2ENV_DOTENV can only
+ * switch loading off.
+ */
+
+/*
+ * [flags.*] requires_tty declares that a flag only means something with a
+ * terminal attached:
+ *
+ *   requires_tty = true      stdin and stderr, outside CI, TERM not "dumb"
+ *   requires_tty = "stdin"   that stream specifically
+ *   requires_tty = "stdout"
+ *   requires_tty = "stderr"
+ *
+ * When argv sets such a flag and the requirement is unmet, the flag is not
+ * applied and the reason is appended to the errors channel, so callers fail
+ * closed on it the same way they do on an invalid value. Setting a boolean to
+ * false (--no-interactive) never requires a terminal: that is how a caller
+ * says "do not prompt".
+ *
+ * Enforcement is argv-only. A value from the environment or a .env is ambient
+ * configuration rather than someone asking for a prompt now, and failing on an
+ * inherited variable would be worse than the problem it prevents; f2e_doctor
+ * reports .env values for these flags instead.
+ *
+ * The detection lives in parser.c rather than terminal_context.c because this
+ * file must stay compilable as a single translation unit. The two agree, and
+ * tests/run.sh asserts it under the same F2E_FORCE_* overrides.
+ */
 
 /*
  * Parses argv using the nearest .cli-flags.toml found by walking upward from
@@ -75,12 +138,21 @@ int f2e_is_help_requested_json_argv(const char *argv_json) F2E_WARN_UNUSED_RESUL
 /*
  * Structured parse: every channel is returned separately instead of packed
  * into env keys, so nothing can be shadowed by real environment variables:
- *   {"flags":{...},"providedFlags":{...},"command":"remote add",
+ *   {"flags":{...},"providedFlags":{...},"dotenv":{...},
+ *    "dotenvOverrides":{...},"sourceOrder":{...},"command":"remote add",
  *    "subcommands":["remote","add"],"extras":["abc"],
  *    "unknownOptions":[],"errors":[]}
- * "flags" is the same default-bearing env map f2e_parse returns.
+ * "flags" is the same fully-resolved env map f2e_parse returns, and is always
+ * authoritative.
  * "providedFlags" contains only argv-derived values and command markers, so
  * callers can merge it over the process environment before schema coercion.
+ * "dotenv" and "dotenvOverrides" split the ./.env values by their rank
+ * relative to the live environment, so a caller merging by hand can write
+ *   {...dotenv, ...processEnv, ...dotenvOverrides, ...providedFlags}
+ * That reproduces "flags" while argv outranks both env sources, which is the
+ * default. "sourceOrder" lists the resolved order for every key whose order
+ * deviates from the default -- including any key that ranks argv below an env
+ * source, where the flat merge above no longer holds and "flags" must be used.
  * "extras" holds operand tokens: positionals after the last matched command
  * (including tokens after a bare --); with no command matched, every
  * positional except argv[0].
@@ -174,6 +246,29 @@ char *f2e_coerce_json_from_file(const char *config_path, const char *values_json
  */
 char *f2e_audit_env_file(void) F2E_OWNED_RESULT;
 char *f2e_audit_env_file_from_file(const char *config_path, const char *env_path) F2E_OWNED_RESULT;
+
+/*
+ * Diagnoses the .env files this config reads: every file in [env] files, or
+ * ./.env when the key is absent.
+ *
+ * Reports two classes of problem. Malformed lines are ones the loader cannot
+ * use and silently skips -- no '=', an invalid name, an unterminated quote, a
+ * value past the line buffer, a stray byte-order mark. Ambiguous lines are the
+ * more interesting class: a key assigned twice, a key set in two files, or a
+ * key no [flags.*] declares. Each of those reads as configuration and is
+ * either ignored or quietly overridden.
+ *
+ * Values are never included in the output, only key names and positions: a
+ * .env holds secrets and this report is made to be pasted into an issue.
+ *
+ * Returns the same shape as f2e_audit_config: a heap-allocated JSON object
+ * {"ok",...,"errors":[],"warnings":[]}. Call f2e_free() on the result.
+ * f2e_doctor_status* returns 0 when there are no errors.
+ */
+char *f2e_doctor(void) F2E_OWNED_RESULT;
+char *f2e_doctor_from_file(const char *config_path) F2E_OWNED_RESULT;
+int f2e_doctor_status(void) F2E_WARN_UNUSED_RESULT;
+int f2e_doctor_status_from_file(const char *config_path) F2E_WARN_UNUSED_RESULT;
 int f2e_audit_env_file_status(void) F2E_WARN_UNUSED_RESULT;
 int f2e_audit_env_file_status_from_file(const char *config_path, const char *env_path) F2E_WARN_UNUSED_RESULT;
 

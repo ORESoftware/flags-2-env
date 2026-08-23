@@ -4,6 +4,28 @@
 
 The native core is C. Runtime clients bind to the same small ABI and convert the returned JSON object into each language's native map type.
 
+## Source repository transition
+
+The canonical source repository is
+[`flags-2-env/flags-2-env`](https://github.com/flags-2-env/flags-2-env). Use it
+for every source reference.
+
+The ten-day compatibility window for the original
+[`ORESoftware/flags-2-env`](https://github.com/ORESoftware/flags-2-env)
+repository ran from 2026-08-09 and **ended on 2026-08-19**. That repository is
+no longer a supported source: it is kept as a read-only historical source and
+redirect notice, so existing immutable references to already-published commits
+and tags stay resolvable, while anything new — clones, submodules, package
+manifests, documentation links — must point at the canonical repository.
+
+The canonical Zed package is `flags-2-env/flags-2-env@0.3.0`. Zed treats
+`org/name` as immutable package identity and has no package-alias field, so
+`oresoftware/flags-2-env@0.3.0` was published separately from the exact same
+tagged source commit during the window; it remains installable but receives no
+new versions. See [`docs/source-migration.md`](docs/source-migration.md) for the
+machine-checked contract, publication order, and the cutoff procedure that
+`scripts/verify-source-migration.py` now enforces against the calendar.
+
 ## Config
 
 Create `.cli-flags.toml` in the project root:
@@ -160,6 +182,158 @@ Set `[parse] allow_unknown = true`, pass `--allow-unknown`, or set `FLAGS2ENV_AL
 
 Add `help` or `description` on any flag to populate the generated help table. Add `[help] url = "https://..."` to print a support or docs URL under the `--help` menu. Use `[help] columns = ["options", "env", "description"]` to choose table columns, or `[help] exclude = ["default"]` to remove columns from the default set. `options` is always kept so every row still identifies the flag.
 
+## Which `.env` files are read
+
+By default `./.env` in the working directory is read if it is present, and
+nothing else — no upward walk, and no lookup beside an explicitly passed config
+path. `[env] files` changes that:
+
+```toml
+[env]
+files = [".env", ".env.local"]
+```
+
+The list **replaces** the default, and the files are read in order, so a later
+file's value wins for a key both define — `[".env", ".env.local"]` behaves the
+way the names suggest. Paths are relative to the working directory; a
+subdirectory such as `config/.env` is fine, but an absolute path or a `..`
+segment is an audit error rather than a silent fallback, because only the
+working directory is ever read.
+
+Declaring an empty list means read none at all:
+
+```toml
+[env]
+files = []          # same effect as `load = false`
+```
+
+`[env] load = false` and `FLAGS2ENV_DOTENV=0` still switch loading off
+entirely; the config declaration wins, because the environment variable can
+only turn loading off, never on.
+
+## Terminals
+
+Three behaviours depend on whether a terminal is attached, and all three are
+defined rather than incidental.
+
+### `requires_tty` — flags that need someone there
+
+A flag like `--interactive` is meaningless without a terminal, and a CLI that
+honours it anyway waits forever on input nobody can give — in CI, in cron, or on
+the far side of a pipe. Declare the requirement and flags2env refuses the flag
+instead:
+
+```toml
+[flags.interactive]
+env = "APP_INTERACTIVE"
+aliases = ["interactive"]
+type = "bool"
+requires_tty = true          # stdin and stderr, outside CI, not TERM=dumb
+
+[flags.progress]
+env = "APP_PROGRESS"
+aliases = ["progress"]
+type = "bool"
+requires_tty = "stdout"      # only stdout has to be a terminal
+```
+
+`requires_tty` accepts `true` (or `prompt`), `false`, `stdin`, `stdout`, and
+`stderr`. `true` mirrors `canPrompt` below: **stdin and stderr** must be
+terminals, outside CI, with `TERM` not `dumb`. Stdout is deliberately not
+required — data is often piped while the prompt stays on stderr.
+
+Refusal is reported through the normal errors channel, so every client already
+fails closed on it:
+
+```
+$ app --interactive | cat
+flags.interactive requires an interactive terminal; stdin and stderr must be a
+terminal, outside CI, with TERM set
+```
+
+Three deliberate details:
+
+- **Turning it off is always legal.** `--no-interactive` is exactly how a caller
+  says "do not prompt", so it never needs a terminal.
+- **Short bundles count.** `-qi` checks the `i` just as `--interactive` would.
+- **It applies to argv, not to the environment.** A value in the environment or
+  a `.env` is ambient configuration, not someone asking for a prompt right now,
+  and failing a CI job because `APP_INTERACTIVE` was inherited would be worse
+  than the problem. `flags2env doctor` warns when a `.env` sets a
+  `requires_tty` flag, so the bypass is visible rather than silent.
+
+A `requires_tty` value that is not one of the six spellings is an **audit
+error**, because a terminal check that silently is not one is worse than none.
+
+### `flags2env context` — what this process can see
+
+```sh
+$ flags2env context
+{ "stdinTty": true, "stdoutTty": false, "canPrompt": true, "outputMode": "plain", ... }
+```
+
+Run it where the real command runs to answer "why did my CLI refuse to prompt".
+`columns` is `null` when the terminal size is unknown — a pty with no window
+size set, for instance — so consumers must handle that.
+
+The `F2E_FORCE_STDIN_TTY`, `F2E_FORCE_STDOUT_TTY`, `F2E_FORCE_STDERR_TTY`, and
+`F2E_FORCE_CI` variables override detection, which is how the test suite pins
+this behaviour without allocating a pty.
+
+### Help table width
+
+| Situation | Width |
+|-----------|-------|
+| `COLUMNS` set to a value in 1–1000 | that value |
+| otherwise, stdout is a terminal | the terminal's width |
+| otherwise (piped, redirected, CI) | **80** |
+
+Clamped to 40–160 in every case. The last row is the one that matters: piped
+`--help` is byte-identical regardless of the terminal that launched it, so
+golden-file tests and diffs are stable. `COLUMNS` remains the explicit override
+for the cases that want something else.
+
+## `flags2env doctor`
+
+`audit` checks `.cli-flags.toml`, and `audit env` compares one `.env` against
+it. `doctor` answers the question you actually have when a value does not
+arrive — *is my `.env` being read, and does it say what I think it says?* It
+reads every file `[env] files` names (or `./.env`) and reports two classes of
+problem:
+
+```sh
+flags2env doctor                 # the discovered .cli-flags.toml
+flags2env doctor path/to/.cli-flags.toml
+```
+
+**Malformed** — lines the loader cannot use and silently skips today:
+
+```
+.env:4: APP_HOST has an unterminated quote, so the quote becomes part of the value
+.env:5: no "=", so this line is not an assignment and is skipped
+.env:6: "app-host" is not a valid environment variable name, so it is skipped
+.env:8: "export" with nothing after it
+```
+
+**Ambiguous** — lines that read as configuration but do something else, or
+nothing:
+
+```
+.env:3: APP_PORT was already assigned at line 2; the later value wins
+.env:7: TYPO_HOST is not declared by any [flags.*] env and is not in env.ignore, so it is read by nothing
+.env.local:1: APP_HOST is also set in .env:2; .env.local wins because it is read later
+.env is readable by group or other (mode 644); a .env usually holds secrets
+```
+
+Malformed lines are errors and exit non-zero, so `doctor` works as a pre-commit
+or CI gate. Ambiguity and permissions are warnings: worth seeing, not worth
+blocking a commit over. Keys listed in `[env] ignore` are not reported as
+undeclared.
+
+**Values are never printed** — only key names and positions. A `.env` holds
+secrets, and this report is exactly the kind of output that gets pasted into an
+issue.
+
 Ignore project-specific env keys during `.env` audits with an `[env]` table:
 
 ```toml
@@ -229,8 +403,8 @@ In an existing project without a `.zpkg.toml`, install it without changing the
 native package manifest:
 
 ```sh
-zed install oresoftware/flags-2-env@^0.1 \
-  --skip-manifest \
+zed install flags-2-env/flags-2-env@^0.3 \
+  --do-not-write-new-manifest \
   --allow-build \
   --adapter none
 zed run flags2env -- audit .cli-flags.toml
@@ -245,7 +419,7 @@ adapter once:
 
 ```toml
 [dependencies]
-"oresoftware/flags-2-env" = "^0.1"
+"flags-2-env/flags-2-env" = "^0.3"
 
 [install]
 adapter = "none"
@@ -253,8 +427,13 @@ adapter = "none"
 
 Then run `zed install --allow-build`. Both install forms retain the native
 project structure, write an integrity-pinned `.zpkg.lock`, and support frozen
-reinstallation with `zed install --frozen --skip-manifest --allow-build
+reinstallation with `zed install --frozen --do-not-write-new-manifest --allow-build
 --adapter none` for manifestless consumers.
+
+Until the end of 2026-08-19, the compatibility coordinate
+`oresoftware/flags-2-env@^0.3` resolves a separately published artifact from
+the same tagged source commit. New manifests should use the canonical
+`flags-2-env/flags-2-env` coordinate.
 
 `tests/flags-2-env-e2e.sh` round-trips the exact publishable artifact through a
 temporary file registry and installs it into npm, nested pnpm, Maven, Ruby,
@@ -343,7 +522,7 @@ const config = { ...process.env, ...overrides };
 const typedConfig: CliStuff = f2e.coerce(config);
 ```
 
-`parseOverridesFromArgs()` remains string-valued, omits schema defaults, and throws a value-redacted `TypeError` when argv contains unknown options or invalid values. Use `parseStructured()` when the caller needs the detailed diagnostic channels. The older `parseFromArgs()` retains its default-bearing behavior for compatibility and should not be spread over `process.env` when defaults are declared. `coerce()` reads the same `.cli-flags.toml` used by generation, keeps only declared env keys, applies schema defaults, converts integers, doubles, booleans, JSON, arrays, and maps, and throws `CoercionError` with all invalid keys when conversion fails. Each conversion error identifies the env key, its `[flags.*]` table, the declared type, the received JSON kind, and how to repair either the value or declaration.
+`parseOverridesFromArgs()` remains string-valued, omits schema defaults, and throws a value-redacted `TypeError` when argv contains unknown options or invalid values. It is argv-only, so the merge above sees no `./.env`; use `parseStructured()` and its `dotenv` / `dotenvOverrides` channels when the project keeps one, as shown in [Env Files](#env-files). Use `parseStructured()` too when the caller needs the detailed diagnostic channels. The older `parseFromArgs()` retains its default-bearing behavior for compatibility and should not be spread over `process.env` when defaults are declared. `coerce()` reads the same `.cli-flags.toml` used by generation, keeps only declared env keys, applies schema defaults, converts integers, doubles, booleans, JSON, arrays, and maps, and throws `CoercionError` with all invalid keys when conversion fails. Each conversion error identifies the env key, its `[flags.*]` table, the declared type, the received JSON kind, and how to repair either the value or declaration.
 
 The generated TypeScript interface is erased at runtime; it does not tell `coerce()` what to do. The TOML `type` field is the runtime source of truth. When `type` is omitted, flags2env deterministically treats the value as a string, even if a default such as `123` looks numeric. It never guesses independently from each process value, because that could make generated types disagree with runtime values. Errors already collected in the configured `[parse] errors_env` are carried into the same exception. Pass `{ configPath: "path/to/.cli-flags.toml" }` as the second argument when config discovery is not appropriate.
 
@@ -378,6 +557,90 @@ build/flags2env env-audit .cli-flags.toml .env
 ```
 
 When the `.env` path is omitted, `flags2env` checks the `.env` file next to the selected `.cli-flags.toml`. Unknown `.env` keys are errors unless they are listed in `[env] ignore`; non-ignored TOML-declared env keys missing from `.env` are warnings because they may be optional, defaulted, or supplied by deployment infrastructure.
+
+## Env Files
+
+Parsing reads `./.env` from the process working directory. A value can come from three sources, ranked highest first by default:
+
+| Source | Where it comes from |
+| --- | --- |
+| `flags` | argv |
+| `env_shell` | the live process environment |
+| `env_file` | `./.env` |
+
+Below all three sits the `[flags.*] default` declared in `.cli-flags.toml`. [`[order-of-preference]`](#changing-the-order-per-key) re-ranks the sources per env key.
+
+```sh
+$ cat .env
+PORT=8080
+HOST="db.internal"
+
+$ mycli serve
+{"PORT":"8080","HOST":"db.internal","DEBUG":"false"}
+
+$ PORT=7777 mycli serve            # a live variable outranks the file
+{"PORT":"7777","HOST":"db.internal","DEBUG":"false"}
+
+$ PORT=7777 mycli serve --port 9999  # argv outranks both
+{"PORT":"9999","HOST":"db.internal","DEBUG":"false"}
+```
+
+Only `./.env` is read. There is no upward walk the way config discovery has one, and no lookup next to an explicitly passed config path, so a `--config` pointing into another tree never drags that tree's `.env` along. A `./.env` symlink is followed like a regular file, which is how a repo can point at a shared or generated env file.
+
+Only keys declared by a `[flags.*] env` are taken from the file. Undeclared keys stay out of the parsed map and are never copied into a returned JSON document. Parse-derived keys — the command path, per-command markers, positionals, unknown options, and parse errors — are never read from `.env` or the environment either, so neither can forge what argv actually contained.
+
+A `.env` value that does not fit its declared type is reported through `[parse] errors_env` and skipped, leaving the value below it in the order. A live environment value that does not fit is skipped silently: the ambient environment is not the parser's to validate, and a stray `DEBUG=verbose` in someone's shell should not turn into a parse error.
+
+### Changing the order per key
+
+The three sources are named `flags`, `env_shell`, and `env_file`. `[order-of-preference]` re-ranks them for individual env keys, highest first:
+
+```toml
+[order-of-preference]
+MY_ENV_1 = (env_file, env_shell, flags)
+MY_ENV_2 = (env_shell, flags)
+MY_ENV_3 = (env_file, flags)
+```
+
+Only keys that deviate from the default need an entry; everything else keeps `flags > env_shell > env_file`. Brackets work as well as parentheses (`MY_ENV_1 = [env_file, env_shell, flags]`), and entries may be bare or quoted.
+
+A list does not have to name every source. Whatever it omits is appended in default order, so `MY_ENV_2 = (env_shell, flags)` resolves to `env_shell > flags > env_file`, and `MY_ENV_3 = (env_file, flags)` resolves to `env_file > flags > env_shell`. At least two sources are required, since one says nothing about precedence.
+
+Note that `flags` can be ranked last, as `MY_ENV_1` does. That pins a value against the command line: `--my-env-1` will not override what `.env` supplies.
+
+`[env] order` sets a config-wide default for keys the table omits:
+
+```toml
+[env]
+order = (env_file, env_shell, flags)
+```
+
+Two shorthands remain for the common case of lifting `.env` over the shell while argv still wins — per flag, or for the whole config:
+
+```toml
+[flags.token]
+env = "API_TOKEN"
+type = "string"
+dotenv_override = true
+
+[env]
+override = true
+```
+
+Most specific declaration wins: an `[order-of-preference]` entry, then the flag's `dotenv_override`, then `[env] order`, then `[env] override`, then the default. `flags2env audit` rejects unknown source names, repeated sources, single-entry lists, and entries for env keys no `[flags.*]` table declares.
+
+Turn file loading off entirely with `[env] load = false`, or per process with `FLAGS2ENV_DOTENV=0`.
+
+Because `./.env` comes from the ambient working directory, long-running or privileged consumers should declare `[env] load = false` for the same reason they do not discover `.cli-flags.toml` from the CWD — see [consumer compliance](docs/consumer-compliance.md#trusted-contract-discovery). That declaration is authoritative: `FLAGS2ENV_DOTENV` can only switch loading off, never back on.
+
+Callers that merge channels by hand instead of using the resolved map get the split they need from `parseStructured()`: `dotenv` holds the values that lose to the environment and `dotenvOverrides` the ones that win it, so a re-ranked `.env` survives a flat merge:
+
+```ts
+const s = f2e.parseStructured(process.argv);
+const config = { ...s.dotenv, ...process.env, ...s.dotenvOverrides, ...s.providedFlags };
+```
+
+That reproduces `flags` while `flags` still outranks both env sources. `s.sourceOrder` reports the resolved order for every key that deviates from the default; if any of them ranks `flags` below an env source, the spread above cannot express it and `s.flags` is the value to use.
 
 ## Shell Completion
 
@@ -1290,9 +1553,68 @@ let appEnv = try loadAppEnv()
 
 The C parser owns config discovery. By default, it walks upward from the current working directory to find the nearest `.cli-flags.toml`, but refuses to use `$HOME/.cli-flags.toml` because that is likely accidental. Runtime clients should not reimplement this lookup; they should pass an explicit `configPath` only when the user asks for one.
 
-Unknown flags and positional tokens are ignored unless `[parse]` declares `unknown_options_env` or `positionals_env`; `allow_unknown` suppresses unknown-option collection when downstream flags are expected. Defaults from `.cli-flags.toml` are included in the parsed map, so they also override environment values when merged.
+Unknown flags and positional tokens are ignored unless `[parse]` declares `unknown_options_env` or `positionals_env`; `allow_unknown` suppresses unknown-option collection when downstream flags are expected. The parsed map is fully resolved: defaults from `.cli-flags.toml` sit at the bottom of the order described in [Env Files](#env-files), under `./.env`, the live environment, and argv. Merge it as-is rather than spreading it over an environment snapshot, which would re-apply values the parser already ranked.
 
 When `[commands.*]` tables are declared, the parser resolves the subcommand path in a dry-run pass before applying defaults, so defaults are only emitted for global flags and the selected commands, and flag lookups always prefer the innermost command scope. The resolved path is reported under `parse.command_env` (default `FLAGS2ENV_COMMAND`, emitted as an empty string when no command is selected), and matched command tokens are consumed rather than recorded as positionals. While no command has matched yet, leading positionals such as the program name are skipped and do not trigger `stop_at_first_positional`.
+
+### Short flag bundles
+
+Single-dash flags combine the way `getopt` combines them, so the muscle-memory
+spellings from everyday tools parse the way their authors meant them:
+
+```console
+$ ls -la              # -l -a: two booleans in one token
+$ rm -rf tmp/         # -r -f
+$ set -eo pipefail    # -e is boolean, then -o consumes "pipefail"
+$ node -pe '1 + 1'    # -p is boolean, then -e consumes the script
+$ git commit -am wip  # -a is boolean, then -m consumes the message
+```
+
+A token of boolean shorts sets each of them to `true`. One value-taking short
+may end the bundle; it consumes the rest of the token as its value — with or
+without an `=` — or, when the token ends there, the next argument:
+
+```console
+$ flags2env app -dv           # DEBUG=true VERBOSE=true
+$ flags2env app -dvp 8080     # DEBUG=true VERBOSE=true PORT=8080
+$ flags2env app -dvp8080      # same, inline value
+$ flags2env app -dvp=8080     # same, inline value with equals
+```
+
+The rules, all of them the classic getopt ones plus this parser's existing
+guarantees:
+
+- Every character before the value flag must be a declared boolean short with
+  an env target. A token containing an undeclared character is not a bundle;
+  it falls back to the historical single-flag reading and never silently
+  half-applies.
+- The value flag ends the bundle: characters after it belong to its value,
+  never to more flags. Put the value-taking flag last — `node -pe '1 + 1'`
+  works, while `-ep '1 + 1'` reads `p` as `-e`'s inline value, exactly as
+  getopt would.
+- A suffix that reads as a boolean value for the first flag keeps that
+  meaning. With `true_aliases = ["t", "1"]`, `-dt` and `-d1` stay
+  `DEBUG=true`, and `-dtrue` stays the canonical spelling — mixed bundling
+  never reinterprets a previously valid token. (An all-boolean token such as
+  `-dt` with `-t` itself a declared boolean short was already a bundle, and
+  stays one.)
+- `requires_tty` applies to every flag in a bundle: `-qi` checks the `i` just
+  as `--interactive` would.
+- Bundles resolve in the active command scope first, then its ancestors, so
+  `gitish ci -am 'fix stuff'` applies the `commit` scope's `-a` and `-m`, and
+  an inherited global `-v` may join the same bundle (`gitish ci -vam wip`).
+- With `[parse] require_equals = true`, the value must be inline
+  (`-dvp8080` or `-dvp=8080`); a separated value stays positional, matching
+  how a lone `-p 8080` behaves in that mode.
+
+`flags2env audit` warns when a single-character boolean value alias also
+resolves as a reachable short flag, because a token like `-dt` then has two
+readings. Reachability includes the active command's inherited/global flags
+and the parser's unique scoped-flag fallback when no command is selected. The
+parser resolves each context deterministically — an all-boolean token is a
+bundle, and otherwise the value-alias reading wins — and the warning names the
+command context when one is involved. Declare different characters if you want
+both spellings.
 
 ### Command aliases are canonicalized
 
