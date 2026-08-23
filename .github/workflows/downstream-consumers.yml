@@ -197,6 +197,7 @@ jobs:
           set -euo pipefail
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import pathlib
+          import sys
           import tomllib
 
           zed = tomllib.loads(pathlib.Path("fixture/.zpkg.toml").read_text())
@@ -216,7 +217,10 @@ jobs:
                   f"[{CANONICAL!r}] or [{LEGACY!r}]"
               )
           if declared == [LEGACY]:
-              print(f"::warning::fixture still pins {LEGACY}; migrate it to {CANONICAL}")
+              print(
+                  f"::warning::fixture still pins {LEGACY}; migrate it to {CANONICAL}",
+                  file=sys.stderr,
+              )
 
           install_dir = zed["install"]["dir"]
           vendor = pathlib.PurePosixPath(install_dir) / pathlib.PurePosixPath(declared[0])
