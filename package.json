@@ -33,7 +33,9 @@
     "pack:audit": "node scripts/audit-npm-package.mjs",
     "pack:dry-run": "npm pack --dry-run",
     "release:audit": "node scripts/audit-release-matrix.mjs",
-    "test:readme": "node scripts/test-readme-snippets.mjs"
+    "test:readme": "node scripts/test-readme-snippets.mjs",
+    "lint:ores": "if [ -f .ores-lint/lint.sh ]; then sh .ores-lint/lint.sh; else echo 'ores-lint not installed'; fi",
+    "prepublishOnly": "npm run lint:ores"
   },
   "files": [
     "LICENSE",
@@ -73,5 +75,13 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0"
+  },
+  "oresLint": {
+    "note": "Declared, not installed. ores-lint resolves these from a global install - see .ores-lint/README.md",
+    "requires": {
+      "eslint": ">=9",
+      "typescript-eslint": ">=8 (optional; without it .ts files are skipped)"
+    },
+    "install": "npm i -g eslint typescript-eslint"
   }
 }
