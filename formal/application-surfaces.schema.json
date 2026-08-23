@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/flags-2-env/flags-2-env/blob/main/formal/application-surfaces.schema.json",
+  "title": "flags-2-env formal application surface inventory",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schemaVersion",
+    "surfaces",
+    "desktopBoundary",
+    "nonApplicationBoundaries"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "./application-surfaces.schema.json"
+    },
+    "schemaVersion": {
+      "const": "flags2env.application-surfaces.v1"
+    },
+    "surfaces": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/surface"
+      }
+    },
+    "desktopBoundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "standaloneAppPresent",
+        "sharedRuntime",
+        "scopeGate"
+      ],
+      "properties": {
+        "standaloneAppPresent": {
+          "type": "boolean"
+        },
+        "sharedRuntime": {
+          "$ref": "#/$defs/path"
+        },
+        "scopeGate": {
+          "$ref": "#/$defs/path"
+        }
+      }
+    },
+    "nonApplicationBoundaries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "scopePath",
+          "reason"
+        ],
+        "properties": {
+          "scopePath": {
+            "$ref": "#/$defs/path"
+          },
+          "except": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/path"
+            },
+            "uniqueItems": true
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+    },
+    "surface": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "scopePath",
+        "entrypoint",
+        "machine",
+        "runtimePaths",
+        "proofPaths"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        },
+        "kind": {
+          "enum": [
+            "browser-app",
+            "browser-runtime",
+            "desktop-app"
+          ]
+        },
+        "scopePath": {
+          "$ref": "#/$defs/path"
+        },
+        "entrypoint": {
+          "$ref": "#/$defs/path"
+        },
+        "machine": {
+          "enum": [
+            "demo",
+            "main-thread",
+            "worker-client",
+            "worker-host"
+          ]
+        },
+        "runtimePaths": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/path"
+          }
+        },
+        "proofPaths": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/path"
+          }
+        }
+      }
+    }
+  }
+}

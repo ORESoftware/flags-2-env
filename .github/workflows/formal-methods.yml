@@ -3,7 +3,21 @@ name: Formal methods
 on:
   pull_request:
     paths:
+      - 'apps/**'
+      - '**/src-tauri/**'
+      - '**/tauri.conf.json'
+      - '**/tauri.conf.json5'
+      - '**/electron-builder.json'
+      - '**/electron-builder.yml'
+      - '**/electron-builder.yaml'
+      - '**/*.desktop'
+      - '**/package.json'
+      - '**/Cargo.toml'
+      - '**/pubspec.yaml'
+      - '**/*.csproj'
+      - '**/*.swift'
       - 'src/**'
+      - 'clients/browser/**'
       - 'clients/rust/**'
       - 'formal/**'
       - 'scripts/formal-check.sh'
@@ -15,7 +29,21 @@ on:
   push:
     branches: [main]
     paths:
+      - 'apps/**'
+      - '**/src-tauri/**'
+      - '**/tauri.conf.json'
+      - '**/tauri.conf.json5'
+      - '**/electron-builder.json'
+      - '**/electron-builder.yml'
+      - '**/electron-builder.yaml'
+      - '**/*.desktop'
+      - '**/package.json'
+      - '**/Cargo.toml'
+      - '**/pubspec.yaml'
+      - '**/*.csproj'
+      - '**/*.swift'
       - 'src/**'
+      - 'clients/browser/**'
       - 'clients/rust/**'
       - 'formal/**'
       - 'scripts/formal-check.sh'
@@ -35,7 +63,7 @@ concurrency:
 
 jobs:
   c-and-smt:
-    name: CBMC and Z3
+    name: Application model, CBMC and Z3
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

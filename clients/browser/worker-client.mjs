@@ -1,3 +1,11 @@
+import {
+  WorkerClientEvent,
+  WorkerClientPhase,
+  initialWorkerClientState,
+  isWorkerClientTerminal,
+  reduceWorkerClientLifecycle,
+} from "./lifecycle.mjs";
+
 const MAX_RPC_BYTES = 4 * 1024 * 1024;
 const MAX_TIMEOUT_MS = 120_000;
 const MAX_PENDING_REQUESTS = 4096;
@@ -108,110 +116,246 @@ export async function createFlags2EnvWorker(options = {}) {
   if (signal?.aborted) throw abortError();
 
   const worker = workerFactory(workerUrl, { type: "module", name: "flags2env" });
-  if (!worker || typeof worker.postMessage !== "function" || typeof worker.terminate !== "function") {
+  if (
+    !worker ||
+    typeof worker.addEventListener !== "function" ||
+    typeof worker.postMessage !== "function" ||
+    typeof worker.terminate !== "function"
+  ) {
+    try {
+      worker?.terminate?.();
+    } catch {
+      // The invalid factory result is rejected below regardless of cleanup support.
+    }
     throw new TypeError("workerFactory must return a Worker-compatible object");
   }
 
   let nextId = 1;
-  let closed = false;
-  let closing = false;
   let closePromise = null;
+  let lifecycle = initialWorkerClientState();
   const pending = new Map();
   const drainWaiters = new Set();
+  let failClosed = null;
+
+  const transition = (event) => {
+    const outcome = reduceWorkerClientLifecycle(
+      lifecycle,
+      event,
+      maxPendingRequests,
+    );
+    lifecycle = outcome.state;
+    return outcome;
+  };
+
+  const assertResourceInvariant = () => {
+    if (lifecycle.pending !== pending.size) {
+      const error = new Error("flags2env worker lifecycle/resource invariant failed");
+      failClosed?.(error);
+      throw error;
+    }
+  };
 
   const notifyDrained = () => {
-    if (pending.size !== 0) return;
+    assertResourceInvariant();
+    if (lifecycle.pending !== 0) return;
     for (const resolve of drainWaiters) resolve();
     drainWaiters.clear();
   };
 
-  const removePending = (id) => {
+  let onAbort = null;
+  const stopWorker = () => {
+    if (onAbort) {
+      try {
+        signal?.removeEventListener("abort", onAbort);
+      } catch {
+        // Termination must continue even for a malformed signal implementation.
+      }
+    }
+    try {
+      worker.terminate();
+    } catch {
+      // The lifecycle is already terminal; no response can be observed again.
+    }
+  };
+
+  const takePending = () => {
+    const entries = [...pending.values()];
+    pending.clear();
+    for (const entry of entries) clearTimeout(entry.timer);
+    return entries;
+  };
+
+  const shutdown = (reason, event) => {
+    const error = normalizeTerminationReason(reason);
+    if (isWorkerClientTerminal(lifecycle)) {
+      const entries = takePending();
+      for (const entry of entries) entry.reject(error);
+      notifyDrained();
+      stopWorker();
+      return;
+    }
+
+    const entries = takePending();
+    const outcome = transition(event);
+    if (!outcome.accepted || !isWorkerClientTerminal(lifecycle)) {
+      lifecycle = reduceWorkerClientLifecycle(
+        lifecycle,
+        WorkerClientEvent.FAULT,
+        maxPendingRequests,
+      ).state;
+    }
+    assertResourceInvariant();
+    for (const entry of entries) entry.reject(error);
+    notifyDrained();
+    stopWorker();
+  };
+
+  failClosed = (reason) => {
+    const error = normalizeTerminationReason(reason);
+    const entries = takePending();
+    if (!isWorkerClientTerminal(lifecycle)) {
+      transition(WorkerClientEvent.FAULT);
+    }
+    for (const entry of entries) entry.reject(error);
+    notifyDrained();
+    stopWorker();
+    return error;
+  };
+
+  const settlePending = (id, succeeded) => {
     const entry = pending.get(id);
     if (!entry) return null;
     pending.delete(id);
     clearTimeout(entry.timer);
-    notifyDrained();
-    return entry;
-  };
-
-  const rejectAll = (error) => {
-    for (const id of [...pending.keys()]) {
-      const entry = removePending(id);
-      entry?.reject(error);
+    const event =
+      entry.kind === "initialization"
+        ? succeeded
+          ? WorkerClientEvent.INITIALIZED
+          : WorkerClientEvent.INITIALIZATION_FAILED
+        : WorkerClientEvent.REQUEST_SETTLED;
+    const outcome = transition(event);
+    if (!outcome.accepted) {
+      return {
+        entry,
+        error: failClosed("flags2env worker lifecycle failed closed"),
+      };
     }
+    assertResourceInvariant();
     notifyDrained();
-  };
-
-  const onAbort = () => terminate(abortError());
-
-  const terminate = (reason = "flags2env worker was terminated") => {
-    if (closed) return;
-    closing = true;
-    closed = true;
-    signal?.removeEventListener("abort", onAbort);
-    worker.terminate();
-    rejectAll(normalizeTerminationReason(reason));
+    return { entry, error: null };
   };
 
   const allocateId = () => {
-    for (let attempts = 0; attempts <= maxPendingRequests; attempts += 1) {
-      if (nextId > Number.MAX_SAFE_INTEGER) nextId = 1;
-      const id = nextId;
-      nextId += 1;
-      if (!pending.has(id)) return id;
+    if (nextId > Number.MAX_SAFE_INTEGER) {
+      throw new RangeError(
+        "flags2env worker request ID space is exhausted; create a new worker",
+      );
     }
-    throw busyError(maxPendingRequests);
+    const id = nextId;
+    nextId += 1;
+    return id;
   };
 
-  worker.addEventListener("message", (event) => {
-    const message = event.data;
-    const entry = removePending(message?.id);
-    if (!entry) return;
-    if (message.ok === true) entry.resolve(message.value);
-    else entry.reject(remoteError(message.error));
-  });
-  worker.addEventListener("error", () => terminate("flags2env worker failed"));
-  worker.addEventListener("messageerror", () => terminate("flags2env worker returned an invalid message"));
-  signal?.addEventListener("abort", onAbort, { once: true });
+  const requestStateError = (outcome) => {
+    if (outcome.code === "busy") return busyError(maxPendingRequests);
+    if (outcome.code === "closing") {
+      return new Error("flags2env worker is closing");
+    }
+    if (isWorkerClientTerminal(outcome.state)) {
+      return new Error("flags2env worker is closed");
+    }
+    return new Error("flags2env worker is not ready");
+  };
 
-  const request = (method, args = [], requestTimeoutMs = timeoutMs) => {
-    if (closed) return Promise.reject(new Error("flags2env worker is closed"));
-    if (closing) return Promise.reject(new Error("flags2env worker is closing"));
+  const request = (
+    method,
+    args = [],
+    requestTimeoutMs = timeoutMs,
+    kind = "request",
+  ) => {
     if (typeof method !== "string" || !Array.isArray(args)) {
       return Promise.reject(new TypeError("worker request requires a method and args array"));
     }
     assertTimeout(requestTimeoutMs);
-    if (pending.size >= maxPendingRequests) {
-      return Promise.reject(busyError(maxPendingRequests));
-    }
+    assertResourceInvariant();
+    const event =
+      kind === "initialization"
+        ? WorkerClientEvent.INITIALIZE_REQUESTED
+        : WorkerClientEvent.REQUEST_STARTED;
+    const started = reduceWorkerClientLifecycle(
+      lifecycle,
+      event,
+      maxPendingRequests,
+    );
+    if (!started.accepted) return Promise.reject(requestStateError(started));
+
     const id = allocateId();
     const envelope = { id, method, args };
     assertSerializable(envelope);
+    lifecycle = started.state;
 
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
-        const entry = removePending(id);
-        entry?.reject(
-          timeoutError(`flags2env worker request timed out after ${requestTimeoutMs}ms`),
+        const settled = settlePending(id, false);
+        settled?.entry.reject(
+          settled.error ??
+            timeoutError(`flags2env worker request timed out after ${requestTimeoutMs}ms`),
         );
       }, requestTimeoutMs);
-      pending.set(id, { resolve, reject, timer });
+      pending.set(id, { resolve, reject, timer, kind });
       try {
+        assertResourceInvariant();
         worker.postMessage(envelope);
       } catch (error) {
-        const entry = removePending(id);
-        entry?.reject(error);
+        const settled = settlePending(id, false);
+        settled?.entry.reject(settled.error ?? error);
       }
     });
   };
 
+  try {
+    worker.addEventListener("message", (event) => {
+      const message = event.data;
+      const settled = settlePending(message?.id, message?.ok === true);
+      if (!settled) return;
+      if (settled.error) settled.entry.reject(settled.error);
+      else if (message.ok === true) settled.entry.resolve(message.value);
+      else settled.entry.reject(remoteError(message.error));
+    });
+    worker.addEventListener("error", () =>
+      shutdown("flags2env worker failed", WorkerClientEvent.FAULT),
+    );
+    worker.addEventListener("messageerror", () =>
+      shutdown(
+        "flags2env worker returned an invalid message",
+        WorkerClientEvent.FAULT,
+      ),
+    );
+    onAbort = () => shutdown(abortError(), WorkerClientEvent.TERMINATE);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  } catch (error) {
+    shutdown(error, WorkerClientEvent.FAULT);
+    throw error;
+  }
+  if (signal?.aborted) {
+    const error = abortError();
+    shutdown(error, WorkerClientEvent.TERMINATE);
+    throw error;
+  }
+
+  const terminate = (reason = "flags2env worker was terminated") => {
+    if (isWorkerClientTerminal(lifecycle)) return;
+    shutdown(reason, WorkerClientEvent.TERMINATE);
+  };
+
   const drain = () => {
-    if (pending.size === 0) return Promise.resolve();
+    assertResourceInvariant();
+    if (lifecycle.pending === 0) return Promise.resolve();
     return new Promise((resolve) => drainWaiters.add(resolve));
   };
 
   const close = (closeOptions = {}) => {
-    if (closed) return Promise.resolve();
+    if (isWorkerClientTerminal(lifecycle)) return Promise.resolve();
     if (closePromise) return closePromise;
     if (!closeOptions || typeof closeOptions !== "object" || Array.isArray(closeOptions)) {
       return Promise.reject(new TypeError("close options must be an object"));
@@ -220,9 +364,12 @@ export async function createFlags2EnvWorker(options = {}) {
       closeOptions.timeoutMs ?? closeTimeoutMs,
       "close timeoutMs",
     );
-    closing = true;
+    const started = transition(WorkerClientEvent.CLOSE_REQUESTED);
+    if (!started.accepted) return Promise.reject(requestStateError(started));
+    assertResourceInvariant();
+
     closePromise = (async () => {
-      if (pending.size > 0) {
+      if (lifecycle.pending > 0) {
         let timer;
         try {
           await Promise.race([
@@ -240,25 +387,32 @@ export async function createFlags2EnvWorker(options = {}) {
             }),
           ]);
         } catch (error) {
-          terminate(error);
+          shutdown(error, WorkerClientEvent.FAULT);
           throw error;
         } finally {
           clearTimeout(timer);
         }
       }
-      terminate("flags2env worker was closed");
+      if (isWorkerClientTerminal(lifecycle)) return;
+      const completed = transition(WorkerClientEvent.DRAIN_COMPLETED);
+      if (!completed.accepted) {
+        const error = failClosed("flags2env worker close lifecycle failed closed");
+        throw error;
+      }
+      assertResourceInvariant();
+      stopWorker();
     })();
     return closePromise;
   };
 
   try {
-    await request("__init", [configText]);
+    await request("__init", [configText], timeoutMs, "initialization");
   } catch (error) {
-    terminate(
-      error?.name === "AbortError"
-        ? error
-        : "flags2env worker initialization failed",
-    );
+    if (!isWorkerClientTerminal(lifecycle)) {
+      shutdown("flags2env worker initialization failed", WorkerClientEvent.FAULT);
+    } else {
+      stopWorker();
+    }
     throw error;
   }
 
@@ -277,14 +431,20 @@ export async function createFlags2EnvWorker(options = {}) {
     drain,
     close,
     terminate,
+    get state() {
+      return lifecycle.phase;
+    },
+    get failed() {
+      return lifecycle.phase === WorkerClientPhase.FAILED;
+    },
     get pendingRequests() {
-      return pending.size;
+      return lifecycle.pending;
     },
     get closing() {
-      return closing;
+      return lifecycle.phase !== WorkerClientPhase.READY;
     },
     get closed() {
-      return closed;
+      return isWorkerClientTerminal(lifecycle);
     },
   });
 }

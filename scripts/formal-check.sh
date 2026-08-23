@@ -141,6 +141,18 @@ run_cbmc() {
   done
 }
 
+run_application_lifecycle() {
+  command -v node >/dev/null || {
+    echo "node is required; run this command through nix develop" >&2
+    return 1
+  }
+
+  echo "==> Application surface inventory"
+  node "$repo_root/formal/check-application-scope.mjs"
+  echo "==> Executable application lifecycle model"
+  node "$repo_root/formal/model-check-app-lifecycle.mjs"
+}
+
 run_z3() {
   command -v z3 >/dev/null || {
     echo "z3 is required; run this command through nix develop" >&2
@@ -190,8 +202,12 @@ run_z3() {
 case "$mode" in
   all)
     run_manifest
+    run_application_lifecycle
     run_cbmc
     run_z3
+    ;;
+  app)
+    run_application_lifecycle
     ;;
   manifest)
     run_manifest
@@ -203,7 +219,7 @@ case "$mode" in
     run_z3
     ;;
   *)
-    echo "usage: $0 [all|manifest|cbmc|z3]" >&2
+    echo "usage: $0 [all|app|manifest|cbmc|z3]" >&2
     exit 2
     ;;
 esac

@@ -4,6 +4,13 @@
 
 The native core is C. Runtime clients bind to the same small ABI and convert the returned JSON object into each language's native map type.
 
+The stateful browser/Web Worker application runtime uses one explicit,
+fail-closed lifecycle reducer. Its actual transition code is exhaustively model
+checked, its parameterized worker invariants are proved with Z3, and its timer,
+promise, and termination effects are exercised in Chromium, Firefox, and
+WebKit. See [`formal/README.md`](formal/README.md) for the exact guarantee,
+desktop-application inventory gate, commands, and environmental boundaries.
+
 ## Source repository transition
 
 The canonical source repository is

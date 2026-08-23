@@ -21,6 +21,7 @@ def main() -> None:
         "flags2env.wasm",
         "lib.mjs",
         "lib.d.ts",
+        "lifecycle.mjs",
         "worker-client.mjs",
         "worker-client.d.ts",
         "worker.mjs",
@@ -88,6 +89,7 @@ def main() -> None:
                     resolved,
                     workerParsed,
                     workerClosed: worker.closed,
+                    workerState: worker.state,
                   };
                 }""",
                 {"baseUrl": base_url},
@@ -110,6 +112,7 @@ def main() -> None:
             assert result["workerParsed"]["PORT"] == "9123"
             assert result["workerParsed"]["DEBUG"] == "true"
             assert result["workerClosed"] is True
+            assert result["workerState"] == "closed"
             assert not external_requests, external_requests
             assert not errors, errors
             context.tracing.stop()

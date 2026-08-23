@@ -1,4 +1,10 @@
 import createFlags2EnvModule from "./flags2env.mjs";
+import {
+  MainThreadEvent,
+  MainThreadPhase,
+  initialMainThreadState,
+  reduceMainThreadLifecycle,
+} from "./lifecycle.mjs";
 
 const CONFIG_DIR = "/flags2env";
 const CONFIG_PATH = `${CONFIG_DIR}/.cli-flags.toml`;
@@ -76,19 +82,31 @@ function parseJsonResult(raw, operation) {
 
 export async function createFlags2Env(options = {}) {
   const { configText = "", moduleOptions = {} } = options;
-  const module = await createFlags2EnvModule(moduleOptions);
-  module.FS.mkdirTree(CONFIG_DIR);
-  let active = false;
+  let lifecycle = initialMainThreadState();
+  let module;
+
+  const transition = (event) => {
+    const outcome = reduceMainThreadLifecycle(lifecycle, event);
+    lifecycle = outcome.state;
+    return outcome;
+  };
 
   const withCall = (callback) => {
-    if (active) {
-      throw new Error("flags2env browser calls are not re-entrant");
+    const started = transition(MainThreadEvent.CALL_STARTED);
+    if (!started.accepted) {
+      throw new Error(
+        started.code === "busy"
+          ? "flags2env browser calls are not re-entrant"
+          : `flags2env browser client is ${lifecycle.phase}`,
+      );
     }
-    active = true;
     try {
       return callback();
     } finally {
-      active = false;
+      const settled = transition(MainThreadEvent.CALL_SETTLED);
+      if (!settled.accepted) {
+        throw new Error("flags2env browser call lifecycle failed closed");
+      }
     }
   };
 
@@ -99,7 +117,19 @@ export async function createFlags2Env(options = {}) {
       { encoding: "utf8" },
     );
   };
-  writeConfig(configText);
+
+  try {
+    module = await createFlags2EnvModule(moduleOptions);
+    module.FS.mkdirTree(CONFIG_DIR);
+    writeConfig(configText);
+    const initialized = transition(MainThreadEvent.INITIALIZED);
+    if (!initialized.accepted) {
+      throw new Error("flags2env browser initialization lifecycle failed closed");
+    }
+  } catch (error) {
+    transition(MainThreadEvent.INITIALIZATION_FAILED);
+    throw error;
+  }
 
   const callConfigAndJson = (operation, fn, payload) =>
     withCall(() =>
@@ -111,6 +141,14 @@ export async function createFlags2Env(options = {}) {
     );
 
   return Object.freeze({
+    get state() {
+      return lifecycle.phase;
+    },
+
+    get failed() {
+      return lifecycle.phase === MainThreadPhase.FAILED;
+    },
+
     setConfig(nextConfig) {
       return withCall(() => writeConfig(nextConfig));
     },
