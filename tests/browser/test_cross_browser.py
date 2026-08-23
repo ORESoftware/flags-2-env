@@ -42,6 +42,7 @@ def run_worker_suite(browser: Browser, base_url: str, engine: str) -> None:
               ).then((response) => response.text());
 
               const client = await createFlags2EnvWorker({configText, timeoutMs: 10000});
+              const readyState = client.state;
               const parsed = await client.parse(["tool", "serve", "--port", "9090", "--debug"]);
               const structured = await client.parseStructured([
                 "tool", "serve", "worker", "--name", "beta", "--verbose"
@@ -101,6 +102,7 @@ default = "alpha"
               }
 
               client.terminate();
+              const terminalState = client.state;
               let closed;
               try {
                 await client.parse(["tool"]);
@@ -127,6 +129,8 @@ default = "alpha"
                 directReply,
                 timeout,
                 closed,
+                readyState,
+                terminalState,
               };
             }""",
             {"baseUrl": base_url},
@@ -156,6 +160,8 @@ default = "alpha"
         assert result["timeout"]["name"] == "TimeoutError"
         assert "timed out" in result["timeout"]["message"]
         assert "closed" in result["closed"]
+        assert result["readyState"] == "ready"
+        assert result["terminalState"] == "closed"
         assert not external_requests, external_requests
         assert not errors, errors
         context.tracing.stop()

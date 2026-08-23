@@ -68,10 +68,11 @@ repository's public history.
 
 ## Cutoff status
 
-The window closed at the end of 2026-08-19. `cutoff` in
-`source-migration.json` is the machine-readable record of what that leaves
-outstanding, and `verify-source-migration.py` compares it against the current
-date on every run:
+The window closed at the end of 2026-08-19. The redirect notice was present on
+the compatibility mirror and the mirror was archived on 2026-08-22, completing
+the cutoff. `cutoff` in `source-migration.json` is the machine-readable record,
+and `verify-source-migration.py` compares it against the current date on every
+run:
 
 | `cutoff` field | Meaning |
 | --- | --- |
@@ -80,22 +81,21 @@ date on every run:
 | `mirrorDisposition` | `read-only-historical-source` — the mirror is kept, not deleted |
 | `pendingObligations` | The steps still owed, each named in `CUTOFF_OBLIGATIONS` |
 
-While the window is open the record is inert. Once it closes, a `pending`
+While the window is open a pending record is inert. Once it closes, a `pending`
 record is an error: the verifier reports how many days have elapsed and prints
-the action that clears each remaining obligation, and it refuses any document that still promises support
-through a date that has passed. The two obligations
-are deliberately outside this repository, because neither can be satisfied by a
-commit here:
+the action that clears each remaining obligation, and it refuses any document
+that still promises support through a date that has passed. The two external
+obligations are now complete:
 
-1. `mirror-notice-updated` — replace the present-tense notice at the top of the
-   mirror's `README.md` with the post-cutoff redirect notice. Because the
-   mirror is commit-identical, this lands as an ordinary reviewed commit on
-   canonical `main` that is then fast-forwarded, never as mirror-only drift.
-2. `mirror-archived` — archive the mirror on GitHub so it is read-only.
+1. `mirror-notice-updated` — the mirror's `README.md` contains the post-cutoff
+   redirect notice and matches canonical content. The notice arrived through
+   shared reviewed history, not mirror-only drift.
+2. `mirror-archived` — the mirror is archived on GitHub and remains readable as
+   a historical source.
 
-Clearing them means setting `state` to `complete`, `completedOn` to that date,
-and emptying `pendingObligations`; the verifier then requires `completedOn` to
-fall after the window and not in the future.
+The completed record sets `state` to `complete`, records `2026-08-22` in
+`completedOn`, and leaves `pendingObligations` empty. The verifier requires that
+date to fall after the window and not in the future.
 
 ## Rollback
 

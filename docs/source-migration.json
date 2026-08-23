@@ -17,13 +17,10 @@
     ]
   },
   "cutoff": {
-    "state": "pending",
-    "completedOn": null,
+    "state": "complete",
+    "completedOn": "2026-08-22",
     "mirrorDisposition": "read-only-historical-source",
-    "pendingObligations": [
-      "mirror-notice-updated",
-      "mirror-archived"
-    ]
+    "pendingObligations": []
   },
   "zedPackage": {
     "version": "0.3.0",

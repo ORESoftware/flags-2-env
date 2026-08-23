@@ -1,9 +1,27 @@
 import { createFlags2Env } from "../dist/lib.mjs";
+import {
+  DemoEvent,
+  DemoPhase,
+  initialDemoState,
+  reduceDemoLifecycle,
+} from "../dist/lifecycle.mjs";
 
 const status = document.querySelector("#status");
 const output = document.querySelector("#output");
 const argvInput = document.querySelector("#argv-json");
 const coerceInput = document.querySelector("#coerce-json");
+let lifecycle = initialDemoState();
+
+function transition(event) {
+  const outcome = reduceDemoLifecycle(lifecycle, event);
+  lifecycle = outcome.state;
+  status.dataset.phase = lifecycle.phase;
+  if (!outcome.accepted) {
+    throw new Error("flags2env demo lifecycle failed closed");
+  }
+}
+
+status.dataset.phase = lifecycle.phase;
 
 function render(value) {
   output.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
@@ -42,6 +60,7 @@ async function initialize() {
     render(flags2env.coerce(parseInput(coerceInput, "environment JSON")));
   });
 
+  transition(DemoEvent.INITIALIZED);
   status.textContent = "Ready — native parser loaded in WebAssembly.";
   status.dataset.ready = "true";
   window.__flags2env = flags2env;
@@ -49,6 +68,9 @@ async function initialize() {
 }
 
 window.__flags2envReady = initialize().catch((error) => {
+  if (lifecycle.phase === DemoPhase.INITIALIZING) {
+    transition(DemoEvent.INITIALIZATION_FAILED);
+  }
   status.textContent = `Failed to initialize: ${error.message}`;
   status.dataset.ready = "false";
   render({ error: error.message });

@@ -4,6 +4,8 @@ export interface Flags2EnvWorkerCloseOptions {
   timeoutMs?: number;
 }
 
+export type Flags2EnvWorkerState = "ready" | "draining" | "closed" | "failed";
+
 export interface Flags2EnvWorkerClient {
   setConfig(configText: string): Promise<void>;
   parse(argv: string[]): Promise<Record<string, string>>;
@@ -15,6 +17,8 @@ export interface Flags2EnvWorkerClient {
   drain(): Promise<void>;
   close(options?: Flags2EnvWorkerCloseOptions): Promise<void>;
   terminate(reason?: string | Error): void;
+  readonly state: Flags2EnvWorkerState;
+  readonly failed: boolean;
   readonly pendingRequests: number;
   readonly closing: boolean;
   readonly closed: boolean;

@@ -14,6 +14,7 @@ const RUNTIME_FILES = [
   "flags2env.wasm",
   "lib.d.ts",
   "lib.mjs",
+  "lifecycle.mjs",
   "package.json",
   "worker-client.d.ts",
   "worker-client.mjs",

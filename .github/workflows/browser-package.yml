@@ -71,14 +71,23 @@ jobs:
         with:
           node-version: "24"
 
-      - name: Install Emscripten and Python tooling
+      - name: Install Python tooling
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends emscripten python3-venv
+          sudo apt-get install --yes --no-install-recommends python3-venv
 
-      - name: Build the WebAssembly runtime
-        run: bash clients/browser/build.sh
+      - name: Build with the pinned Emscripten toolchain
+        run: |
+          set -euo pipefail
+          source clients/browser/toolchain.env
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            --env HOME=/tmp \
+            --volume "$PWD:/src" \
+            --workdir /src \
+            "$F2E_EMSCRIPTEN_IMAGE" \
+            bash clients/browser/build.sh
 
       - name: Build and extract the allowlisted npm package
         shell: bash
