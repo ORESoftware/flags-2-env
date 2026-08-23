@@ -253,6 +253,32 @@ if [ "$actual" != "$expected" ]; then
   exit 1
 fi
 
+# a mixed bundle's invalid trailing value reports against the value-taking
+# flag through errors_env while the leading booleans still apply
+actual="$(cd "$NATIVE_SCALARS_DIR" && "$CLI" app -dpx)"
+expected='{"PORT":"3000","DEBUG":"true","PAYLOAD":"7","F2E_PARSE_ERRORS":"[\"flags.port value \\\"x\\\" is not a valid integer\"]"}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected mixed bundle error report: %s\nActual:                             %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+
+# typed bundle values ride the same validation as their long spellings: a
+# json-typed value flag consumes a separated bundle value, and a typed
+# negative number is accepted in separated form
+actual="$(cd "$NATIVE_SCALARS_DIR" && "$CLI" app -dj '{"a":1}')"
+expected='{"PORT":"3000","DEBUG":"true","PAYLOAD":"{\"a\":1}"}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected mixed bundle json value: %s\nActual:                           %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+
+actual="$(cd "$NATIVE_SCALARS_DIR" && "$CLI" app -dp -1)"
+expected='{"PORT":"-1","DEBUG":"true","PAYLOAD":"7"}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected mixed bundle negative int: %s\nActual:                             %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+
 actual="$("$CLI" audit env "$ROOT_DIR/tests/env-audit-clean/.cli-flags.toml" "$ROOT_DIR/tests/env-audit-clean/.env")"
 expected='{"ok":true,"errorCount":0,"warningCount":0,"errors":[],"warnings":[]}'
 if [ "$actual" != "$expected" ]; then
