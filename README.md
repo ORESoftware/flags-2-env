@@ -1592,11 +1592,15 @@ guarantees:
   consumed, so a word like `archive.tar` stays a positional. `require_equals`
   suppresses this for bundles and lone shorts alike.
 - Every character before the value flag must be a declared boolean short with
-  an env target. A token containing an undeclared character is not a bundle;
-  it falls back to the historical single-flag reading and never silently
-  half-applies. Such a token is reported through `unknown_options_env`
-  wherever the undeclared character sits, so a typo like `rm -rF` surfaces
-  the same way `rm -Fr` does rather than vanishing.
+  an env target, resolvable in the active scope. A token containing a
+  character that is not — a typo, a short belonging to a command that is not
+  active, a short several commands declare differently — is not a bundle and
+  applies nothing at all. Such a token is reported through
+  `unknown_options_env` wherever the offending character sits, so a typo like
+  `rm -rF` surfaces the same way `rm -Fr` does rather than vanishing. When the
+  token has more than one character after the dash, `errors_env` also explains
+  which character was at fault, instead of quoting the token's tail back as a
+  value for its first flag. `allow_unknown` silences both channels.
 - An explicit `=` makes an empty remainder a real value, so every spelling of
   "set this to the empty string" agrees: `--mode=`, `-m=` and `-dvm=` all
   export `NODE_ENV=""`. Without the `=`, a bundle ending at its value flag
@@ -1616,18 +1620,40 @@ guarantees:
 - Bundles resolve in the active command scope first, then its ancestors, so
   `gitish ci -am 'fix stuff'` applies the `commit` scope's `-a` and `-m`, and
   an inherited global `-v` may join the same bundle (`gitish ci -vam wip`).
+  When no command is selected, the same globally-unique fallback that resolves
+  a lone `-m` resolves it inside a bundle, which means one token may combine
+  shorts declared by unrelated commands, and a character two commands declare
+  differently resolves to neither. Write the command first if you want the
+  scoped reading.
 - With `[parse] require_equals = true`, the value must be inline
   (`-dvp8080` or `-dvp=8080`); a separated value stays positional, matching
   how a lone `-p 8080` behaves in that mode.
+- A bundle whose *value* is rejected still applies its leading booleans, just
+  as the equivalent separate tokens would: `-dvp x` sets `DEBUG` and `VERBOSE`
+  and reports `flags.port value "x" is not a valid integer` through
+  `errors_env`. Only an unreadable *token* applies nothing.
 
-`flags2env audit` warns when a single-character boolean value alias also
-resolves as a reachable short flag, because a token like `-dt` then has two
-readings. Reachability includes the active command's inherited/global flags
-and the parser's unique scoped-flag fallback when no command is selected. The
-parser resolves each context deterministically — an all-boolean token is a
-bundle, and otherwise the value-alias reading wins — and the warning names the
-command context when one is involved. Declare different characters if you want
-both spellings.
+What `flags2env audit` checks about bundles:
+
+- A single-character boolean value alias that also resolves as a reachable
+  short flag, because a token like `-dt` then has two readings. Reachability
+  includes the active command's inherited/global flags and the parser's unique
+  scoped-flag fallback when no command is selected; the warning names every
+  context in which the collision is reachable, not just the first one found.
+  The parser resolves each context deterministically — an all-boolean token is
+  a bundle, and otherwise the value-alias reading wins. Declare different
+  characters if you want both spellings.
+- A *multi-character* boolean value alias that spells a bundle. With
+  `true_aliases = ["vp"]`, `-dvp` is a value for the boolean while `-dvp8080`
+  is `-v` plus `-p 8080` — two spellings that differ only in whether the value
+  is inline, resolving to different flags.
+- A `short` declared with more than one character. Only the first is ever
+  used, so `short = "ab"` quietly ships a CLI whose `-ab` is a bundle rather
+  than the two-letter flag that was written. This is an error, not a warning.
+
+Generated shell completion decomposes bundles the same way the parser does, so
+a bundled value flag's separated value is offered as a value rather than
+matched against subcommand names.
 
 ### Command aliases are canonicalized
 

@@ -104,6 +104,18 @@ run_config_case "$ROOT_DIR/tests/short-bundles" '{"RECURSIVE":"true","FORCE":"fa
 run_config_case "$ROOT_DIR/tests/short-bundles" '{"RECURSIVE":"true","FORCE":"true"}' app -rf archive.tar
 # Node accepts -pe (print + eval); the value-taking -e must end the bundle.
 run_config_case "$ROOT_DIR/tests/node-short-bundle" '{"PRINT":"true","EVAL":""}' app -pe ''
+run_config_case "$ROOT_DIR/tests/node-short-bundle" '{"PRINT":"true","EVAL":"1 + 1"}' app -pe '1 + 1'
+# ...and the reversed spelling stays getopt: -e takes a value, so "p" is that
+# value and the script that follows is positional. Same declaration, different
+# order, different meaning - which is the point of putting the value flag last.
+run_config_case "$ROOT_DIR/tests/node-short-bundle" '{"EVAL":"p"}' app -ep '1 + 1'
+# The literal tar letters, as the muscle memory spells them.
+TAR_DIR="$ROOT_DIR/tests/tar-short-bundle"
+run_config_case "$TAR_DIR" '{"EXTRACT":"true","VERBOSE":"true","FILE":"archive.tar"}' app -xvf archive.tar
+run_config_case "$TAR_DIR" '{"EXTRACT":"true","VERBOSE":"true","FILE":"archive.tar"}' app -xvfarchive.tar
+run_config_case "$TAR_DIR" '{"EXTRACT":"true","VERBOSE":"true","FILE":"archive.tar"}' app -xvf=archive.tar
+run_config_case "$TAR_DIR" '{"EXTRACT":"true","GZIP":"true","VERBOSE":"true","FILE":"archive.tgz"}' app -xzvf archive.tgz
+run_config_case "$TAR_DIR" '{"EXTRACT":"true","VERBOSE":"true","FILE":"archive.tar"}' app -x -v -f archive.tar
 # a suffix that reads as a boolean value for the first flag keeps that meaning
 # (compatibility): -dt is debug=true via true_aliases, never a bundle
 run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true"}' app -dt
@@ -204,6 +216,24 @@ for bundle_unknown in -zd -dz -dvz -zdv; do
     exit 1
   fi
 done
+
+# The error channel names the character that is actually at fault. The old
+# fallback reported `flags.debug value "vz" is not a valid bool` - a flag that
+# is fine and a value nobody typed - which sent people looking in the wrong
+# place for a mistyped bundle.
+FAULT_DIR="$ROOT_DIR/tests/short-bundle-faults"
+run_config_case "$FAULT_DIR" '{"POSITIONALS":"[\"'"$CLI"'\",\"app\"]","UNKNOWN":"[\"-dvz\"]","ERRORS":"[\"\\\"-dvz\\\" is not a short flag bundle: -z is not a declared short flag\"]"}' app -dvz
+run_config_case "$FAULT_DIR" '{"POSITIONALS":"[\"'"$CLI"'\",\"app\"]","UNKNOWN":"[\"-dzv\"]","ERRORS":"[\"\\\"-dzv\\\" is not a short flag bundle: -z is not a declared short flag\"]"}' app -dzv
+# The same explanation regardless of where the bad character sits - that
+# symmetry is the whole point.
+run_config_case "$FAULT_DIR" '{"POSITIONALS":"[\"'"$CLI"'\",\"app\"]","UNKNOWN":"[\"-zdv\"]","ERRORS":"[\"\\\"-zdv\\\" is not a short flag bundle: -z is not a declared short flag\"]"}' app -zdv
+# A lone unrecognized short is just an unknown option; there is nothing about
+# a bundle to explain.
+run_config_case "$FAULT_DIR" '{"POSITIONALS":"[\"'"$CLI"'\",\"app\"]","UNKNOWN":"[\"-q\"]"}' app -q
+# allow_unknown silences both channels, as it does for any unknown option.
+run_config_case "$FAULT_DIR" '{"POSITIONALS":"[\"'"$CLI"'\",\"app\"]"}' app --allow-unknown -dvz
+# An invalid *value* is still reported against the flag that owns it.
+run_config_case "$FAULT_DIR" '{"DEBUG":"true","VERBOSE":"true","POSITIONALS":"[\"'"$CLI"'\",\"app\"]","ERRORS":"[\"flags.port value \\\"abc\\\" is not a valid integer\"]"}' app -dvpabc
 
 # ...but a character that is a *value* for the bundle's value-taking flag is
 # not an unknown option: "z" is -p's (invalid) value, reported through the
@@ -647,13 +677,91 @@ fi
 # short flag introduced by an active child command, and audit must not miss it.
 SCOPED_BUNDLE_ALIAS_CONFIG="$ROOT_DIR/tests/audit-bundle-command/.cli-flags.toml"
 actual="$("$CLI" audit "$SCOPED_BUNDLE_ALIAS_CONFIG")"
-expected='{"ok":true,"errorCount":0,"warningCount":1,"errors":[],"warnings":["flags.debug boolean value alias \"t\" doubles as short flag -t (flags.trace) when command \"commit\" is active; \"-dt\" parses as a bundle, not a value for flags.debug"]}'
+expected='{"ok":true,"errorCount":0,"warningCount":1,"errors":[],"warnings":["flags.debug boolean value alias \"t\" doubles as short flag -t (flags.trace) when command \"commit\" is active or when no command is selected; \"-dt\" parses as a bundle, not a value for flags.debug"]}'
 if [ "$actual" != "$expected" ]; then
   printf 'Expected command-scope bundle-alias warning:\n%s\nActual: %s\n' "$expected" "$actual" >&2
   exit 1
 fi
 run_config_case "$ROOT_DIR/tests/audit-bundle-command" '{"FLAGS2ENV_COMMAND":"commit","DEBUG":"true","TRACE":"true"}' gitish commit -dt
 run_config_case "$ROOT_DIR/tests/audit-bundle-command" '{"FLAGS2ENV_COMMAND":"","DEBUG":"true","TRACE":"true"}' gitish -dt
+
+# A short flag is one character; everything past the first byte used to be
+# dropped in silence, shipping a CLI whose "-ab" was a bundle rather than the
+# two-letter flag the author wrote.
+MULTI_SHORT_DIR="$TMP_TEST_DIR/audit-multi-char-short"
+mkdir -p "$MULTI_SHORT_DIR"
+cat > "$MULTI_SHORT_DIR/.cli-flags.toml" <<'EOF'
+[flags.alpha]
+env = "ALPHA"
+aliases = ["alpha"]
+short = "ab"
+type = "bool"
+
+[flags.beta]
+env = "BETA"
+aliases = ["beta"]
+short = "b"
+type = "bool"
+EOF
+set +e
+actual="$("$CLI" audit "$MULTI_SHORT_DIR/.cli-flags.toml")"
+set -e
+expected='{"ok":false,"errorCount":1,"warningCount":0,"errors":["flags.alpha short \"ab\" is more than one character; only \"a\" is used, and \"-ab\" parses as a short flag bundle"],"warnings":[]}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected multi-character short error:\n%s\nActual: %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+# and the parse the author did not ask for is exactly the bundle
+actual="$(cd "$MULTI_SHORT_DIR" && "$CLI" app -ab)"
+expected='{"ALPHA":"true","BETA":"true"}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected -ab to parse as a bundle: %s\nActual: %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+
+# A multi-character boolean value alias can spell a whole bundle, and then two
+# spellings that differ only in whether a value is inline resolve to different
+# flags. The audit has to say so.
+MULTI_ALIAS_DIR="$TMP_TEST_DIR/audit-multi-char-alias"
+mkdir -p "$MULTI_ALIAS_DIR"
+cat > "$MULTI_ALIAS_DIR/.cli-flags.toml" <<'EOF'
+[flags.debug]
+env = "DEBUG"
+aliases = ["debug"]
+short = "d"
+type = "bool"
+true_aliases = ["vp"]
+
+[flags.verbose]
+env = "VERBOSE"
+aliases = ["verbose"]
+short = "v"
+type = "bool"
+
+[flags.port]
+env = "PORT"
+aliases = ["port"]
+short = "p"
+type = "integer"
+EOF
+actual="$("$CLI" audit "$MULTI_ALIAS_DIR/.cli-flags.toml")"
+expected='{"ok":true,"errorCount":0,"warningCount":1,"errors":[],"warnings":["flags.debug boolean value alias \"vp\" also spells a short flag bundle; \"-dvp\" is a value for flags.debug, but \"-dvp\" followed by anything parses as a bundle"]}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected multi-character alias bundle warning:\n%s\nActual: %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+actual="$(cd "$MULTI_ALIAS_DIR" && "$CLI" app -dvp)"
+expected='{"DEBUG":"true"}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected -dvp to stay a boolean value: %s\nActual: %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+actual="$(cd "$MULTI_ALIAS_DIR" && "$CLI" app -dvp8080)"
+expected='{"DEBUG":"true","VERBOSE":"true","PORT":"8080"}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected -dvp8080 to parse as a bundle: %s\nActual: %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
 
 set +e
 "$CLI" completion bash mycli "$UNSAFE_CONFIG" >/dev/null 2>/dev/null
