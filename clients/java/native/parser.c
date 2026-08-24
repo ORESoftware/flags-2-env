@@ -126,6 +126,9 @@ typedef struct {
   char false_aliases[F2E_MAX_ALIASES][F2E_MAX_NAME];
   size_t false_alias_count;
   char short_name;
+  /* the `short` value exactly as declared; only its first byte becomes
+     short_name, so keeping the rest is what lets audit catch `short = "ab"` */
+  char short_declared[F2E_MAX_NAME];
   F2EValueType type;
   int invalid_type;
   char type_value[F2E_MAX_VALUE];
@@ -266,6 +269,19 @@ static size_t f2e_strlcpy(char *dst, const char *src, size_t dst_size) {
     dst[copy_len] = '\0';
   }
   return src_len;
+}
+
+/* Truncating append, the strlcpy counterpart. Used for building audit
+   messages, where losing the tail of a long list beats writing past the end. */
+static size_t f2e_strlcat(char *dst, const char *src, size_t dst_size) {
+  size_t dst_len = 0;
+  while (dst_len < dst_size && dst[dst_len] != '\0') {
+    dst_len++;
+  }
+  if (dst_len >= dst_size) {
+    return dst_len + (src ? strlen(src) : 0);
+  }
+  return dst_len + f2e_strlcpy(dst + dst_len, src, dst_size - dst_len);
 }
 
 static char *f2e_strdup(const char *value) {
@@ -1937,6 +1953,7 @@ static int f2e_load_config(const char *config_path, F2EConfig *config) {
       char parsed[F2E_MAX_VALUE];
       if (f2e_parse_bare_value(value, parsed, sizeof(parsed)) && parsed[0] != '\0') {
         current->short_name = parsed[0];
+        f2e_strlcpy(current->short_declared, parsed, sizeof(current->short_declared));
       }
     } else if (f2e_streq(key, "type")) {
       char parsed[F2E_MAX_VALUE];
@@ -3016,6 +3033,95 @@ static void f2e_apply_defaults_for_path(F2EConfig *config, F2EPair *pairs, size_
   }
 }
 
+/* Why a single-dash token could not be read as short flags. The token's first
+   character resolving is not enough: every character up to the value-taking
+   one has to resolve too, and when one does not, the offending character is
+   what the caller needs to hear about. Blaming the token's first flag for a
+   "value" made of the remaining characters names the wrong thing. */
+typedef enum {
+  F2E_SHORT_FAULT_NONE = 0,
+  F2E_SHORT_FAULT_UNDECLARED,   /* the character is no flag's short, anywhere */
+  F2E_SHORT_FAULT_OUT_OF_SCOPE, /* declared, but not by the active scope chain */
+  F2E_SHORT_FAULT_AMBIGUOUS,    /* declared by several scopes, none of them active */
+  F2E_SHORT_FAULT_NO_ENV        /* declared here, but targets no env var */
+} F2EShortFault;
+
+/* Reports the first character of `shorts` that stops the token from reading as
+   a bundle. Scanning stops at the first value-taking short because everything
+   after it is that flag's value, not more flags. */
+static F2EShortFault f2e_short_token_fault(F2EConfig *config, int scope, const char *shorts,
+                                           char *offender, const F2EFlag **owner) {
+  for (const char *cursor = shorts; *cursor; cursor++) {
+    F2EFlag *flag = f2e_find_flag_by_short(config, scope, *cursor);
+    if (!flag) {
+      int ambiguous = 0;
+      const F2EFlag *elsewhere = f2e_find_flag_any_scope_by_short(config, *cursor, &ambiguous);
+      if (offender) {
+        *offender = *cursor;
+      }
+      if (owner) {
+        *owner = elsewhere;
+      }
+      if (ambiguous) {
+        return F2E_SHORT_FAULT_AMBIGUOUS;
+      }
+      return elsewhere ? F2E_SHORT_FAULT_OUT_OF_SCOPE : F2E_SHORT_FAULT_UNDECLARED;
+    }
+    if (flag->env[0] == '\0') {
+      if (offender) {
+        *offender = *cursor;
+      }
+      if (owner) {
+        *owner = flag;
+      }
+      return F2E_SHORT_FAULT_NO_ENV;
+    }
+    if (flag->type != F2E_TYPE_BOOL) {
+      /* A value-taking short ends the token; the rest is its value. */
+      return F2E_SHORT_FAULT_NONE;
+    }
+  }
+  return F2E_SHORT_FAULT_NONE;
+}
+
+/* The `errors_env` line for a token that did not read as flags. Names the
+   character at fault and why, instead of quoting the token's tail back as a
+   value the caller never wrote. */
+static void f2e_report_short_token_fault(F2EConfig *config, int scope, const char *token,
+                                         F2EJsonList *errors) {
+  if (!errors) {
+    return;
+  }
+  char offender = '\0';
+  const F2EFlag *owner = NULL;
+  char message[512];
+  switch (f2e_short_token_fault(config, scope, token + 1, &offender, &owner)) {
+    case F2E_SHORT_FAULT_UNDECLARED:
+      snprintf(message, sizeof(message),
+               "\"%s\" is not a short flag bundle: -%c is not a declared short flag",
+               token, offender);
+      break;
+    case F2E_SHORT_FAULT_OUT_OF_SCOPE:
+      snprintf(message, sizeof(message),
+               "\"%s\" is not a short flag bundle: -%c belongs to flags.%s, which this command scope does not reach",
+               token, offender, f2e_audit_flag_name(owner));
+      break;
+    case F2E_SHORT_FAULT_AMBIGUOUS:
+      snprintf(message, sizeof(message),
+               "\"%s\" is not a short flag bundle: -%c is declared by more than one command, and none is active",
+               token, offender);
+      break;
+    case F2E_SHORT_FAULT_NO_ENV:
+      snprintf(message, sizeof(message),
+               "\"%s\" is not a short flag bundle: -%c is flags.%s, which declares no env target",
+               token, offender, f2e_audit_flag_name(owner));
+      break;
+    default:
+      return;
+  }
+  f2e_json_list_append(errors, message);
+}
+
 static int f2e_can_bundle_bool_shorts(F2EConfig *config, int scope, const char *shorts) {
   if (!shorts || shorts[0] == '\0') {
     return 0;
@@ -3029,13 +3135,32 @@ static int f2e_can_bundle_bool_shorts(F2EConfig *config, int scope, const char *
   return 1;
 }
 
-static void f2e_apply_bool_short_bundle(F2EConfig *config, int scope, F2EPair *pairs, size_t pair_count, const char *shorts, F2EJsonList *errors) {
-  for (const char *cursor = shorts; *cursor; cursor++) {
-    F2EFlag *flag = f2e_find_flag_by_short(config, scope, *cursor);
-    if (flag && flag->env[0] != '\0' && flag->type == F2E_TYPE_BOOL) {
-      /* A bundled -i is still an -i, so requires_tty applies here too. */
-      f2e_set_bare_bool(flag, pairs, pair_count, errors);
+/* An all-boolean bundle is shorthand for the same shorts written separately:
+   `-dv` must mean exactly `-d -v`. That equivalence was broken for the
+   trailing short, which alone is adjacent to the next argv element and so is
+   the only one that can consume a separated boolean value. `-d -v false` set
+   VERBOSE=false while `-dv false` set VERBOSE=true and left "false" as a
+   positional, so adding one character to a token silently changed the meaning
+   of the *next* argument. Only the last short gets the separated-value
+   reading, and only under the same guards as the lone spelling: the value
+   must be one this flag would itself accept. */
+static void f2e_apply_bool_short_bundle(F2EConfig *config, int scope, F2EPair *pairs, size_t pair_count, const char *shorts, int *index, int argc, const char *const argv[], F2EJsonList *errors) {
+  size_t count = shorts ? strlen(shorts) : 0;
+  for (size_t k = 0; k < count; k++) {
+    F2EFlag *flag = f2e_find_flag_by_short(config, scope, shorts[k]);
+    if (!flag || flag->env[0] == '\0' || flag->type != F2E_TYPE_BOOL) {
+      continue;
     }
+    if (k + 1 == count &&
+        config->allow_separated_values &&
+        index && *index + 1 < argc &&
+        f2e_can_consume_separated_value(flag, argv[*index + 1]) &&
+        f2e_try_set_bool_value(flag, pairs, pair_count, argv[*index + 1], errors)) {
+      (*index)++;
+      continue;
+    }
+    /* A bundled -i is still an -i, so requires_tty applies here too. */
+    f2e_set_bare_bool(flag, pairs, pair_count, errors);
   }
 }
 
@@ -3077,12 +3202,16 @@ static int f2e_apply_mixed_short_bundle(F2EConfig *config, int scope, F2EPair *p
     }
   }
   const char *value = shorts + split + 1;
+  int explicit_value = 0;
   if (*value == '=') {
     /* Mirrors the single-short spelling `-p=8080`, so `-dvp=8080` and
-       `-dvp8080` agree. */
+       `-dvp8080` agree. An explicit `=` also makes an *empty* remainder a
+       real value: `--mode=` sets the env var to "", so `-dvm=` must too
+       rather than silently dropping the assignment. */
     value++;
+    explicit_value = 1;
   }
-  if (*value != '\0') {
+  if (explicit_value || *value != '\0') {
     f2e_try_set_flag_value(value_flag, pairs, pair_count, value, errors);
   } else if (config->allow_separated_values &&
              *index + 1 < argc &&
@@ -3091,6 +3220,22 @@ static int f2e_apply_mixed_short_bundle(F2EConfig *config, int scope, F2EPair *p
     f2e_try_set_flag_value(value_flag, pairs, pair_count, argv[*index], errors);
   }
   return 1;
+}
+
+/* One reporting path for every single-dash token that did not read as flags,
+   whichever check rejected it. `unknown_options_env` is the channel, as it has
+   always been for a token whose *first* character was undeclared; a token with
+   two or more characters after the dash is someone spelling a bundle, so
+   `errors_env` also gets the reason. A lone `-q` needs no explanation, and
+   `allow_unknown` silences both - the caller checks it before calling. */
+static void f2e_report_unusable_token(F2EConfig *config, int scope, const char *token,
+                                      F2EJsonList *unknown_options, F2EJsonList *errors) {
+  if (unknown_options) {
+    f2e_json_list_append(unknown_options, token);
+  }
+  if (token[0] == '-' && token[1] != '-' && token[1] != '\0' && token[2] != '\0') {
+    f2e_report_short_token_fault(config, scope, token, errors);
+  }
 }
 
 static void f2e_apply_long_arg(F2EConfig *config, int scope, F2EPair *pairs, size_t pair_count, const char *token, int *index, int argc, const char *const argv[], F2EJsonList *errors) {
@@ -3159,15 +3304,27 @@ static void f2e_apply_long_arg(F2EConfig *config, int scope, F2EPair *pairs, siz
   }
 }
 
-static void f2e_apply_short_arg(F2EConfig *config, int scope, F2EPair *pairs, size_t pair_count, const char *token, int *index, int argc, const char *const argv[], F2EJsonList *errors) {
+/* Returns 1 when the token was handled, 0 only for a bundle-shaped token that
+   no reading could apply; the caller then reports it in `unknown_options_env`.
+   That channel used to depend on *where* the undeclared character sat: `-zd`
+   was reported because `f2e_token_looks_like_known_option` failed on token[1]
+   before this function ran, while `-dz` and `-rF` reached the fallback below
+   and vanished with no entry anywhere - the exact shape of a mistyped bundle.
+
+   The early bails below stay 1 on purpose. A short that resolves to no flag
+   here has already been screened by the caller, so reaching this point means
+   it is declared but deliberately not applicable in this scope - an ambiguous
+   short under F2E_SCOPE_LENIENT, or a flag with no env target. Those are
+   accepted and not applied, never reported as unknown. */
+static int f2e_apply_short_arg(F2EConfig *config, int scope, F2EPair *pairs, size_t pair_count, const char *token, int *index, int argc, const char *const argv[], F2EJsonList *errors) {
   if (token[1] == '\0') {
-    return;
+    return 1;
   }
 
   char short_name = token[1];
   F2EFlag *first = f2e_find_flag_by_short(config, scope, short_name);
   if (!first || first->env[0] == '\0') {
-    return;
+    return 1;
   }
 
   const char *rest = token + 2;
@@ -3178,7 +3335,10 @@ static void f2e_apply_short_arg(F2EConfig *config, int scope, F2EPair *pairs, si
   }
 
   if (first->type != F2E_TYPE_BOOL) {
-    if (*rest) {
+    /* `has_inline_value` marks an explicit `=`, which makes even an empty
+       remainder a real assignment. Ignoring it made `-m=` a no-op while
+       `--mode=` set "" - the same flag, two spellings, two meanings. */
+    if (has_inline_value || *rest) {
       f2e_try_set_flag_value(first, pairs, pair_count, rest, errors);
     } else if (config->allow_separated_values &&
                *index + 1 < argc &&
@@ -3186,12 +3346,12 @@ static void f2e_apply_short_arg(F2EConfig *config, int scope, F2EPair *pairs, si
       (*index)++;
       f2e_try_set_flag_value(first, pairs, pair_count, argv[*index], errors);
     }
-    return;
+    return 1;
   }
 
   if (has_inline_value) {
     f2e_try_set_flag_value(first, pairs, pair_count, rest, errors);
-    return;
+    return 1;
   }
 
   if (*rest == '\0') {
@@ -3200,15 +3360,15 @@ static void f2e_apply_short_arg(F2EConfig *config, int scope, F2EPair *pairs, si
         f2e_can_consume_separated_value(first, argv[*index + 1]) &&
         f2e_try_set_bool_value(first, pairs, pair_count, argv[*index + 1], errors)) {
       (*index)++;
-      return;
+      return 1;
     }
     f2e_set_bare_bool(first, pairs, pair_count, errors);
-    return;
+    return 1;
   }
 
   if (f2e_can_bundle_bool_shorts(config, scope, token + 1)) {
-    f2e_apply_bool_short_bundle(config, scope, pairs, pair_count, token + 1, errors);
-    return;
+    f2e_apply_bool_short_bundle(config, scope, pairs, pair_count, token + 1, index, argc, argv, errors);
+    return 1;
   }
 
   /* Compatibility before bundling: a suffix that reads as a boolean value for
@@ -3219,15 +3379,24 @@ static void f2e_apply_short_arg(F2EConfig *config, int scope, F2EPair *pairs, si
     const char *canonical = NULL;
     if (f2e_bool_value_alias(first, rest, &canonical)) {
       f2e_try_set_flag_value(first, pairs, pair_count, rest, errors);
-      return;
+      return 1;
     }
   }
 
   if (f2e_apply_mixed_short_bundle(config, scope, pairs, pair_count, token + 1, index, argc, argv, errors)) {
-    return;
+    return 1;
   }
 
-  f2e_try_set_flag_value(first, pairs, pair_count, rest, errors);
+  /* Every bundle reading failed. The historical fallback treated the suffix as
+     an inline value for the first flag, which for a boolean is invalid by
+     construction (a valid one was already taken by the alias check above), so
+     the token sets nothing either way - but it reported the failure as
+     `flags.<first> value "<tail>" is not a valid bool`, naming a flag that is
+     usually fine and a value nobody typed. Return 0 instead and let the caller
+     report the token, so a bad character in position three is reported exactly
+     like the same bad character in position one. */
+  (void)errors;
+  return 0;
 }
 
 static const char *f2e_audit_flag_name(const F2EFlag *flag) {
@@ -3402,19 +3571,47 @@ static void f2e_audit_command_semantics(const F2EConfig *config, F2EAudit *audit
   }
 }
 
-/* Find a short flag that can be read after `flag` in at least one parser
-   context. Checking only flag->command misses two real bundle contexts:
+/* Names one lookup context for an audit message. Root needs no wording: a
+   collision reachable at the top level is reachable in every invocation. */
+static void f2e_audit_scope_label(const F2EConfig *config, int scope, char *out, size_t out_size) {
+  if (scope == F2E_SCOPE_LENIENT) {
+    f2e_strlcpy(out, "when no command is selected", out_size);
+    return;
+  }
+  char command_label[F2E_MAX_VALUE];
+  if (!f2e_command_path_label(config, scope, command_label, sizeof(command_label))) {
+    f2e_strlcpy(command_label, config->commands[scope].name, sizeof(command_label));
+  }
+  snprintf(out, out_size, "when command \"%s\" is active", command_label);
+}
+
+/* Every context in which `alias_short` can be read directly after `flag`'s own
+   short. Checking only flag->command misses two real bundle contexts:
 
    - a global flag followed by a short declared by an active child command;
    - lenient lookup, where globally-unique scoped shorts remain available when
      argv selects no command.
 
    Requiring both shorts to resolve to the concrete flags in the same context
-   also avoids warning about child declarations that shadow the first short. */
-static const F2EFlag *f2e_find_reachable_bundle_alias(const F2EConfig *config,
-                                                       const F2EFlag *flag,
-                                                       char alias_short,
-                                                       int *scope_out) {
+   also avoids warning about child declarations that shadow the first short.
+
+   Collecting *all* of them matters: the same collision is routinely reachable
+   from a command scope and from the no-command lenient lookup, and naming only
+   the first left the config author fixing one spelling and keeping the other.
+   `want_value_flag` selects which of the two readings to collect, so a
+   collision that resolves to a boolean in one context and a value-taking flag
+   in another is reported as the two distinct hazards it is. */
+static const F2EFlag *f2e_collect_bundle_alias_contexts(const F2EConfig *config,
+                                                        const F2EFlag *flag,
+                                                        char alias_short,
+                                                        int want_value_flag,
+                                                        char *contexts,
+                                                        size_t contexts_size) {
+  const F2EFlag *first = NULL;
+  size_t named = 0;
+  if (contexts && contexts_size > 0) {
+    contexts[0] = '\0';
+  }
   size_t context_count = config->command_count + 2;
   for (size_t context = 0; context < context_count; context++) {
     int scope = context == 0
@@ -3427,14 +3624,49 @@ static const F2EFlag *f2e_find_reachable_bundle_alias(const F2EConfig *config,
       continue;
     }
     F2EFlag *other = f2e_find_flag_by_short((F2EConfig *)config, scope, alias_short);
-    if (other && other != flag) {
-      if (scope_out) {
-        *scope_out = scope;
-      }
-      return other;
+    if (!other || other == flag) {
+      continue;
     }
+    if ((other->type != F2E_TYPE_BOOL) != (want_value_flag != 0)) {
+      continue;
+    }
+    if (!first) {
+      first = other;
+    }
+    if (scope == F2E_SCOPE_ROOT) {
+      /* Reachable everywhere; further context wording would only add noise. */
+      if (contexts && contexts_size > 0) {
+        contexts[0] = '\0';
+      }
+      return first;
+    }
+    if (!contexts || contexts_size == 0) {
+      continue;
+    }
+    if (named >= 3) {
+      if (named == 3) {
+        f2e_strlcat(contexts, ", and in other command scopes", contexts_size);
+      }
+      named++;
+      continue;
+    }
+    char label[F2E_MAX_VALUE + 64];
+    f2e_audit_scope_label(config, scope, label, sizeof(label));
+    f2e_strlcat(contexts, named == 0 ? " " : " or ", contexts_size);
+    f2e_strlcat(contexts, label, contexts_size);
+    named++;
   }
-  return NULL;
+  return first;
+}
+
+/* True when `shorts` reads as a bundle in `scope`: every character before the
+   value-taking one is a declared boolean short with an env target. This is the
+   parser's own predicate, so audit and parse cannot drift apart. */
+static int f2e_shorts_spell_bundle(const F2EConfig *config, int scope, const char *shorts) {
+  if (!shorts || shorts[0] == '\0') {
+    return 0;
+  }
+  return f2e_short_token_fault((F2EConfig *)config, scope, shorts, NULL, NULL) == F2E_SHORT_FAULT_NONE;
 }
 
 static void f2e_audit_config_semantics(const F2EConfig *config, F2EAudit *audit) {
@@ -3471,6 +3703,18 @@ static void f2e_audit_config_semantics(const F2EConfig *config, F2EAudit *audit)
     if (flag->short_name != '\0' && !isalnum((unsigned char)flag->short_name)) {
       f2e_audit_add(audit, 1, "flags.%s has invalid short flag \"%c\"", f2e_audit_flag_name(flag), flag->short_name);
     }
+    /* A short flag is one character by definition, and everything past the
+       first byte was being dropped in silence - so `short = "ab"` quietly
+       shipped a CLI whose `-ab` meant "-a bundled with whatever -b is" rather
+       than the two-letter flag the author wrote. */
+    if (flag->short_declared[0] != '\0' && flag->short_declared[1] != '\0') {
+      f2e_audit_add(audit, 1,
+                    "flags.%s short \"%s\" is more than one character; only \"%c\" is used, and \"-%s\" parses as a short flag bundle",
+                    f2e_audit_flag_name(flag),
+                    flag->short_declared,
+                    flag->short_name,
+                    flag->short_declared);
+    }
     if (flag->invalid_type) {
       f2e_audit_add(audit, 1, "flags.%s type \"%s\" is not supported",
                     f2e_audit_flag_name(flag),
@@ -3478,57 +3722,79 @@ static void f2e_audit_config_semantics(const F2EConfig *config, F2EAudit *audit)
     }
     f2e_audit_bool_value_aliases(flag, audit);
 
-    /* A single-character boolean value alias that doubles as a reachable
-       short flag makes `-<short><alias>` ambiguous between "value for the
-       boolean" and "short bundle". Surface the shadowing in every kind of
-       lookup context where both flags can actually resolve together. */
+    /* A boolean value alias that also reads as short flags makes
+       `-<short><alias>` ambiguous between "value for the boolean" and "short
+       bundle". Surface the shadowing in every lookup context where the two
+       readings can actually resolve together. */
     if (flag->type == F2E_TYPE_BOOL && flag->short_name != '\0') {
       for (size_t j = 0; j < flag->true_alias_count + flag->false_alias_count; j++) {
         const char *alias = j < flag->true_alias_count
                                 ? flag->true_aliases[j]
                                 : flag->false_aliases[j - flag->true_alias_count];
-        if (alias[0] == '\0' || alias[1] != '\0') {
+        if (alias[0] == '\0') {
           continue;
         }
-        int collision_scope = F2E_SCOPE_ROOT;
-        const F2EFlag *other = f2e_find_reachable_bundle_alias(config, flag, alias[0], &collision_scope);
-        if (other && other != flag) {
-          /* Which reading wins matches the parser: an all-boolean token is a
-             bundle; otherwise the value-alias reading is kept. */
-          char collision_context[F2E_MAX_VALUE + 64] = "";
-          if (collision_scope >= 0) {
-            char command_label[F2E_MAX_VALUE];
-            if (!f2e_command_path_label(config, collision_scope, command_label, sizeof(command_label))) {
-              f2e_strlcpy(command_label, config->commands[collision_scope].name, sizeof(command_label));
+        if (alias[1] != '\0') {
+          /* A multi-character alias can spell a whole bundle. That reading is
+             the more dangerous one, because it only appears once a value is
+             appended: with true_aliases = ["vp"], `-dvp` is a value for the
+             boolean while `-dvp8080` is `-v` plus `-p 8080`. Two spellings
+             that differ only in whether a value is inline must not resolve to
+             different flags in silence. */
+          for (size_t context = 0; context <= config->command_count + 1; context++) {
+            int scope = context == 0
+                            ? F2E_SCOPE_ROOT
+                            : context <= config->command_count
+                                  ? (int)(context - 1)
+                                  : F2E_SCOPE_LENIENT;
+            if (f2e_find_flag_by_short((F2EConfig *)config, scope, flag->short_name) != flag) {
+              continue;
             }
-            snprintf(collision_context, sizeof(collision_context),
-                     " when command \"%s\" is active", command_label);
-          } else if (collision_scope == F2E_SCOPE_LENIENT) {
-            f2e_strlcpy(collision_context, " when no command is selected", sizeof(collision_context));
-          }
-          if (other->type == F2E_TYPE_BOOL) {
+            if (!f2e_shorts_spell_bundle(config, scope, alias)) {
+              continue;
+            }
+            char collision_context[F2E_MAX_VALUE + 64] = "";
+            if (scope != F2E_SCOPE_ROOT) {
+              char label[F2E_MAX_VALUE + 64];
+              f2e_audit_scope_label(config, scope, label, sizeof(label));
+              f2e_strlcpy(collision_context, " ", sizeof(collision_context));
+              f2e_strlcat(collision_context, label, sizeof(collision_context));
+            }
             f2e_audit_add(audit, 0,
-                          "flags.%s boolean value alias \"%s\" doubles as short flag -%c (flags.%s)%s; \"-%c%c\" parses as a bundle, not a value for flags.%s",
+                          "flags.%s boolean value alias \"%s\" also spells a short flag bundle%s; \"-%c%s\" is a value for flags.%s, but \"-%c%s\" followed by anything parses as a bundle",
                           f2e_audit_flag_name(flag),
                           alias,
-                          alias[0],
-                          f2e_audit_flag_name(other),
                           collision_context,
                           flag->short_name,
-                          alias[0],
-                          f2e_audit_flag_name(flag));
-          } else {
-            f2e_audit_add(audit, 0,
-                          "flags.%s boolean value alias \"%s\" doubles as short flag -%c (flags.%s)%s; \"-%c%c\" parses as a value for flags.%s, not a bundle",
-                          f2e_audit_flag_name(flag),
                           alias,
-                          alias[0],
-                          f2e_audit_flag_name(other),
-                          collision_context,
+                          f2e_audit_flag_name(flag),
                           flag->short_name,
-                          alias[0],
-                          f2e_audit_flag_name(flag));
+                          alias);
+            break;
           }
+          continue;
+        }
+        /* Which reading wins matches the parser: an all-boolean token is a
+           bundle; otherwise the value-alias reading is kept. */
+        for (int want_value_flag = 0; want_value_flag <= 1; want_value_flag++) {
+          char collision_context[F2E_MAX_VALUE + 64] = "";
+          const F2EFlag *other = f2e_collect_bundle_alias_contexts(config, flag, alias[0], want_value_flag,
+                                                                   collision_context, sizeof(collision_context));
+          if (!other) {
+            continue;
+          }
+          f2e_audit_add(audit, 0,
+                        want_value_flag
+                            ? "flags.%s boolean value alias \"%s\" doubles as short flag -%c (flags.%s)%s; \"-%c%c\" parses as a value for flags.%s, not a bundle"
+                            : "flags.%s boolean value alias \"%s\" doubles as short flag -%c (flags.%s)%s; \"-%c%c\" parses as a bundle, not a value for flags.%s",
+                        f2e_audit_flag_name(flag),
+                        alias,
+                        alias[0],
+                        f2e_audit_flag_name(other),
+                        collision_context,
+                        flag->short_name,
+                        alias[0],
+                        f2e_audit_flag_name(flag));
         }
       }
     }
@@ -4903,6 +5169,34 @@ static int f2e_completion_scope_flag_words(const F2EConfig *config,
   return 1;
 }
 
+/* The scope's short-flag characters, split by whether they take a value. The
+   generated scripts need the raw characters, not the `-x` words, so they can
+   walk a combined token such as `-xvf` one character at a time. */
+static int f2e_completion_scope_short_chars(const F2EConfig *config,
+                                            int scope,
+                                            F2EBuffer *bool_chars,
+                                            F2EBuffer *value_chars) {
+  size_t indexes[F2E_MAX_FLAGS];
+  size_t count = f2e_help_collect_scope_flags(config, scope, indexes);
+  for (size_t k = 0; k < count; k++) {
+    const F2EFlag *flag = &config->flags[indexes[k]];
+    if (flag->env[0] == '\0' || flag->short_name == '\0') {
+      continue;
+    }
+    if (!isalnum((unsigned char)flag->short_name)) {
+      return 0;
+    }
+    if (f2e_find_flag_by_short((F2EConfig *)config, scope, flag->short_name) != flag) {
+      continue;
+    }
+    F2EBuffer *target = flag->type == F2E_TYPE_BOOL ? bool_chars : value_chars;
+    if (!f2e_buffer_append_char(target, flag->short_name)) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
 static int f2e_completion_scope_child_commands(const F2EConfig *config, int scope, F2EBuffer *words) {
   for (size_t i = 0; i < config->command_count; i++) {
     const F2ECommand *command = &config->commands[i];
@@ -4986,6 +5280,38 @@ static int f2e_completion_emit_scope_helpers(const F2EConfig *config, F2EBuffer 
     }
   }
 
+  for (size_t which = 0; which < 2; which++) {
+    if (!f2e_buffer_append(script, function_name) ||
+        !f2e_buffer_append(script, which == 0 ? "_bool_shorts" : "_value_shorts") ||
+        !f2e_buffer_append(script, "() {\n  case \"$1\" in\n")) {
+      return 0;
+    }
+    for (size_t s = 0; s < scope_count; s++) {
+      char key[F2E_MAX_VALUE];
+      if (!f2e_completion_scope_key(config, scopes[s], key, sizeof(key))) {
+        return 0;
+      }
+      F2EBuffer bool_chars = {0};
+      F2EBuffer value_chars = {0};
+      if (!f2e_buffer_init(&bool_chars) || !f2e_buffer_init(&value_chars)) {
+        free(bool_chars.data);
+        free(value_chars.data);
+        return 0;
+      }
+      int collected = f2e_completion_scope_short_chars(config, scopes[s], &bool_chars, &value_chars);
+      const F2EBuffer *chosen = which == 0 ? &bool_chars : &value_chars;
+      int ok = collected && f2e_completion_emit_case_entry(script, key, chosen->data);
+      free(bool_chars.data);
+      free(value_chars.data);
+      if (!ok) {
+        return 0;
+      }
+    }
+    if (!f2e_buffer_append(script, "    *) printf '%s' '' ;;\n  esac\n}\n")) {
+      return 0;
+    }
+  }
+
   if (!f2e_buffer_append(script, function_name) ||
       !f2e_buffer_append(script, "_cmds() {\n  case \"$1\" in\n")) {
     return 0;
@@ -5034,21 +5360,67 @@ static int f2e_completion_emit_scope_helpers(const F2EConfig *config, F2EBuffer 
       }
     }
   }
+  /* Reduce a combined single-dash token to the one option that can own the
+     NEXT word, so `-nl value` is read the way the parser reads it instead of
+     letting `value` look like a subcommand. Leading boolean characters are
+     skipped; a value-taking character claims the next word only when the
+     token ends there (`-nl` yes, `-nlx` no, its value is already inline); an
+     undeclared character means the token is not a bundle at all and owns
+     nothing. An all-boolean token ends on its last character, which may still
+     take a separated `true`/`false` exactly as a lone `-n` does. */
   if (!f2e_buffer_append(script, "    *) printf '%s' '' ;;\n  esac\n}\n") ||
       !f2e_buffer_append(script, function_name) ||
+      !f2e_buffer_append(script, "_effective_opt() {\n"
+                                 "  local rest c bools values\n"
+                                 "  case \"$2\" in\n"
+                                 "    --*) printf '%s' \"$2\" ; return ;;\n"
+                                 "    -?) printf '%s' \"$2\" ; return ;;\n"
+                                 "    -*) ;;\n"
+                                 "    *) printf '%s' \"$2\" ; return ;;\n"
+                                 "  esac\n"
+                                 "  bools=\"$(") ||
+      !f2e_buffer_append(script, function_name) ||
+      !f2e_buffer_append(script, "_bool_shorts \"$1\")\"\n"
+                                 "  values=\"$(") ||
+      !f2e_buffer_append(script, function_name) ||
+      !f2e_buffer_append(script, "_value_shorts \"$1\")\"\n"
+                                 "  rest=\"${2#-}\"\n"
+                                 "  c=''\n"
+                                 "  while [ -n \"$rest\" ]; do\n"
+                                 "    c=\"${rest%\"${rest#?}\"}\"\n"
+                                 "    rest=\"${rest#?}\"\n"
+                                 "    case \"$values\" in\n"
+                                 "      *\"$c\"*)\n"
+                                 "        if [ -z \"$rest\" ]; then printf '%s' \"-$c\" ; fi\n"
+                                 "        return ;;\n"
+                                 "    esac\n"
+                                 "    case \"$bools\" in\n"
+                                 "      *\"$c\"*) ;;\n"
+                                 "      *) return ;;\n"
+                                 "    esac\n"
+                                 "  done\n"
+                                 "  printf '%s' \"-$c\"\n"
+                                 "}\n") ||
+      !f2e_buffer_append(script, function_name) ||
       !f2e_buffer_append(script, "_consumes_value() {\n"
-                                 "  local value_opts bool_value_opts\n"
+                                 "  local value_opts bool_value_opts opt\n"
+                                 "  opt=\"$(") ||
+      !f2e_buffer_append(script, function_name) ||
+      !f2e_buffer_append(script, "_effective_opt \"$1\" \"$2\")\"\n"
+                                 "  if [ -z \"$opt\" ]; then\n"
+                                 "    return 1\n"
+                                 "  fi\n"
                                  "  value_opts=\"$(") ||
       !f2e_buffer_append(script, function_name) ||
       !f2e_buffer_append(script, "_value_opts \"$1\")\"\n"
                                  "  case \" $value_opts \" in\n"
-                                 "    *\" $2 \"*) return 0 ;;\n"
+                                 "    *\" $opt \"*) return 0 ;;\n"
                                  "  esac\n"
                                  "  bool_value_opts=\"$(") ||
       !f2e_buffer_append(script, function_name) ||
       !f2e_buffer_append(script, "_bool_value_opts \"$1\")\"\n"
                                  "  case \" $bool_value_opts \" in\n"
-                                 "    *\" $2 \"*)\n"
+                                 "    *\" $opt \"*)\n"
                                  "      case \" ") ||
       !f2e_buffer_append(script, bool_values ? bool_values : "") ||
       !f2e_buffer_append(script, " \" in\n"
@@ -7511,15 +7883,17 @@ static void f2e_scan_argv(F2EConfig *config,
       if (f2e_token_sets_allow_unknown(token, &parsed_allow_unknown)) {
         allow_unknown = parsed_allow_unknown;
         allow_unknown_forced = 1;
-      } else if (!allow_unknown && unknown_options) {
-        f2e_json_list_append(unknown_options, token);
+      } else if (!allow_unknown) {
+        f2e_report_unusable_token(config, scope, token, unknown_options, errors);
       }
       continue;
     }
     if (token[1] == '-') {
       f2e_apply_long_arg(config, scope, pairs, pair_count, token, &i, argc, argv, errors);
-    } else {
-      f2e_apply_short_arg(config, scope, pairs, pair_count, token, &i, argc, argv, errors);
+    } else if (!f2e_apply_short_arg(config, scope, pairs, pair_count, token, &i, argc, argv, errors) &&
+               !allow_unknown) {
+      /* Bundle-shaped token whose characters do not spell a usable option. */
+      f2e_report_unusable_token(config, scope, token, unknown_options, errors);
     }
   }
 }
