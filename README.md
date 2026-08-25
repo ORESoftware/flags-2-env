@@ -671,6 +671,20 @@ Bash installs to `${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completio
 
 ## Runtime Clients
 
+The repository root is a Cargo workspace, so Rust applications can pin the
+client directly to an immutable repository revision while releases continue to
+publish the package from `clients/rust`:
+
+```toml
+[dependencies]
+flags2env = { git = "https://github.com/flags-2-env/flags-2-env.git", rev = "<full-commit-sha>" }
+```
+
+CI installs that git dependency into an isolated consumer, executes the bundled
+parser, and separately runs the package-only checks from `clients/rust`. A
+source checkout is therefore not counted as integration until a downstream
+binary resolves and executes the actual package.
+
 Client sources live under `clients/<runtime>/`. For package publishing, render or copy only the target runtime client plus the C source or a platform-specific native artifact.
 
 ```sh

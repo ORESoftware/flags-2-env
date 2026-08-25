@@ -2,6 +2,7 @@ build/
 dist/
 node_modules/
 target/
+/Cargo.lock
 clients/rust/Cargo.lock
 clients/*/.gradle/
 .dart_tool/
