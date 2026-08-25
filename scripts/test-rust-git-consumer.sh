@@ -12,5 +12,7 @@ cargo add \
   flags2env \
   --git "file://$repo_root" \
   --rev "$repo_sha"
-cargo run --manifest-path "$consumer_root/Cargo.toml" --locked
-
+(
+  cd "$consumer_root"
+  cargo run --locked
+)
