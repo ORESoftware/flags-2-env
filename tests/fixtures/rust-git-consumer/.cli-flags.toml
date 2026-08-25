@@ -1,0 +1,8 @@
+[parse]
+allow_unknown = false
+
+[flags.port]
+long = "port"
+env = "CONSUMER_PORT"
+type = "integer"
+

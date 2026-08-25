@@ -1,0 +1,9 @@
+[package]
+name = "flags2env-git-consumer"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+flags2env = "0.1"
+
