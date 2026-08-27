@@ -28,12 +28,19 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
           def replace_once(text: str, old: str, new: str, label: str) -> str:
               count = text.count(old)
               if count != 1:
                   raise SystemExit(f"{label}: expected exactly one match, found {count}")
               return text.replace(old, new, 1)
+
+          def replace_regex_once(text: str, pattern: str, replacement: str, label: str) -> str:
+              updated, count = re.subn(pattern, replacement, text, count=1, flags=re.MULTILINE)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected exactly one match, found {count}")
+              return updated
 
           parser_path = Path("src/parser.c")
           parser = parser_path.read_text()
@@ -91,10 +98,9 @@ jobs:
           /* Reads one .env file into `dotenv`. Returns 0 when it is not readable. */'''
           parser = replace_once(parser, helper_anchor, helper_replacement, "dotenv diagnostic helper")
 
-          parser = replace_once(
+          parser = replace_regex_once(
               parser,
-              '''static int f2e_dotenv_load_one(F2EDotEnv *dotenv, const F2EConfig *config,
-                                         const char *relative_path) {''',
+              r'''static int f2e_dotenv_load_one\(F2EDotEnv \*dotenv, const F2EConfig \*config,\n\s+const char \*relative_path\) \{''',
               '''static int f2e_dotenv_load_one(F2EDotEnv *dotenv,
                                          const F2EConfig *config,
                                          const char *relative_path,
