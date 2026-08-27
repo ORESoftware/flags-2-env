@@ -232,11 +232,13 @@ jobs:
           tests_path.write_text(tests, encoding="utf-8")
           PY
 
-      - name: Run repository contract
+      - name: Run parser-specific contract
         shell: bash
         run: |
           set -euo pipefail
-          make test
+          make borrow-check cli build/dotenv-api-test
+          ./tests/run.sh
+          ./build/dotenv-api-test
 
       - name: Commit only tested product files
         shell: bash
