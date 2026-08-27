@@ -1,0 +1,250 @@
+name: Finalize DEN-2754
+
+on:
+  push:
+    branches:
+      - alexanderdmills/den-2754-flags-2-env-env-lines-past-the-read-buffer-are-still
+
+permissions:
+  contents: write
+
+concurrency:
+  group: den-2754-final-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply bounded functional patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected exactly one match, found {count}")
+              return text.replace(old, new, 1)
+
+          parser_path = Path("src/parser.c")
+          parser = parser_path.read_text(encoding="utf-8")
+
+          parser = replace_once(
+              parser,
+              '''static const char *f2e_dotenv_file_at(const F2EConfig *config, size_t index) {
+            if (config && config->dotenv_files_set) {
+              return index < config->dotenv_file_count ? config->dotenv_files[index] : NULL;
+            }
+            return index == 0 ? ".env" : NULL;
+          }
+
+          /* Reads one .env file into `dotenv`. Returns 0 when it is not readable. */''',
+              '''static const char *f2e_dotenv_file_at(const F2EConfig *config, size_t index) {
+            if (config && config->dotenv_files_set) {
+              return index < config->dotenv_file_count ? config->dotenv_files[index] : NULL;
+            }
+            return index == 0 ? ".env" : NULL;
+          }
+
+          /* Pure formatting step; the caller owns the error-channel side effect. */
+          static int f2e_dotenv_truncation_message(const char *relative_path,
+                                                   size_t line_number,
+                                                   char *out,
+                                                   size_t out_size) {
+            if (!out || out_size == 0 || line_number == 0) {
+              return 0;
+            }
+            const char *path = relative_path && relative_path[0] != '\\0'
+                                   ? relative_path
+                                   : ".env";
+            int written = snprintf(
+                out,
+                out_size,
+                "%s:%lu: line exceeds the %d-byte read buffer; value was bounded and its tail skipped",
+                path,
+                (unsigned long)line_number,
+                F2E_MAX_LINE - 1);
+            return written >= 0 && (size_t)written < out_size;
+          }
+
+          static void f2e_report_dotenv_truncation(F2EJsonList *errors,
+                                                   const char *relative_path,
+                                                   size_t line_number) {
+            if (!errors || !errors->initialized) {
+              return;
+            }
+            char message[512];
+            if (f2e_dotenv_truncation_message(relative_path,
+                                              line_number,
+                                              message,
+                                              sizeof(message))) {
+              f2e_json_list_append(errors, message);
+            }
+          }
+
+          /* Reads one .env file into `dotenv`. Returns 0 when it is not readable. */''',
+              "diagnostic helper",
+          )
+          parser = replace_once(
+              parser,
+              '''static int f2e_dotenv_load_one(F2EDotEnv *dotenv, const F2EConfig *config,
+                                         const char *relative_path) {''',
+              '''static int f2e_dotenv_load_one(F2EDotEnv *dotenv,
+                                         const F2EConfig *config,
+                                         const char *relative_path,
+                                         F2EJsonList *errors) {''',
+              "load-one signature",
+          )
+          parser = replace_once(
+              parser,
+              '''  char line[F2E_MAX_LINE];
+            int first_line = 1;
+            int continuing = 0;
+            while (fgets(line, sizeof(line), file)) {''',
+              '''  char line[F2E_MAX_LINE];
+            int first_line = 1;
+            int continuing = 0;
+            size_t line_number = 0;
+            while (fgets(line, sizeof(line), file)) {''',
+              "line counter",
+          )
+          parser = replace_once(
+              parser,
+              '''    if (continuing) {
+                continuing = !completed;
+                continue;
+              }
+              continuing = !completed;
+
+              char *raw = line;''',
+              '''    if (continuing) {
+                continuing = !completed;
+                continue;
+              }
+              line_number++;
+              continuing = !completed;
+              if (!completed) {
+                f2e_report_dotenv_truncation(errors, relative_path, line_number);
+              }
+
+              char *raw = line;''',
+              "first-chunk diagnostic",
+          )
+          parser = replace_once(
+              parser,
+              '''static int f2e_dotenv_load(F2EDotEnv *dotenv, const F2EConfig *config) {''',
+              '''static int f2e_dotenv_load(F2EDotEnv *dotenv,
+                                    const F2EConfig *config,
+                                    F2EJsonList *errors) {''',
+              "load signature",
+          )
+          parser = replace_once(
+              parser,
+              '''    if (path && f2e_dotenv_load_one(dotenv, config, path)) {''',
+              '''    if (path && f2e_dotenv_load_one(dotenv, config, path, errors)) {''',
+              "load-one call",
+          )
+          parser = replace_once(
+              parser,
+              '''static F2EDotEnv *f2e_dotenv_open(const F2EConfig *config) {''',
+              '''static F2EDotEnv *f2e_dotenv_open(const F2EConfig *config,
+                                           F2EJsonList *errors) {''',
+              "open signature",
+          )
+          parser = replace_once(
+              parser,
+              '''  if (!f2e_dotenv_load(dotenv, config)) {''',
+              '''  if (!f2e_dotenv_load(dotenv, config, errors)) {''',
+              "load call",
+          )
+          parser = replace_once(
+              parser,
+              '''  F2EDotEnv *dotenv = f2e_dotenv_open(config);''',
+              '''  F2EDotEnv *dotenv = f2e_dotenv_open(config, track_errors ? &errors : NULL);''',
+              "ordinary parse call",
+          )
+          parser = replace_once(
+              parser,
+              '''  F2EDotEnv *dotenv = f2e_dotenv_open(config);''',
+              '''  F2EDotEnv *dotenv = f2e_dotenv_open(config, lists_ok ? &errors : NULL);''',
+              "structured parse call",
+          )
+          parser_path.write_text(parser, encoding="utf-8")
+
+          tests_path = Path("tests/run.sh")
+          tests = tests_path.read_text(encoding="utf-8")
+          tests = replace_once(
+              tests,
+              '''DOTENV_BIG_DIR="$TMP_TEST_DIR/dotenv-big"
+          mkdir -p "$DOTENV_BIG_DIR"
+          cp "$DOTENV_DIR/.cli-flags.toml" "$DOTENV_BIG_DIR/.cli-flags.toml"''',
+              '''DOTENV_BIG_DIR="$TMP_TEST_DIR/dotenv-big"
+          mkdir -p "$DOTENV_BIG_DIR"
+          {
+            cat "$DOTENV_DIR/.cli-flags.toml"
+            printf '\\n[parse]\\nerrors_env = "F2E_DOTENV_ERRORS"\\n'
+          } > "$DOTENV_BIG_DIR/.cli-flags.toml"''',
+              "test error channel",
+          )
+          tests = replace_once(
+              tests,
+              '''case "$dotenv_big" in
+            *'"F2E_DOTENV_TOKEN":"next-real-line"'*)
+              ;;
+            *)
+              printf 'The line after an over-long .env line must still be read:\\n%s\\n' "$dotenv_big" >&2
+              exit 1
+              ;;
+          esac
+          dotenv_big_len=''',
+              '''case "$dotenv_big" in
+            *'"F2E_DOTENV_TOKEN":"next-real-line"'*)
+              ;;
+            *)
+              printf 'The line after an over-long .env line must still be read:\\n%s\\n' "$dotenv_big" >&2
+              exit 1
+              ;;
+          esac
+          case "$dotenv_big" in
+            *'"F2E_DOTENV_ERRORS":"[\\".env:1: line exceeds the 4095-byte read buffer; value was bounded and its tail skipped\\"]"'*)
+              ;;
+            *)
+              printf 'An over-long .env line must be reported through errors_env:\\n%s\\n' "$dotenv_big" >&2
+              exit 1
+              ;;
+          esac
+          dotenv_big_len=''',
+              "test diagnostic assertion",
+          )
+          tests_path.write_text(tests, encoding="utf-8")
+          PY
+
+      - name: Run repository contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          make test
+
+      - name: Commit only tested product files
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f \
+            .github/workflows/agent-den-2754.yml \
+            .github/workflows/repair-den-2754-regex.yml \
+            .github/workflows/finalize-den-2754.yml
+          git config user.name "alex-main-agent"
+          git config user.email "alex-main-agent@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "fix(parser): report truncated dotenv lines (DEN-2754)"
+          git push origin HEAD
