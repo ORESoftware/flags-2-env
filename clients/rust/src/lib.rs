@@ -1,5 +1,11 @@
 pub mod bundled;
+pub mod env_map;
+
 pub use bundled::BundledFlags2Env;
+pub use env_map::{
+    cli_overrides, current_env_map, env_map_from_argv, env_value, get_env_map, process_argv,
+    process_env_map, EnvMap,
+};
 
 #[cfg(any(test, kani))]
 mod formal_model;
