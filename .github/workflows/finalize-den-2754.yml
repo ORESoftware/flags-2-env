@@ -166,17 +166,21 @@ jobs:
               '''  if (!f2e_dotenv_load(dotenv, config, errors)) {''',
               "load call",
           )
-          parser = replace_once(
-              parser,
-              '''  F2EDotEnv *dotenv = f2e_dotenv_open(config);''',
+          open_call = '''  F2EDotEnv *dotenv = f2e_dotenv_open(config);'''
+          open_call_count = parser.count(open_call)
+          if open_call_count != 2:
+              raise SystemExit(
+                  f"dotenv open calls: expected exactly two matches, found {open_call_count}"
+              )
+          parser = parser.replace(
+              open_call,
               '''  F2EDotEnv *dotenv = f2e_dotenv_open(config, track_errors ? &errors : NULL);''',
-              "ordinary parse call",
+              1,
           )
-          parser = replace_once(
-              parser,
-              '''  F2EDotEnv *dotenv = f2e_dotenv_open(config);''',
+          parser = parser.replace(
+              open_call,
               '''  F2EDotEnv *dotenv = f2e_dotenv_open(config, lists_ok ? &errors : NULL);''',
-              "structured parse call",
+              1,
           )
           parser_path.write_text(parser, encoding="utf-8")
 
@@ -238,13 +242,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm -f \
-            .github/workflows/agent-den-2754.yml \
-            .github/workflows/repair-den-2754-regex.yml \
-            .github/workflows/finalize-den-2754.yml
           git config user.name "alex-main-agent"
           git config user.email "alex-main-agent@users.noreply.github.com"
-          git add -A
+          git add src/parser.c tests/run.sh
           git diff --cached --check
           git commit -m "fix(parser): report truncated dotenv lines (DEN-2754)"
           git push origin HEAD
