@@ -812,8 +812,9 @@ static int f2e_cli_run_completion(const char *shell, const char *command, const 
 static void f2e_cli_generate_usage(void) {
   f2e_cli_stderr_locked(
       "%s",
-      "usage: flags2env generate <language> [config] [--name TypeName]\n"
-      "languages: typescript, python, go, rust, java, csharp, dart, json-schema\n");
+      "usage: flags2env generate <language> [config] [--name TypeName] [--output path]\n"
+      "languages: typescript, python, go, rust, java, csharp, dart, json-schema\n"
+      "--output writes the file read-only (chmod a-w). Typical: generated/dart/env.dart\n");
 }
 
 static int f2e_cli_run_generate(int argc, const char *const argv[]) {
@@ -825,6 +826,7 @@ static int f2e_cli_run_generate(int argc, const char *const argv[]) {
   const char *language = argv[2];
   const char *config_path = NULL;
   const char *type_name = NULL;
+  const char *output_path = NULL;
   for (int i = 3; i < argc; i++) {
     const char *token = argv[i];
     if (f2e_cli_streq(token, "--name") || f2e_cli_streq(token, "-n")) {
@@ -851,6 +853,18 @@ static int f2e_cli_run_generate(int argc, const char *const argv[]) {
       config_path = token + 9;
       continue;
     }
+    if (f2e_cli_streq(token, "--output") || f2e_cli_streq(token, "-o")) {
+      if (i + 1 >= argc) {
+        f2e_cli_generate_usage();
+        return 2;
+      }
+      output_path = argv[++i];
+      continue;
+    }
+    if (strncmp(token, "--output=", 9) == 0) {
+      output_path = token + 9;
+      continue;
+    }
     if (token[0] == '-' || config_path) {
       f2e_cli_generate_usage();
       return 2;
@@ -864,6 +878,16 @@ static int f2e_cli_run_generate(int argc, const char *const argv[]) {
     f2e_cli_stderr_locked("flags2env: could not generate %s types; check the language, type name, and config audit\n",
                           language ? language : "");
     return 1;
+  }
+  if (output_path) {
+    int wrote = f2e_cli_write_file_readonly(output_path, source);
+    f2e_free(source);
+    if (!wrote) {
+      f2e_cli_stderr_locked("flags2env: could not write read-only generated file: %s\n", output_path);
+      return 1;
+    }
+    f2e_cli_stderr_locked("wrote %s (read-only)\n", output_path);
+    return 0;
   }
   int ok = f2e_cli_stdout_write_locked(source);
   f2e_free(source);
