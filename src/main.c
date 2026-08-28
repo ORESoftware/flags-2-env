@@ -435,6 +435,52 @@ static int f2e_cli_write_file(const char *path, const char *contents) {
   return ok;
 }
 
+static int f2e_cli_dirname(const char *path, char *out, size_t out_size) {
+  if (!path || !out || out_size == 0) {
+    return 0;
+  }
+  size_t len = strlen(path);
+  if (len == 0 || len >= out_size) {
+    return 0;
+  }
+  memcpy(out, path, len + 1);
+  char *slash = NULL;
+  for (char *cursor = out; *cursor; cursor++) {
+    if (*cursor == '/' || *cursor == '\\') {
+      slash = cursor;
+    }
+  }
+  if (!slash) {
+    if (out_size < 2) {
+      return 0;
+    }
+    out[0] = '.';
+    out[1] = '\0';
+    return 1;
+  }
+  if (slash == out) {
+    slash[1] = '\0';
+    return 1;
+  }
+  *slash = '\0';
+  return 1;
+}
+
+static int f2e_cli_write_file_readonly(const char *path, const char *contents) {
+  char parent[PATH_MAX];
+  if (!path || !f2e_cli_dirname(path, parent, sizeof(parent))) {
+    return 0;
+  }
+  if (parent[0] != '\0' && strcmp(parent, ".") != 0 && !f2e_cli_mkdir_p(parent)) {
+    return 0;
+  }
+  (void)F2E_CHMOD_WRITABLE(path);
+  if (!f2e_cli_write_file(path, contents)) {
+    return 0;
+  }
+  return F2E_CHMOD_READONLY(path) == 0;
+}
+
 static int f2e_cli_file_contains(const char *path, const char *needle) {
   FILE *file = fopen(path, "r");
   if (!file) {
