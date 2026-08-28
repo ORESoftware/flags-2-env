@@ -503,11 +503,19 @@ The generated completion scripts are static. They do not invoke `flags2env`, rea
 Generate an importable env-keyed type from `.cli-flags.toml`:
 
 ```sh
-f2e generate typescript .cli-flags.toml --name CliStuff > generated/cli-interfaces.ts
-f2e generate python .cli-flags.toml --name CliStuff > generated/cli_interfaces.py
-f2e generate go .cli-flags.toml --name CliStuff > generated/cli_config.go
-f2e generate dart .cli-flags.toml --name CliStuff > generated/cli_stuff.dart
+mkdir -p generated/typescript generated/python generated/go generated/dart generated/json-schema
+f2e generate typescript .cli-flags.toml --name CliStuff --output generated/typescript/cli-interfaces.ts
+f2e generate python .cli-flags.toml --name CliStuff --output generated/python/cli_interfaces.py
+f2e generate go .cli-flags.toml --name CliStuff --output generated/go/cli_config.go
+f2e generate dart .cli-flags.toml --name CliStuff --output generated/dart/env.dart
+f2e generate json-schema .cli-flags.toml --name CliStuff --output generated/json-schema/env.schema.json
 ```
+
+`--output` writes the file and freezes it with `chmod a-w`. Do not hand-edit generated files; change `.cli-flags.toml` and regenerate. Directories and `generated/README.md` stay writable. Git does not persist the write bit, so re-run `python3 scripts/check-generated-contract.py --freeze` after clone, or generate again with `--output`.
+
+JSON Schema is a **runtime cross-check**, not the primary generator input (that remains `.cli-flags.toml`). `scripts/check-generated-contract.py` validates fixtures against the generated schema at runtime (valid instances must pass, invalid must fail) and compares schema property names to flag `env` keys. Compile-time types alone are not the contract.
+
+Shell redirects (`> generated/dart/env.dart`) still work but do not freeze the file; prefer `--output`.
 
 The native generator supports TypeScript (`ts`), Python (`py`), Go (`golang`), Rust (`rs`), Java, C# (`cs`/`dotnet`), Dart, and JSON Schema. Properties use the declared `env` names. A flag with a default is required in the generated type because `coerce()` can always supply it; a flag without a default is optional.
 
