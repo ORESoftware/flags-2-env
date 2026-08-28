@@ -16,11 +16,18 @@
 
 #if defined(_WIN32)
 #include <direct.h>
+#include <io.h>
+#include <sys/stat.h>
 #define F2E_MKDIR(path) _mkdir(path)
+#define F2E_CHMOD_WRITABLE(path) _chmod((path), _S_IREAD | _S_IWRITE)
+#define F2E_CHMOD_READONLY(path) _chmod((path), _S_IREAD)
 #else
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <unistd.h>
 #define F2E_MKDIR(path) mkdir(path, 0755)
+#define F2E_CHMOD_WRITABLE(path) chmod((path), 0644)
+#define F2E_CHMOD_READONLY(path) chmod((path), 0444)
 #endif
 
 #ifndef PATH_MAX
