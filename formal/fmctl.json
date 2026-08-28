@@ -1,6 +1,6 @@
 {
   "schemaVersion": "formal-methods.v1",
-  "repoUrl": "https://github.com/ORESoftware/flags-2-env.git",
+  "repoUrl": "https://github.com/flags-2-env/flags-2-env.git",
   "gitRef": "main",
   "paths": [
     "src/",

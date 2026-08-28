@@ -1,0 +1,25 @@
+# The tar spelling: several boolean shorts followed by one that takes the
+# archive name, inline or separated.
+[flags.extract]
+env = "EXTRACT"
+aliases = ["extract"]
+short = "x"
+type = "bool"
+
+[flags.verbose]
+env = "VERBOSE"
+aliases = ["verbose"]
+short = "v"
+type = "bool"
+
+[flags.gzip]
+env = "GZIP"
+aliases = ["gzip"]
+short = "z"
+type = "bool"
+
+[flags.file]
+env = "FILE"
+aliases = ["file"]
+short = "f"
+type = "string"

@@ -12,6 +12,12 @@ if [[ ! -x "$zed" ]]; then
   exit 2
 fi
 zed="$(cd -- "$(dirname -- "$zed")" && pwd -P)/$(basename -- "$zed")"
+manifestless_flag=--do-not-write-new-manifest
+if ! "$zed" install --help 2>&1 | grep -Fq -- "$manifestless_flag"; then
+  # Compatibility with the immutable pre-rename CLI used by older workflow
+  # pins. New CLI releases exercise the canonical spelling above.
+  manifestless_flag=--allow-no-manifest
+fi
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 if [[ ! -f "$repo_root/.zpkg.toml" ]]; then
@@ -19,7 +25,7 @@ if [[ ! -f "$repo_root/.zpkg.toml" ]]; then
   exit 2
 fi
 
-read -r package_ref package_version < <(
+read -r package_ref package_version package_org package_name < <(
   python3 - "$repo_root/.zpkg.toml" <<'PY_ZPKG'
 import pathlib
 import sys
@@ -29,10 +35,10 @@ package = tomllib.loads(pathlib.Path(sys.argv[1]).read_text())["package"]
 org = package["org"]
 name = package["name"]
 version = package["version"]
-print(f"{org}/{name}@={version} {version}")
+print(f"{org}/{name}@={version} {version} {org} {name}")
 PY_ZPKG
 )
-if [[ -z "$package_ref" || -z "$package_version" ]]; then
+if [[ -z "$package_ref" || -z "$package_version" || -z "$package_org" || -z "$package_name" ]]; then
   echo "could not derive the exact package coordinate from .zpkg.toml" >&2
   exit 2
 fi
@@ -66,7 +72,21 @@ author_home="$suite_root/author-home"
   ZED_PKG_HOME="$author_home" "$zed" r2g --r2g-root "$r2g_root"
 )
 
-roundtrip="$r2g_root/oresoftware-flags-2-env"
+roundtrip=""
+roundtrip_count=0
+while IFS= read -r candidate; do
+  roundtrip="$candidate"
+  roundtrip_count=$((roundtrip_count + 1))
+done < <(
+  find "$r2g_root" -mindepth 1 -maxdepth 1 -type d \
+    \( -name "$package_org-$package_name" -o -name "$package_org-$package_name-*" \) \
+    -print
+)
+if [[ "$roundtrip_count" -ne 1 ]]; then
+  printf 'expected one Zed r2g workspace for %s/%s, found %s\n' \
+    "$package_org" "$package_name" "$roundtrip_count" >&2
+  exit 1
+fi
 registry="$roundtrip/registry"
 if [[ ! -d "$registry" ]]; then
   echo "zed r2g did not create its file registry: $registry" >&2
@@ -181,14 +201,14 @@ install_layout() {
     ZED_PKG_HOME="$consumer_home" \
     ZED_PKG_REGISTRY="$registry_url" \
       "$zed" install "$package_ref" \
-        --skip-manifest \
+        "$manifestless_flag" \
         --allow-build \
         --adapter none \
         --install-mode "$mode"
   )
 
   local modules="$expected/zed_modules"
-  local target="$modules/oresoftware/flags-2-env"
+  local target="$modules/$package_org/$package_name"
   local bin="$modules/.bin/flags2env"
   local contract="$target/.cli-flags.toml"
 
@@ -205,8 +225,8 @@ install_layout() {
   [[ ! -e "$expected/.zed/classpath" ]]
   [[ ! -e "$expected/.zed/go.work" ]]
   [[ ! -e "$expected/.zed/pythonpath" ]]
-  grep -Fq 'org = "oresoftware"' "$expected/.zpkg.lock"
-  grep -Fq 'name = "flags-2-env"' "$expected/.zpkg.lock"
+  grep -Fq "org = \"$package_org\"" "$expected/.zpkg.lock"
+  grep -Fq "name = \"$package_name\"" "$expected/.zpkg.lock"
   grep -Fq "version = \"$package_version\"" "$expected/.zpkg.lock"
 
   if [[ "$mode" == symlink ]]; then
@@ -270,7 +290,7 @@ install_layout() {
     ZED_PKG_REGISTRY="$registry_url" \
       "$zed" install \
         --frozen \
-        --skip-manifest \
+        "$manifestless_flag" \
         --allow-build \
         --adapter none \
         --install-mode "$mode"

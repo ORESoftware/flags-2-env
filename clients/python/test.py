@@ -1,11 +1,34 @@
+import json
 import os
-import platform
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+# Resolved before the chdir dance below, so the shared contract stays findable.
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 from flags2env import Flags2Env
+from lib import _default_library_name, _resolve_library_path
 
 
-suffix = "dylib" if platform.system() == "Darwin" else "dll" if platform.system() == "Windows" else "so"
-sdk = Flags2Env(f"../../build/libflags2env.{suffix}")
+with TemporaryDirectory() as directory:
+    root = Path(directory)
+    platform_library = root / _default_library_name()
+    platform_library.touch()
+
+    for canonical_name in (
+        "libflags2env.dylib",
+        "libflags2env.so",
+        "flags2env.dll",
+    ):
+        requested = root / canonical_name
+        expected = requested if requested == platform_library else platform_library
+        assert Path(_resolve_library_path(str(requested))) == expected
+
+    custom_path = root / "custom-flags2env.so"
+    assert _resolve_library_path(str(custom_path)) == str(custom_path)
+
+
+sdk = Flags2Env(f"../../build/{_default_library_name()}")
 
 os.chdir("../../tests/fixtures/nested/deeper")
 parsed = sdk.parse(["app", "--debug=t", "--port", "8181"])
@@ -17,6 +40,17 @@ assert parsed["COLOR"] == "true", parsed
 explicit = sdk.parse(["app", "--debug=f"], "../../.cli-flags.toml")
 assert explicit["DEBUG"] == "false", explicit
 assert explicit["PORT"] == "3000", explicit
+
+# Shared short-bundle contract. Combined single-character flags ("rm -rf",
+# "set -eo pipefail", "node -pe") are the densest corner of the parser, and a
+# binding that never parses one is green without having exercised the library.
+# The case list is generated from the reference parser; see
+# scripts/verify-bundle-contract.py.
+_contract = json.loads((REPO_ROOT / "tests/fixtures/bundle-contract.json").read_text())
+for _case in _contract["cases"]:
+    _actual = sdk.parse(_case["argv"])
+    assert _actual == _case["expect"], (_case["name"], _case["argv"], _actual)
+assert len(_contract["cases"]) >= 19, _contract
 
 combined = sdk.apply({"PORT": "env", "KEEP": "1"}, ["app", "--port", "8181"])
 assert combined["PORT"] == "8181", combined

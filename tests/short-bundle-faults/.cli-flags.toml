@@ -1,0 +1,32 @@
+# Reporting surface for combined short flags: every channel is declared so the
+# tests can see which one a malformed bundle lands in.
+[parse]
+positionals_env = "POSITIONALS"
+unknown_options_env = "UNKNOWN"
+errors_env = "ERRORS"
+
+[flags.debug]
+env = "DEBUG"
+aliases = ["debug"]
+short = "d"
+type = "bool"
+true_aliases = ["yes"]
+false_aliases = ["no"]
+
+[flags.verbose]
+env = "VERBOSE"
+aliases = ["verbose"]
+short = "v"
+type = "bool"
+
+[flags.mode]
+env = "MODE"
+aliases = ["mode"]
+short = "m"
+type = "string"
+
+[flags.port]
+env = "PORT"
+aliases = ["port"]
+short = "p"
+type = "integer"

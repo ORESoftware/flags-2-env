@@ -21,12 +21,6 @@
       "kind": "cli"
     },
     {
-      "repository": "ORESoftware/flags-2-env",
-      "contract": ".cli-flags.toml",
-      "command": "flags2env",
-      "kind": "cli"
-    },
-    {
       "repository": "ORESoftware/happy-wakey.rs",
       "contract": ".cli-flags.toml",
       "command": "happy-wakey",
@@ -146,6 +140,12 @@
       "repository": "fiducia-cloud/fiducia-cli.rs",
       "contract": ".cli-flags.toml",
       "command": "fiducia",
+      "kind": "cli"
+    },
+    {
+      "repository": "flags-2-env/flags-2-env",
+      "contract": ".cli-flags.toml",
+      "command": "flags2env",
       "kind": "cli"
     },
     {

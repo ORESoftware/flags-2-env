@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/ORESoftware/flags-2-env/prebuilt/manifest.schema.json",
+  "$id": "https://github.com/flags-2-env/flags-2-env/prebuilt/manifest.schema.json",
   "title": "flags-2-env prebuilt artifact manifest",
   "type": "object",
   "additionalProperties": false,

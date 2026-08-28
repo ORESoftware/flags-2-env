@@ -128,6 +128,28 @@ reply="$(run_complete _flags2env_complete_tool tool -l workspace '' | tr '\n' ' 
 expect_contains 'alias-looking short-option value keeps root scope' "$reply" 'ws'
 expect_not_contains 'alias-looking short-option value keeps root scope' "$reply" 'remotes'
 
+# The same rule has to survive the getopt spelling: `-nl workspace` is `-n`
+# bundled with `-l`, so `workspace` is -l's value, not a command. Matching only
+# whole option words let the bundle's value walk completion into that scope,
+# while the parser stayed in root - completion and parse disagreeing about the
+# same argv.
+reply="$(run_complete _flags2env_complete_tool tool -nl workspace '' | tr '\n' ' ')"
+expect_contains 'bundled short-option value keeps root scope' "$reply" 'ws'
+expect_contains 'bundled short-option value keeps root scope' "$reply" 'workspace'
+expect_not_contains 'bundled short-option value keeps root scope' "$reply" 'remote'
+expect_not_contains 'bundled short-option value keeps root scope' "$reply" 'remotes'
+# A lone bool short still consumes a following bool word, so the word after it
+# is a command again.
+reply="$(run_complete _flags2env_complete_tool tool -n workspace '' | tr '\n' ' ')"
+expect_contains 'lone bool short enters the value scope' "$reply" 'remote'
+# ...and once the bundle's value flag has an inline value it consumes nothing.
+reply="$(run_complete _flags2env_complete_tool tool -nlx workspace '' | tr '\n' ' ')"
+expect_contains 'inline bundle value leaves the command free' "$reply" 'remote'
+# A character that is not a declared short makes the token no bundle at all,
+# so it owns nothing that follows.
+reply="$(run_complete _flags2env_complete_tool tool -nq workspace '' | tr '\n' ' ')"
+expect_contains 'unbundleable token consumes nothing' "$reply" 'remote'
+
 # The same rule applies inside nested scopes.
 reply="$(run_complete _flags2env_complete_tool tool ws remote add --url tag '--' | tr '\n' ' ')"
 expect_contains 'nested canonical command-looking value stays in add' "$reply" '--url'

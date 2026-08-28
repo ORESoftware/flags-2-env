@@ -1,10 +1,10 @@
 class Flags2env < Formula
   desc "Parse project-declared CLI flags into environment override maps"
-  homepage "https://github.com/ORESoftware/flags-2-env"
-  url "https://github.com/ORESoftware/flags-2-env.git", tag: "v0.1.0"
+  homepage "https://github.com/flags-2-env/flags-2-env"
+  url "https://github.com/flags-2-env/flags-2-env.git", tag: "v0.1.0"
   version "0.1.0"
   license "MIT"
-  head "https://github.com/ORESoftware/flags-2-env.git", branch: "main"
+  head "https://github.com/flags-2-env/flags-2-env.git", branch: "main"
 
   def install
     system "make", "all"

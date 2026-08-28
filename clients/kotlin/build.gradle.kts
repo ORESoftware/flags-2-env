@@ -47,10 +47,10 @@ publishing {
             pom {
                 name.set("flags2env Kotlin")
                 description.set("Kotlin facade for the flags2env Java native bridge.")
-                url.set("https://github.com/ORESoftware/flags-2-env")
+                url.set("https://github.com/flags-2-env/flags-2-env")
                 licenses { license { name.set("MIT"); url.set("https://opensource.org/license/mit") } }
                 developers { developer { id.set("oresoftware"); name.set("ORESoftware") } }
-                scm { url.set("https://github.com/ORESoftware/flags-2-env") }
+                scm { url.set("https://github.com/flags-2-env/flags-2-env") }
             }
         }
     }

@@ -90,6 +90,10 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
       if (write_bytes(config_path, data + 1, size - 1)) {
         consume_owned(f2e_audit_config_from_file(config_path));
         consume_owned(f2e_parse_json_argv_from_file(config_path, "[\"fuzz\",\"run\",\"--flag=value\"]"));
+        /* Bundle-shaped tokens against a fuzzed config: every short lookup in
+           them resolves against attacker-controlled flag declarations. */
+        consume_owned(f2e_parse_json_argv_from_file(config_path, "[\"fuzz\",\"run\",\"-abc\",\"-ab=v\",\"-abv\"]"));
+        consume_owned(f2e_parse_json_argv_from_file(config_path, "[\"fuzz\",\"-ab\",\"value\",\"-a=\",\"-\"]"));
         consume_owned(f2e_parse_structured_json_argv_from_file(
             config_path, "[\"fuzz\",\"run\",\"--flag=value\",\"--\",\"operand\"]"));
         consume_owned(f2e_help_table_for_json_argv_from_file(
@@ -115,6 +119,11 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     case 4:
       if (cwd_ready == 1 && dotenv_config && write_dotenv(".env", data + 1, size - 1)) {
         consume_owned(f2e_parse_json_argv_from_file(dotenv_config, "[\"fuzz\",\"--str=cli\"]"));
+        /* The same override, spelled as a bundle: -b is bool, -s takes the
+           value, so this crosses short bundling with .env precedence. */
+        consume_owned(f2e_parse_json_argv_from_file(dotenv_config, "[\"fuzz\",\"-bs=cli\"]"));
+        consume_owned(f2e_parse_json_argv_from_file(dotenv_config, "[\"fuzz\",\"-bs\",\"cli\"]"));
+        consume_owned(f2e_parse_json_argv_from_file(dotenv_config, "[\"fuzz\",\"-bi\",\"-1\",\"-bj\",\"{}\"]"));
         consume_owned(f2e_parse_structured_json_argv_from_file(
             dotenv_config, "[\"fuzz\",\"--int=1\",\"--\",\"operand\"]"));
         consume_owned(f2e_audit_env_file_from_file(dotenv_config, ".env"));

@@ -71,7 +71,7 @@ function packageMetadata(version) {
     publishConfig: { access: "public" },
     repository: {
       type: "git",
-      url: "git+https://github.com/ORESoftware/flags-2-env.git",
+      url: "git+https://github.com/flags-2-env/flags-2-env.git",
       directory: "clients/browser",
     },
     keywords: ["cli", "env", "flags", "wasm", "webassembly", "browser"],

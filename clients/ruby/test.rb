@@ -1,7 +1,12 @@
 suffix = RUBY_PLATFORM.match?(/darwin/) ? "dylib" : RUBY_PLATFORM.match?(/mswin|mingw|cygwin/) ? "dll" : "so"
 ENV["FLAGS2ENV_NATIVE_LIB"] = File.expand_path("../../build/libflags2env.#{suffix}", __dir__)
 
+require "json"
+
 require_relative "lib"
+
+# Resolved before the chdir below, so the shared contract stays findable.
+REPO_ROOT = File.expand_path("../..", __dir__)
 
 Dir.chdir("../../tests/fixtures/nested/deeper")
 
@@ -10,6 +15,21 @@ raise "unexpected parsed map: #{parsed.inspect}" unless parsed["DEBUG"] == "true
 
 explicit = Flags2Env.parse(["app", "--debug=f"], config_path: "../../.cli-flags.toml")
 raise "unexpected explicit config map: #{explicit.inspect}" unless explicit["DEBUG"] == "false" && explicit["PORT"] == "3000"
+
+# Shared short-bundle contract. Combined single-character flags ("rm -rf",
+# "set -eo pipefail", "node -pe") are the densest corner of the parser, and a
+# binding that never parses one is green without having exercised the library.
+# The case list is generated from the reference parser; see
+# scripts/verify-bundle-contract.py.
+contract = JSON.parse(File.read(File.join(REPO_ROOT, "tests/fixtures/bundle-contract.json")))
+contract["cases"].each do |bundle_case|
+  actual = Flags2Env.parse(bundle_case["argv"])
+  next if actual == bundle_case["expect"]
+
+  raise "bundle contract #{bundle_case["argv"].join(" ")}: expected " \
+        "#{bundle_case["expect"].inspect}, got #{actual.inspect}"
+end
+raise "bundle contract looks truncated" unless contract["cases"].length >= 19
 
 combined = Flags2Env.apply({ "PORT" => "env", "KEEP" => "1" }, ["app", "--port", "8181"])
 raise "unexpected combined map: #{combined.inspect}" unless combined["PORT"] == "8181" && combined["KEEP"] == "1" && combined["COLOR"] == "true"

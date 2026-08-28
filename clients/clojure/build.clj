@@ -34,7 +34,7 @@
      :pom-data
      [[:name "flags2env Clojure"]
       [:description "Clojure facade for the flags2env Java native bridge."]
-      [:url "https://github.com/ORESoftware/flags-2-env"]
+      [:url "https://github.com/flags-2-env/flags-2-env"]
       [:licenses
        [:license
         [:name "MIT"]
@@ -44,8 +44,8 @@
         [:id "oresoftware"]
         [:name "ORESoftware"]]]
       [:scm
-       [:url "https://github.com/ORESoftware/flags-2-env"]
-       [:connection "scm:git:https://github.com/ORESoftware/flags-2-env.git"]]]})
+       [:url "https://github.com/flags-2-env/flags-2-env"]
+       [:connection "scm:git:https://github.com/flags-2-env/flags-2-env.git"]]]})
   (b/jar {:class-dir class-dir :jar-file jar-file}))
 
 (defn source-jar [_]

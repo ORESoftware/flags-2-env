@@ -14,6 +14,10 @@
 #include <windows.h>
 #define F2E_FILENO _fileno
 #define F2E_ISATTY _isatty
+#elif defined(__EMSCRIPTEN__)
+#include <unistd.h>
+#define F2E_FILENO fileno
+#define F2E_ISATTY isatty
 #else
 #include <sys/ioctl.h>
 #include <unistd.h>
@@ -180,16 +184,14 @@ const char *f2e_terminal_shell_family(void) {
 }
 
 static int f2e_detect_ci(void) {
-  const char *ci = getenv("CI");
-  if (ci && f2e_value_truthy(ci)) {
-    return 1;
-  }
   const char *markers[] = {
-      "GITHUB_ACTIONS", "GITLAB_CI", "BUILDKITE", "CIRCLECI",
-      "TF_BUILD",       "JENKINS_URL", "TEAMCITY_VERSION", "BUILD_BUILDID"};
+      "CI",             "CONTINUOUS_INTEGRATION", "BUILD_NUMBER",
+      "GITHUB_ACTIONS", "GITLAB_CI",              "BUILDKITE",
+      "CIRCLECI",       "TEAMCITY_VERSION",        "TF_BUILD",
+      "JENKINS_URL",    "BUILD_BUILDID"};
   size_t count = sizeof(markers) / sizeof(markers[0]);
   for (size_t index = 0; index < count; index++) {
-    if (f2e_env_present(markers[index])) {
+    if (f2e_value_truthy(getenv(markers[index]))) {
       return 1;
     }
   }
@@ -221,6 +223,9 @@ static unsigned int f2e_terminal_columns_for_fd(int fd) {
     SHORT width = (SHORT)(info.srWindow.Right - info.srWindow.Left + 1);
     return width > 0 ? (unsigned int)width : 0;
   }
+  return 0;
+#elif defined(__EMSCRIPTEN__)
+  (void)fd;
   return 0;
 #else
 #if defined(TIOCGWINSZ)
@@ -456,4 +461,26 @@ char *f2e_terminal_context_env_json(void) {
     return NULL;
   }
   return json;
+}
+
+int f2e_terminal_stream_is_tty(const char *stream) {
+  if (!stream) {
+    return 0;
+  }
+  struct f2e_terminal_snapshot snapshot = f2e_detect_snapshot();
+  if (f2e_ascii_equal_ci(stream, "stdin")) {
+    return snapshot.stdin_tty;
+  }
+  if (f2e_ascii_equal_ci(stream, "stdout")) {
+    return snapshot.stdout_tty;
+  }
+  if (f2e_ascii_equal_ci(stream, "stderr")) {
+    return snapshot.stderr_tty;
+  }
+  return 0;
+}
+
+int f2e_terminal_can_prompt(void) {
+  struct f2e_terminal_snapshot snapshot = f2e_detect_snapshot();
+  return snapshot.can_prompt;
 }

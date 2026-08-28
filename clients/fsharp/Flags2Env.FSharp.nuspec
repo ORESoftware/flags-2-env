@@ -5,8 +5,8 @@
     <version>0.1.0</version>
     <authors>ORESoftware</authors>
     <license type="expression">MIT</license>
-    <projectUrl>https://github.com/ORESoftware/flags-2-env</projectUrl>
-    <repository type="git" url="https://github.com/ORESoftware/flags-2-env" />
+    <projectUrl>https://github.com/flags-2-env/flags-2-env</projectUrl>
+    <repository type="git" url="https://github.com/flags-2-env/flags-2-env" />
     <readme>README.md</readme>
     <description>F# bindings for flags2env.</description>
     <dependencies>

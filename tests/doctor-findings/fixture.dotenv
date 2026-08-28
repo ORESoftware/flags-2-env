@@ -1,0 +1,8 @@
+# comment
+F2E_DOCTOR_KEPT=first
+F2E_DOCTOR_KEPT=second
+F2E_DOCTOR_UNQUOTED="open
+no equals sign here
+lower-case=nope
+F2E_DOCTOR_UNDECLARED=x
+F2E_DOCTOR_IGNORED=fine

@@ -1,0 +1,268 @@
+{
+  "$comment": [
+    "Shared bundle contract for combined single-character short flags.",
+    "Every language client binds the same src/parser.c, so these cases are a",
+    "contract on the binding surface, not on parsing logic: a client that",
+    "reaches the parser at all must reproduce every row exactly.",
+    "Config is tests/fixtures/.cli-flags.toml, resolved relative to repo root.",
+    "Regenerate with scripts/verify-bundle-contract.py --write after an",
+    "intentional semantics change; CI runs it without --write."
+  ],
+  "config": "tests/fixtures/.cli-flags.toml",
+  "cases": [
+    {
+      "name": "all-bool bundle: ls -la",
+      "argv": [
+        "app",
+        "-dv"
+      ],
+      "expect": {
+        "PORT": "3000",
+        "DEBUG": "true",
+        "COLOR": "true",
+        "VERBOSE": "true"
+      }
+    },
+    {
+      "name": "all-bool bundle is order-independent",
+      "argv": [
+        "app",
+        "-vd"
+      ],
+      "expect": {
+        "PORT": "3000",
+        "DEBUG": "true",
+        "COLOR": "true",
+        "VERBOSE": "true"
+      }
+    },
+    {
+      "name": "mixed bundle, inline value",
+      "argv": [
+        "app",
+        "-dvp8080"
+      ],
+      "expect": {
+        "PORT": "8080",
+        "DEBUG": "true",
+        "COLOR": "true",
+        "VERBOSE": "true"
+      }
+    },
+    {
+      "name": "mixed bundle, = joined value",
+      "argv": [
+        "app",
+        "-dvp=8080"
+      ],
+      "expect": {
+        "PORT": "8080",
+        "DEBUG": "true",
+        "COLOR": "true",
+        "VERBOSE": "true"
+      }
+    },
+    {
+      "name": "mixed bundle, separated value: set -eo pipefail",
+      "argv": [
+        "app",
+        "-dvp",
+        "8080"
+      ],
+      "expect": {
+        "PORT": "8080",
+        "DEBUG": "true",
+        "COLOR": "true",
+        "VERBOSE": "true"
+      }
+    },
+    {
+      "name": "value flag ends the bundle; later chars are its value",
+      "argv": [
+        "app",
+        "-dmvc"
+      ],
+      "expect": {
+        "PORT": "3000",
+        "DEBUG": "true",
+        "COLOR": "true",
+        "NODE_ENV": "vc"
+      }
+    },
+    {
+      "name": "bool value alias beats the bundle reading",
+      "argv": [
+        "app",
+        "-dt"
+      ],
+      "expect": {
+        "PORT": "3000",
+        "DEBUG": "true",
+        "COLOR": "true"
+      }
+    },
+    {
+      "name": "an undeclared character anywhere voids the token",
+      "argv": [
+        "app",
+        "-dvz"
+      ],
+      "expect": {
+        "PORT": "3000",
+        "DEBUG": "false",
+        "COLOR": "true"
+      }
+    },
+    {
+      "name": "undeclared character first voids the token",
+      "argv": [
+        "app",
+        "-zdv"
+      ],
+      "expect": {
+        "PORT": "3000",
+        "DEBUG": "false",
+        "COLOR": "true"
+      }
+    },
+    {
+      "name": "value flag last with nothing to consume",
+      "argv": [
+        "app",
+        "-dvp"
+      ],
+      "expect": {
+        "PORT": "3000",
+        "DEBUG": "true",
+        "COLOR": "true",
+        "VERBOSE": "true"
+      }
+    },
+    {
+      "name": "the next option is not consumed as a value",
+      "argv": [
+        "app",
+        "-dvp",
+        "--debug"
+      ],
+      "expect": {
+        "PORT": "3000",
+        "DEBUG": "true",
+        "COLOR": "true",
+        "VERBOSE": "true"
+      }
+    },
+    {
+      "name": "trailing bool consumes a separated bool value",
+      "argv": [
+        "app",
+        "-dv",
+        "false"
+      ],
+      "expect": {
+        "PORT": "3000",
+        "DEBUG": "true",
+        "COLOR": "true",
+        "VERBOSE": "false"
+      }
+    },
+    {
+      "name": "...identically to the separated spelling",
+      "argv": [
+        "app",
+        "-d",
+        "-v",
+        "false"
+      ],
+      "expect": {
+        "PORT": "3000",
+        "DEBUG": "true",
+        "COLOR": "true",
+        "VERBOSE": "false"
+      }
+    },
+    {
+      "name": "a value the trailing flag would not accept stays positional",
+      "argv": [
+        "app",
+        "-dv",
+        "0"
+      ],
+      "expect": {
+        "PORT": "3000",
+        "DEBUG": "true",
+        "COLOR": "true",
+        "VERBOSE": "true"
+      }
+    },
+    {
+      "name": "...identically to the separated spelling",
+      "argv": [
+        "app",
+        "-d",
+        "-v",
+        "0"
+      ],
+      "expect": {
+        "PORT": "3000",
+        "DEBUG": "true",
+        "COLOR": "true",
+        "VERBOSE": "true"
+      }
+    },
+    {
+      "name": "a non-boolean word is never consumed",
+      "argv": [
+        "app",
+        "-dv",
+        "notabool"
+      ],
+      "expect": {
+        "PORT": "3000",
+        "DEBUG": "true",
+        "COLOR": "true",
+        "VERBOSE": "true"
+      }
+    },
+    {
+      "name": "explicit = makes an empty remainder a real value",
+      "argv": [
+        "app",
+        "-dvm="
+      ],
+      "expect": {
+        "PORT": "3000",
+        "DEBUG": "true",
+        "COLOR": "true",
+        "VERBOSE": "true",
+        "NODE_ENV": ""
+      }
+    },
+    {
+      "name": "...matching the long spelling",
+      "argv": [
+        "app",
+        "--mode="
+      ],
+      "expect": {
+        "PORT": "3000",
+        "DEBUG": "false",
+        "COLOR": "true",
+        "NODE_ENV": ""
+      }
+    },
+    {
+      "name": "no = means no value: the flag is left untouched",
+      "argv": [
+        "app",
+        "-dvm"
+      ],
+      "expect": {
+        "PORT": "3000",
+        "DEBUG": "true",
+        "COLOR": "true",
+        "VERBOSE": "true"
+      }
+    }
+  ]
+}

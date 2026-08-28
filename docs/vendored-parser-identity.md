@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   flags2env:
-    uses: ORESoftware/flags-2-env/.github/workflows/reusable-consumer-compliance.yml@<tooling-full-commit-sha>
+    uses: flags-2-env/flags-2-env/.github/workflows/reusable-consumer-compliance.yml@<tooling-full-commit-sha>
     with:
       tooling_ref: <same-tooling-full-commit-sha>
       parser_ref: <consumer-parser-full-commit-sha>

@@ -4,5 +4,5 @@ description: Crystal bindings for flags2env
 license: MIT
 authors:
   - ORESoftware
-repository: https://github.com/ORESoftware/flags-2-env
+repository: https://github.com/flags-2-env/flags-2-env
 crystal: ">= 1.9.0"

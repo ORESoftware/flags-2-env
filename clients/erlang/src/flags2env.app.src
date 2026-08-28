@@ -5,4 +5,4 @@
   {applications, [kernel, stdlib]},
   {modules, [flags2env]},
   {licenses, ["MIT"]},
-  {links, [{"GitHub", "https://github.com/ORESoftware/flags-2-env"}]}]}.
+  {links, [{"GitHub", "https://github.com/flags-2-env/flags-2-env"}]}]}.

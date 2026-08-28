@@ -8,7 +8,7 @@
   <packaging>jar</packaging>
   <name>flags2env Java</name>
   <description>Java bindings for flags2env.</description>
-  <url>https://github.com/ORESoftware/flags-2-env</url>
+  <url>https://github.com/flags-2-env/flags-2-env</url>
 
   <properties>
     <central.publishing.server.id>central</central.publishing.server.id>
@@ -29,9 +29,9 @@
   </developers>
 
   <scm>
-    <connection>scm:git:https://github.com/ORESoftware/flags-2-env.git</connection>
-    <developerConnection>scm:git:ssh://git@github.com/ORESoftware/flags-2-env.git</developerConnection>
-    <url>https://github.com/ORESoftware/flags-2-env</url>
+    <connection>scm:git:https://github.com/flags-2-env/flags-2-env.git</connection>
+    <developerConnection>scm:git:ssh://git@github.com/flags-2-env/flags-2-env.git</developerConnection>
+    <url>https://github.com/flags-2-env/flags-2-env</url>
   </scm>
 
   <build>

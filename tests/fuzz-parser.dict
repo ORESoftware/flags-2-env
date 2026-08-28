@@ -1,0 +1,25 @@
+# libFuzzer dictionary: tokens that steer mutation toward the
+# combined single-character flag ("short bundle") code path. Without these
+# the mutator has to synthesize a multi-char "-xy" token from scratch, which
+# it will not do inside a CI-sized time budget.
+
+"-n"
+"-l"
+"-u"
+"-nl"
+"-ln"
+"-nu"
+"-nn"
+"-nl="
+"-nlabel"
+"-nz"
+"-zn"
+"--"
+"ws"
+"remote"
+"add"
+"tag"
+"--name="
+"--label="
+"[\",\"]"
+"[\"t\","

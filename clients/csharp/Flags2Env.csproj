@@ -6,8 +6,8 @@
     <Authors>ORESoftware</Authors>
     <Description>C# bindings for flags2env.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/ORESoftware/flags-2-env</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/ORESoftware/flags-2-env</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/flags-2-env/flags-2-env</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/flags-2-env/flags-2-env</RepositoryUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
     <Nullable>enable</Nullable>

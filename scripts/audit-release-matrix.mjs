@@ -430,7 +430,7 @@ const packageControls = {
     ["clients/crystal/shard.yml", /^name: flags2env$/m, "Shard package name"],
     ["clients/crystal/shard.yml", /^version: 0\.1\.0$/m, "Shard package version"],
     ["clients/crystal/shard.yml", /^license: MIT$/m, "Shard package license metadata"],
-    ["clients/crystal/shard.yml", /^repository: https:\/\/github\.com\/ORESoftware\/flags-2-env$/m, "Shard package repository metadata"],
+    ["clients/crystal/shard.yml", /^repository: https:\/\/github\.com\/flags-2-env\/flags-2-env$/m, "Shard package repository metadata"],
     ["clients/crystal/shard.yml", /^crystal: /m, "Shard Crystal version constraint"],
     ["clients/crystal/README.md", /Crystal bindings/, "Shard package README"],
     ["clients/crystal/LICENSE", /MIT License/, "Shard package license file"],

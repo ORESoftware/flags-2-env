@@ -1,0 +1,12 @@
+[flags.debug]
+env = "DEBUG"
+short = "d"
+type = "bool"
+true_aliases = ["t"]
+
+[commands.commit]
+
+[commands.commit.flags.trace]
+env = "TRACE"
+short = "t"
+type = "bool"

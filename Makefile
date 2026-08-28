@@ -124,3 +124,18 @@ prebuilt-%:
 	$(PREBUILT_HARNESS) build $*
 
 .PHONY: prebuilt-tier1 prebuilt-verify
+
+# DEN-2847: manifest generation + deep verification (staging; artifacts commit in DEN-2848)
+PREBUILT_MANIFEST := scripts/prebuilt/manifest.py
+PREBUILT_STAGING := build/prebuilt-staging
+
+prebuilt-manifest: prebuilt-tier1
+	python3 $(PREBUILT_MANIFEST) generate --staging $(PREBUILT_STAGING) --out build/manifest.json
+
+prebuilt-manifest-verify: prebuilt-manifest
+	python3 $(PREBUILT_MANIFEST) verify --manifest build/manifest.json --artifact-root $(PREBUILT_STAGING)
+
+prebuilt-manifest-selftest: prebuilt-manifest
+	python3 $(PREBUILT_MANIFEST) self-test --manifest build/manifest.json --artifact-root $(PREBUILT_STAGING)
+
+.PHONY: prebuilt-manifest prebuilt-manifest-verify prebuilt-manifest-selftest

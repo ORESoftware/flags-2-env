@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   flags2env:
-    uses: ORESoftware/flags-2-env/.github/workflows/reusable-consumer-compliance.yml@<tooling-full-commit-sha>
+    uses: flags-2-env/flags-2-env/.github/workflows/reusable-consumer-compliance.yml@<tooling-full-commit-sha>
     with:
       tooling_ref: <same-tooling-full-commit-sha>
       parser_ref: <consumer-parser-full-commit-sha>
@@ -22,6 +22,13 @@ jobs:
 ```
 
 Pin `uses:` and `tooling_ref` to the same reviewed full commit SHA. `parser_ref` is separate on purpose: it must match the immutable parser revision in the consumer's manifest and lockfile. This lets a repository adopt newer read-only compliance tooling without silently changing the parser embedded in its production artifact.
+
+The canonical Git source is
+`https://github.com/flags-2-env/flags-2-env.git`. The original
+`https://github.com/ORESoftware/flags-2-env.git` source remains accepted through
+2026-08-19 so consumers can migrate without losing immutable pins. The policy
+checker rejects that compatibility URL after the cutoff; the canonical URL has
+no transition expiry.
 
 Ordinary pull-request checks need only `contents: read`.
 

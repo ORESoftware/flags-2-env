@@ -1,5 +1,5 @@
 [help]
-url = "https://github.com/ORESoftware/flags-2-env"
+url = "https://github.com/flags-2-env/flags-2-env"
 
 [flags.config]
 env = "FLAGS2ENV_CONFIG"

@@ -1,0 +1,29 @@
+[flags.long]
+env = "LONG"
+short = "l"
+type = "bool"
+
+[flags.all]
+env = "ALL"
+short = "a"
+type = "bool"
+
+[flags.recursive]
+env = "RECURSIVE"
+short = "r"
+type = "bool"
+
+[flags.force]
+env = "FORCE"
+short = "f"
+type = "bool"
+
+[flags.errexit]
+env = "ERREXIT"
+short = "e"
+type = "bool"
+
+[flags.shell_option]
+env = "SHELL_OPTION"
+short = "o"
+type = "string"

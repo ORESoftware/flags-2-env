@@ -1,0 +1,25 @@
+# Fixture: flags that only mean something with a terminal attached.
+[parse]
+errors_env = "F2E_TTY_ERRORS"
+
+[flags.interactive]
+env = "F2E_TTY_INTERACTIVE"
+aliases = ["interactive"]
+short = "i"
+type = "bool"
+requires_tty = true
+help = "Prompt for anything missing."
+
+[flags.progress]
+env = "F2E_TTY_PROGRESS"
+aliases = ["progress"]
+type = "bool"
+requires_tty = "stdout"
+help = "Draw a progress bar."
+
+[flags.quiet]
+env = "F2E_TTY_QUIET"
+aliases = ["quiet"]
+short = "q"
+type = "bool"
+help = "Needs no terminal."

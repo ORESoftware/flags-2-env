@@ -4,8 +4,8 @@ version: "0.1.0"
 synopsis: "OCaml bindings for flags2env"
 authors: ["ORESoftware"]
 license: "MIT"
-homepage: "https://github.com/ORESoftware/flags-2-env"
-bug-reports: "https://github.com/ORESoftware/flags-2-env/issues"
+homepage: "https://github.com/flags-2-env/flags-2-env"
+bug-reports: "https://github.com/flags-2-env/flags-2-env/issues"
 depends: [
   "ocaml"
   "dune" {>= "3.11"}
@@ -28,4 +28,4 @@ build: [
     "@doc" {with-doc}
   ]
 ]
-dev-repo: "git+https://github.com/ORESoftware/flags-2-env.git"
+dev-repo: "git+https://github.com/flags-2-env/flags-2-env.git"

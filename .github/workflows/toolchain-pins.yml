@@ -1,0 +1,39 @@
+name: toolchain pins
+
+on:
+  pull_request:
+    paths:
+      - "toolchains/**"
+      - "prebuilt/targets.json"
+      - "scripts/validate-toolchain-pins.py"
+      - "docs/toolchain-pinning.md"
+      - ".github/workflows/toolchain-pins.yml"
+  push:
+    branches: [main]
+    paths:
+      - "toolchains/**"
+      - "prebuilt/targets.json"
+      - "scripts/validate-toolchain-pins.py"
+      - "docs/toolchain-pinning.md"
+      - ".github/workflows/toolchain-pins.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Validate checked-in release toolchain pins
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/validate-toolchain-pins.py
+          python3 scripts/validate-toolchain-pins.py
