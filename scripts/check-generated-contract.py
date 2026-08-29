@@ -201,24 +201,136 @@ def jsonschema_validate(instance: Any, schema: dict[str, Any]) -> list[str]:
 
 
 def structural_validate(instance: Any, schema: dict[str, Any]) -> list[str]:
-    """Subset used when the `jsonschema` package is not installed."""
-    errors: list[str] = []
-    if schema.get("type") == "object" and not isinstance(instance, dict):
-        return ["instance is not an object"]
-    if not isinstance(instance, dict) or not isinstance(schema.get("properties"), dict):
-        return errors
-    required = schema.get("required") or []
-    if isinstance(required, list):
-        for key in required:
-            if key not in instance:
-                errors.append(f"missing required property {key!r}")
-    additional = schema.get("additionalProperties", True)
-    if additional is False:
-        allowed = set(schema["properties"])
-        for key in instance:
-            if key not in allowed:
-                errors.append(f"undeclared property {key!r}")
-    return errors
+    """Validate the contract subset without an optional third-party package.
+
+    The fallback must still distinguish valid and invalid fixtures.  Checking
+    only object shape made a property such as ``{"type": "integer"}`` a no-op,
+    so a string could satisfy an integer contract whenever ``jsonschema`` was
+    absent.  Keep this deliberately small, but recurse through the object and
+    array shapes emitted by flags2env and honor their scalar constraints.
+    """
+
+    def kind_matches(value: Any, expected: str) -> bool:
+        if expected == "null":
+            return value is None
+        if expected == "boolean":
+            return isinstance(value, bool)
+        if expected == "integer":
+            return isinstance(value, int) and not isinstance(value, bool)
+        if expected == "number":
+            return isinstance(value, (int, float)) and not isinstance(value, bool)
+        if expected == "string":
+            return isinstance(value, str)
+        if expected == "array":
+            return isinstance(value, list)
+        if expected == "object":
+            return isinstance(value, dict)
+        return False
+
+    def visit(value: Any, rule: Any, path: str) -> list[str]:
+        if rule is True:
+            return []
+        if rule is False:
+            return [f"{path}: schema rejects every value"]
+        if not isinstance(rule, dict):
+            return [f"{path}: schema is not an object or boolean"]
+
+        problems: list[str] = []
+        expected = rule.get("type")
+        expected_types = (
+            [expected]
+            if isinstance(expected, str)
+            else expected
+            if isinstance(expected, list)
+            else []
+        )
+        if expected_types and not any(
+            isinstance(item, str) and kind_matches(value, item)
+            for item in expected_types
+        ):
+            return [f"{path}: expected {' or '.join(map(str, expected_types))}"]
+
+        if "const" in rule and value != rule["const"]:
+            problems.append(f"{path}: value does not equal const")
+        enum = rule.get("enum")
+        if isinstance(enum, list) and value not in enum:
+            problems.append(f"{path}: value is not in enum")
+
+        all_of = rule.get("allOf")
+        if isinstance(all_of, list):
+            for child in all_of:
+                problems.extend(visit(value, child, path))
+        any_of = rule.get("anyOf")
+        if isinstance(any_of, list) and not any(not visit(value, child, path) for child in any_of):
+            problems.append(f"{path}: value does not satisfy anyOf")
+        one_of = rule.get("oneOf")
+        if isinstance(one_of, list):
+            matches = sum(not visit(value, child, path) for child in one_of)
+            if matches != 1:
+                problems.append(f"{path}: value satisfies {matches} oneOf branches")
+
+        if isinstance(value, dict):
+            properties = rule.get("properties")
+            property_rules = properties if isinstance(properties, dict) else {}
+            required = rule.get("required")
+            if isinstance(required, list):
+                for key in required:
+                    if isinstance(key, str) and key not in value:
+                        problems.append(f"{path}: missing required property {key!r}")
+            for key, child_rule in property_rules.items():
+                if key in value:
+                    problems.extend(visit(value[key], child_rule, f"{path}.{key}"))
+            additional = rule.get("additionalProperties", True)
+            for key in value.keys() - property_rules.keys():
+                if additional is False:
+                    problems.append(f"{path}: undeclared property {key!r}")
+                elif isinstance(additional, dict):
+                    problems.extend(visit(value[key], additional, f"{path}.{key}"))
+
+        if isinstance(value, list):
+            items = rule.get("items")
+            if isinstance(items, (dict, bool)):
+                for index, item in enumerate(value):
+                    problems.extend(visit(item, items, f"{path}[{index}]"))
+            minimum_items = rule.get("minItems")
+            maximum_items = rule.get("maxItems")
+            if isinstance(minimum_items, int) and len(value) < minimum_items:
+                problems.append(f"{path}: fewer than minItems")
+            if isinstance(maximum_items, int) and len(value) > maximum_items:
+                problems.append(f"{path}: more than maxItems")
+
+        if isinstance(value, str):
+            minimum_length = rule.get("minLength")
+            maximum_length = rule.get("maxLength")
+            pattern = rule.get("pattern")
+            if isinstance(minimum_length, int) and len(value) < minimum_length:
+                problems.append(f"{path}: shorter than minLength")
+            if isinstance(maximum_length, int) and len(value) > maximum_length:
+                problems.append(f"{path}: longer than maxLength")
+            if isinstance(pattern, str):
+                try:
+                    if re.search(pattern, value) is None:
+                        problems.append(f"{path}: string does not match pattern")
+                except re.error as exc:
+                    problems.append(f"{path}: invalid schema pattern: {exc}")
+
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            minimum = rule.get("minimum")
+            maximum = rule.get("maximum")
+            exclusive_minimum = rule.get("exclusiveMinimum")
+            exclusive_maximum = rule.get("exclusiveMaximum")
+            if isinstance(minimum, (int, float)) and value < minimum:
+                problems.append(f"{path}: value is below minimum")
+            if isinstance(maximum, (int, float)) and value > maximum:
+                problems.append(f"{path}: value is above maximum")
+            if isinstance(exclusive_minimum, (int, float)) and value <= exclusive_minimum:
+                problems.append(f"{path}: value is not above exclusiveMinimum")
+            if isinstance(exclusive_maximum, (int, float)) and value >= exclusive_maximum:
+                problems.append(f"{path}: value is not below exclusiveMaximum")
+
+        return problems
+
+    return visit(instance, schema, "$")
 
 
 def fixture_dirs(root: Path, generated_dir: Path) -> tuple[list[Path], list[Path]]:

@@ -965,6 +965,12 @@ static F2EOrderProblem f2e_parse_source_order(const char *value, F2ESourceOrder 
   for (size_t i = 0; i < F2E_SOURCE_COUNT; i++) {
     F2ESource source = (F2ESource)F2E_DEFAULT_SOURCE_ORDER[i];
     if (!f2e_source_order_contains(out, source)) {
+      /* A valid partial order can omit at most F2E_SOURCE_COUNT entries, but
+         keep the write guarded so both the compiler and future enum changes
+         can see that this fixed-size array is never indexed at its bound. */
+      if (out->count >= F2E_SOURCE_COUNT) {
+        return F2E_ORDER_DUPLICATE_SOURCE;
+      }
       out->sources[out->count++] = (unsigned char)source;
     }
   }
