@@ -1,0 +1,7 @@
+[parse]
+allow_unknown = false
+
+[flags.port]
+aliases = ["port"]
+env = "CONSUMER_PORT"
+type = "integer"

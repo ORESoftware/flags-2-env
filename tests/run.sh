@@ -511,6 +511,25 @@ case "$generated_schema" in
     ;;
 esac
 
+OUTPUT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/f2e-gen-out.XXXXXX")"
+OUTPUT_DART="$OUTPUT_DIR/generated/dart/env.dart"
+OUTPUT_SCHEMA="$OUTPUT_DIR/generated/json-schema/env.schema.json"
+"$CLI" generate dart "$CODEGEN_CONFIG" --name CliStuff --output "$OUTPUT_DART"
+"$CLI" generate json-schema "$CODEGEN_CONFIG" --name CliStuff --output "$OUTPUT_SCHEMA"
+if [ -w "$OUTPUT_DART" ] || [ -w "$OUTPUT_SCHEMA" ]; then
+  printf 'generate --output must chmod a-w the written files\n' >&2
+  rm -rf "$OUTPUT_DIR"
+  exit 1
+fi
+if ! grep -q 'final class CliStuff' "$OUTPUT_DART"; then
+  printf 'generate --output dart file missing class:\n%s\n' "$(cat "$OUTPUT_DART")" >&2
+  rm -rf "$OUTPUT_DIR"
+  exit 1
+fi
+python3 "$ROOT_DIR/scripts/check-generated-contract.py" --self-test
+python3 "$ROOT_DIR/scripts/check-generated-contract.py" --root "$ROOT_DIR" --freeze --require-readonly
+rm -rf "$OUTPUT_DIR"
+
 set +e
 "$CLI" generate unsupported "$CODEGEN_CONFIG" >/dev/null 2>/dev/null
 status=$?
@@ -1400,7 +1419,10 @@ rm -f "$DOTENV_KIND_DIR/.env"
 # oversized input is bounded rather than truncating the rest of the file away
 DOTENV_BIG_DIR="$TMP_TEST_DIR/dotenv-big"
 mkdir -p "$DOTENV_BIG_DIR"
-cp "$DOTENV_DIR/.cli-flags.toml" "$DOTENV_BIG_DIR/.cli-flags.toml"
+{
+  cat "$DOTENV_DIR/.cli-flags.toml"
+  printf '\n[parse]\nerrors_env = "F2E_DOTENV_ERRORS"\n'
+} > "$DOTENV_BIG_DIR/.cli-flags.toml"
 {
   i=0
   while [ "$i" -lt 600 ]; do
@@ -1439,6 +1461,14 @@ case "$dotenv_big" in
     ;;
   *)
     printf 'The line after an over-long .env line must still be read:\n%s\n' "$dotenv_big" >&2
+    exit 1
+    ;;
+esac
+case "$dotenv_big" in
+  *'"F2E_DOTENV_ERRORS":"[\".env:1: line exceeds the 4095-byte read buffer; value was bounded and its tail skipped\"]"'*)
+    ;;
+  *)
+    printf 'An over-long .env line must be reported through errors_env:\n%s\n' "$dotenv_big" >&2
     exit 1
     ;;
 esac

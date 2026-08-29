@@ -965,6 +965,12 @@ static F2EOrderProblem f2e_parse_source_order(const char *value, F2ESourceOrder 
   for (size_t i = 0; i < F2E_SOURCE_COUNT; i++) {
     F2ESource source = (F2ESource)F2E_DEFAULT_SOURCE_ORDER[i];
     if (!f2e_source_order_contains(out, source)) {
+      /* A valid partial order can omit at most F2E_SOURCE_COUNT entries, but
+         keep the write guarded so both the compiler and future enum changes
+         can see that this fixed-size array is never indexed at its bound. */
+      if (out->count >= F2E_SOURCE_COUNT) {
+        return F2E_ORDER_DUPLICATE_SOURCE;
+      }
       out->sources[out->count++] = (unsigned char)source;
     }
   }
@@ -4660,9 +4666,47 @@ static const char *f2e_dotenv_file_at(const F2EConfig *config, size_t index) {
   return index == 0 ? ".env" : NULL;
 }
 
+/* Pure formatting step; the caller owns the error-channel side effect. */
+static int f2e_dotenv_truncation_message(const char *relative_path,
+                                         size_t line_number,
+                                         char *out,
+                                         size_t out_size) {
+  if (!out || out_size == 0 || line_number == 0) {
+    return 0;
+  }
+  const char *path = relative_path && relative_path[0] != '\0'
+                         ? relative_path
+                         : ".env";
+  int written = snprintf(
+      out,
+      out_size,
+      "%s:%lu: line exceeds the %d-byte read buffer; value was bounded and its tail skipped",
+      path,
+      (unsigned long)line_number,
+      F2E_MAX_LINE - 1);
+  return written >= 0 && (size_t)written < out_size;
+}
+
+static void f2e_report_dotenv_truncation(F2EJsonList *errors,
+                                         const char *relative_path,
+                                         size_t line_number) {
+  if (!errors || !errors->initialized) {
+    return;
+  }
+  char message[512];
+  if (f2e_dotenv_truncation_message(relative_path,
+                                    line_number,
+                                    message,
+                                    sizeof(message))) {
+    f2e_json_list_append(errors, message);
+  }
+}
+
 /* Reads one .env file into `dotenv`. Returns 0 when it is not readable. */
-static int f2e_dotenv_load_one(F2EDotEnv *dotenv, const F2EConfig *config,
-                               const char *relative_path) {
+static int f2e_dotenv_load_one(F2EDotEnv *dotenv,
+                               const F2EConfig *config,
+                               const char *relative_path,
+                               F2EJsonList *errors) {
   if (config && config->dotenv_files_set &&
       f2e_dotenv_path_containment(relative_path) != 1) {
     return 0;
@@ -4680,6 +4724,7 @@ static int f2e_dotenv_load_one(F2EDotEnv *dotenv, const F2EConfig *config,
   char line[F2E_MAX_LINE];
   int first_line = 1;
   int continuing = 0;
+  size_t line_number = 0;
   while (fgets(line, sizeof(line), file)) {
     /* A line longer than the read buffer arrives in several chunks. Only the
        first is a line; the rest are the tail of its value and must not be read
@@ -4691,7 +4736,11 @@ static int f2e_dotenv_load_one(F2EDotEnv *dotenv, const F2EConfig *config,
       continuing = !completed;
       continue;
     }
+    line_number++;
     continuing = !completed;
+    if (!completed) {
+      f2e_report_dotenv_truncation(errors, relative_path, line_number);
+    }
 
     char *raw = line;
     if (first_line) {
@@ -4737,14 +4786,16 @@ static int f2e_dotenv_load_one(F2EDotEnv *dotenv, const F2EConfig *config,
  * later file wins for a key both define — the order the list is written in is
  * the order a reader expects it to apply.
  */
-static int f2e_dotenv_load(F2EDotEnv *dotenv, const F2EConfig *config) {
+static int f2e_dotenv_load(F2EDotEnv *dotenv,
+                          const F2EConfig *config,
+                          F2EJsonList *errors) {
   memset(dotenv, 0, sizeof(*dotenv));
 
   size_t count = f2e_dotenv_file_count(config);
   int loaded_any = 0;
   for (size_t i = 0; i < count; i++) {
     const char *path = f2e_dotenv_file_at(config, i);
-    if (path && f2e_dotenv_load_one(dotenv, config, path)) {
+    if (path && f2e_dotenv_load_one(dotenv, config, path, errors)) {
       loaded_any = 1;
     }
   }
@@ -4765,7 +4816,8 @@ static int f2e_dotenv_is_enabled(const F2EConfig *config) {
   return config->dotenv_enabled;
 }
 
-static F2EDotEnv *f2e_dotenv_open(const F2EConfig *config) {
+static F2EDotEnv *f2e_dotenv_open(const F2EConfig *config,
+                                 F2EJsonList *errors) {
   if (!f2e_dotenv_is_enabled(config)) {
     return NULL;
   }
@@ -4773,7 +4825,7 @@ static F2EDotEnv *f2e_dotenv_open(const F2EConfig *config) {
   if (!dotenv) {
     return NULL;
   }
-  if (!f2e_dotenv_load(dotenv, config)) {
+  if (!f2e_dotenv_load(dotenv, config, errors)) {
     free(dotenv);
     return NULL;
   }
@@ -7997,7 +8049,7 @@ char *f2e_parse_from_file(const char *config_path, int argc, const char *const a
                   NULL);
   }
 
-  F2EDotEnv *dotenv = f2e_dotenv_open(config);
+  F2EDotEnv *dotenv = f2e_dotenv_open(config, track_errors ? &errors : NULL);
   f2e_apply_value_sources(config,
                           pairs,
                           F2E_MAX_PAIRS,
@@ -8183,7 +8235,7 @@ char *f2e_parse_structured_from_file(const char *config_path, int argc, const ch
                 lenient,
                 NULL);
 
-  F2EDotEnv *dotenv = f2e_dotenv_open(config);
+  F2EDotEnv *dotenv = f2e_dotenv_open(config, lists_ok ? &errors : NULL);
   F2EBuffer order_report = {0};
   size_t order_report_count = 0;
   int order_report_ok = f2e_buffer_init(&order_report);
