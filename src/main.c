@@ -16,11 +16,18 @@
 
 #if defined(_WIN32)
 #include <direct.h>
+#include <io.h>
+#include <sys/stat.h>
 #define F2E_MKDIR(path) _mkdir(path)
+#define F2E_CHMOD_WRITABLE(path) _chmod((path), _S_IREAD | _S_IWRITE)
+#define F2E_CHMOD_READONLY(path) _chmod((path), _S_IREAD)
 #else
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <unistd.h>
 #define F2E_MKDIR(path) mkdir(path, 0755)
+#define F2E_CHMOD_WRITABLE(path) chmod((path), 0644)
+#define F2E_CHMOD_READONLY(path) chmod((path), 0444)
 #endif
 
 #ifndef PATH_MAX
@@ -428,6 +435,52 @@ static int f2e_cli_write_file(const char *path, const char *contents) {
   return ok;
 }
 
+static int f2e_cli_dirname(const char *path, char *out, size_t out_size) {
+  if (!path || !out || out_size == 0) {
+    return 0;
+  }
+  size_t len = strlen(path);
+  if (len == 0 || len >= out_size) {
+    return 0;
+  }
+  memcpy(out, path, len + 1);
+  char *slash = NULL;
+  for (char *cursor = out; *cursor; cursor++) {
+    if (*cursor == '/' || *cursor == '\\') {
+      slash = cursor;
+    }
+  }
+  if (!slash) {
+    if (out_size < 2) {
+      return 0;
+    }
+    out[0] = '.';
+    out[1] = '\0';
+    return 1;
+  }
+  if (slash == out) {
+    slash[1] = '\0';
+    return 1;
+  }
+  *slash = '\0';
+  return 1;
+}
+
+static int f2e_cli_write_file_readonly(const char *path, const char *contents) {
+  char parent[PATH_MAX];
+  if (!path || !f2e_cli_dirname(path, parent, sizeof(parent))) {
+    return 0;
+  }
+  if (parent[0] != '\0' && strcmp(parent, ".") != 0 && !f2e_cli_mkdir_p(parent)) {
+    return 0;
+  }
+  (void)F2E_CHMOD_WRITABLE(path);
+  if (!f2e_cli_write_file(path, contents)) {
+    return 0;
+  }
+  return F2E_CHMOD_READONLY(path) == 0;
+}
+
 static int f2e_cli_file_contains(const char *path, const char *needle) {
   FILE *file = fopen(path, "r");
   if (!file) {
@@ -759,8 +812,9 @@ static int f2e_cli_run_completion(const char *shell, const char *command, const 
 static void f2e_cli_generate_usage(void) {
   f2e_cli_stderr_locked(
       "%s",
-      "usage: flags2env generate <language> [config] [--name TypeName]\n"
-      "languages: typescript, python, go, rust, java, csharp, dart, json-schema\n");
+      "usage: flags2env generate <language> [config] [--name TypeName] [--output path]\n"
+      "languages: typescript, python, go, rust, java, csharp, dart, json-schema\n"
+      "--output writes the file read-only (chmod a-w). Typical: generated/dart/env.dart\n");
 }
 
 static int f2e_cli_run_generate(int argc, const char *const argv[]) {
@@ -772,6 +826,7 @@ static int f2e_cli_run_generate(int argc, const char *const argv[]) {
   const char *language = argv[2];
   const char *config_path = NULL;
   const char *type_name = NULL;
+  const char *output_path = NULL;
   for (int i = 3; i < argc; i++) {
     const char *token = argv[i];
     if (f2e_cli_streq(token, "--name") || f2e_cli_streq(token, "-n")) {
@@ -798,6 +853,18 @@ static int f2e_cli_run_generate(int argc, const char *const argv[]) {
       config_path = token + 9;
       continue;
     }
+    if (f2e_cli_streq(token, "--output") || f2e_cli_streq(token, "-o")) {
+      if (i + 1 >= argc) {
+        f2e_cli_generate_usage();
+        return 2;
+      }
+      output_path = argv[++i];
+      continue;
+    }
+    if (strncmp(token, "--output=", 9) == 0) {
+      output_path = token + 9;
+      continue;
+    }
     if (token[0] == '-' || config_path) {
       f2e_cli_generate_usage();
       return 2;
@@ -811,6 +878,16 @@ static int f2e_cli_run_generate(int argc, const char *const argv[]) {
     f2e_cli_stderr_locked("flags2env: could not generate %s types; check the language, type name, and config audit\n",
                           language ? language : "");
     return 1;
+  }
+  if (output_path) {
+    int wrote = f2e_cli_write_file_readonly(output_path, source);
+    f2e_free(source);
+    if (!wrote) {
+      f2e_cli_stderr_locked("flags2env: could not write read-only generated file: %s\n", output_path);
+      return 1;
+    }
+    f2e_cli_stderr_locked("wrote %s (read-only)\n", output_path);
+    return 0;
   }
   int ok = f2e_cli_stdout_write_locked(source);
   f2e_free(source);

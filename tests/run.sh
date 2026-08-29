@@ -511,6 +511,25 @@ case "$generated_schema" in
     ;;
 esac
 
+OUTPUT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/f2e-gen-out.XXXXXX")"
+OUTPUT_DART="$OUTPUT_DIR/generated/dart/env.dart"
+OUTPUT_SCHEMA="$OUTPUT_DIR/generated/json-schema/env.schema.json"
+"$CLI" generate dart "$CODEGEN_CONFIG" --name CliStuff --output "$OUTPUT_DART"
+"$CLI" generate json-schema "$CODEGEN_CONFIG" --name CliStuff --output "$OUTPUT_SCHEMA"
+if [ -w "$OUTPUT_DART" ] || [ -w "$OUTPUT_SCHEMA" ]; then
+  printf 'generate --output must chmod a-w the written files\n' >&2
+  rm -rf "$OUTPUT_DIR"
+  exit 1
+fi
+if ! grep -q 'final class CliStuff' "$OUTPUT_DART"; then
+  printf 'generate --output dart file missing class:\n%s\n' "$(cat "$OUTPUT_DART")" >&2
+  rm -rf "$OUTPUT_DIR"
+  exit 1
+fi
+python3 "$ROOT_DIR/scripts/check-generated-contract.py" --self-test
+python3 "$ROOT_DIR/scripts/check-generated-contract.py" --root "$ROOT_DIR" --freeze --require-readonly
+rm -rf "$OUTPUT_DIR"
+
 set +e
 "$CLI" generate unsupported "$CODEGEN_CONFIG" >/dev/null 2>/dev/null
 status=$?
