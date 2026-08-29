@@ -1,0 +1,8 @@
+# Fixture: every finding `doctor` reports, in one file.
+[env]
+ignore = ["F2E_DOCTOR_IGNORED"]
+
+[flags.kept]
+env = "F2E_DOCTOR_KEPT"
+aliases = ["kept"]
+type = "string"

@@ -3,11 +3,24 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 OUT="${1:-$ROOT/clients/browser/dist}"
+# Resolved from the repository root above.
+# shellcheck disable=SC1091
+source "$ROOT/clients/browser/toolchain.env"
 
 command -v emcc >/dev/null 2>&1 || {
   echo "emcc is required to build the browser client" >&2
   exit 1
 }
+
+actual_emcc_version=$(emcc --version | sed -n '1s/.*) \([0-9][0-9.]*\).*/\1/p')
+if [[ "$actual_emcc_version" != "$F2E_EMSCRIPTEN_VERSION" ]]; then
+  if [[ "${F2E_ALLOW_UNPINNED_EMSCRIPTEN:-0}" != "1" ]]; then
+    echo "emcc $F2E_EMSCRIPTEN_VERSION is required; found ${actual_emcc_version:-unknown}" >&2
+    echo "use the pinned image: $F2E_EMSCRIPTEN_IMAGE" >&2
+    exit 1
+  fi
+  echo "warning: building with unsupported emcc ${actual_emcc_version:-unknown}" >&2
+fi
 
 mkdir -p "$OUT"
 
@@ -32,6 +45,7 @@ emcc "$ROOT/src/parser.c" \
 
 cp "$ROOT/clients/browser/lib.mjs" "$OUT/lib.mjs"
 cp "$ROOT/clients/browser/lib.d.ts" "$OUT/lib.d.ts"
+cp "$ROOT/clients/browser/lifecycle.mjs" "$OUT/lifecycle.mjs"
 cp "$ROOT/clients/browser/worker.mjs" "$OUT/worker.mjs"
 cp "$ROOT/clients/browser/worker-client.mjs" "$OUT/worker-client.mjs"
 cp "$ROOT/clients/browser/worker-client.d.ts" "$OUT/worker-client.d.ts"

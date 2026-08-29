@@ -14,6 +14,7 @@ const generatedFiles = [
   "flags2env.wasm",
   "lib.d.ts",
   "lib.mjs",
+  "lifecycle.mjs",
   "worker-client.d.ts",
   "worker-client.mjs",
   "worker.mjs",

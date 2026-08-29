@@ -1,0 +1,84 @@
+{
+  "$schema": "./application-surfaces.schema.json",
+  "schemaVersion": "flags2env.application-surfaces.v1",
+  "surfaces": [
+    {
+      "id": "browser-main-thread",
+      "kind": "browser-runtime",
+      "scopePath": "clients/browser/lib.mjs",
+      "entrypoint": "clients/browser/lib.mjs",
+      "machine": "main-thread",
+      "runtimePaths": [
+        "clients/browser/lib.mjs",
+        "clients/browser/lifecycle.mjs"
+      ],
+      "proofPaths": [
+        "formal/model-check-app-lifecycle.mjs",
+        "formal/smt/application_lifecycle.smt2"
+      ]
+    },
+    {
+      "id": "browser-worker-client",
+      "kind": "browser-runtime",
+      "scopePath": "clients/browser/worker-client.mjs",
+      "entrypoint": "clients/browser/worker-client.mjs",
+      "machine": "worker-client",
+      "runtimePaths": [
+        "clients/browser/worker-client.mjs",
+        "clients/browser/lifecycle.mjs"
+      ],
+      "proofPaths": [
+        "formal/model-check-app-lifecycle.mjs",
+        "formal/smt/application_lifecycle.smt2"
+      ]
+    },
+    {
+      "id": "browser-worker-host",
+      "kind": "browser-runtime",
+      "scopePath": "clients/browser/worker.mjs",
+      "entrypoint": "clients/browser/worker.mjs",
+      "machine": "worker-host",
+      "runtimePaths": [
+        "clients/browser/worker.mjs",
+        "clients/browser/lifecycle.mjs"
+      ],
+      "proofPaths": [
+        "formal/model-check-app-lifecycle.mjs",
+        "formal/smt/application_lifecycle.smt2"
+      ]
+    },
+    {
+      "id": "browser-demo",
+      "kind": "browser-app",
+      "scopePath": "clients/browser/demo/",
+      "entrypoint": "clients/browser/demo/app.mjs",
+      "machine": "demo",
+      "runtimePaths": [
+        "clients/browser/demo/app.mjs",
+        "clients/browser/lifecycle.mjs"
+      ],
+      "proofPaths": [
+        "formal/model-check-app-lifecycle.mjs",
+        "formal/smt/application_lifecycle.smt2"
+      ]
+    }
+  ],
+  "desktopBoundary": {
+    "standaloneAppPresent": false,
+    "sharedRuntime": "clients/browser/lifecycle.mjs",
+    "scopeGate": "formal/check-application-scope.mjs"
+  },
+  "nonApplicationBoundaries": [
+    {
+      "scopePath": "src/main.c",
+      "reason": "The native CLI is a single-shot process around the CBMC/Z3-checked parser and terminal-context code, not a persistent UI lifecycle."
+    },
+    {
+      "scopePath": "clients/",
+      "except": [
+        "clients/browser/"
+      ],
+      "reason": "The remaining language clients are synchronous parser adapters; they do not own an application lifecycle state machine."
+    }
+  ]
+}

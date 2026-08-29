@@ -1,9 +1,27 @@
 name: Formal methods
 
+# The repository runner is the operational authority for application models,
+# manifest scope, CBMC, and SMT obligations. CI supplies the pinned tools and
+# invokes that same runner so local and hosted proof results have one meaning.
+
 on:
   pull_request:
     paths:
+      - 'apps/**'
+      - '**/src-tauri/**'
+      - '**/tauri.conf.json'
+      - '**/tauri.conf.json5'
+      - '**/electron-builder.json'
+      - '**/electron-builder.yml'
+      - '**/electron-builder.yaml'
+      - '**/*.desktop'
+      - '**/package.json'
+      - '**/Cargo.toml'
+      - '**/pubspec.yaml'
+      - '**/*.csproj'
+      - '**/*.swift'
       - 'src/**'
+      - 'clients/browser/**'
       - 'clients/rust/**'
       - 'formal/**'
       - 'scripts/formal-check.sh'
@@ -15,7 +33,21 @@ on:
   push:
     branches: [main]
     paths:
+      - 'apps/**'
+      - '**/src-tauri/**'
+      - '**/tauri.conf.json'
+      - '**/tauri.conf.json5'
+      - '**/electron-builder.json'
+      - '**/electron-builder.yml'
+      - '**/electron-builder.yaml'
+      - '**/*.desktop'
+      - '**/package.json'
+      - '**/Cargo.toml'
+      - '**/pubspec.yaml'
+      - '**/*.csproj'
+      - '**/*.swift'
       - 'src/**'
+      - 'clients/browser/**'
       - 'clients/rust/**'
       - 'formal/**'
       - 'scripts/formal-check.sh'
@@ -24,6 +56,8 @@ on:
       - 'flake.nix'
       - 'flake.lock'
       - '.github/workflows/formal-methods.yml'
+  schedule:
+    - cron: '05 6 * * 2'
   workflow_dispatch:
 
 permissions:
@@ -34,10 +68,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  c-and-smt:
-    name: CBMC and Z3
+  manifest:
+    name: Formal manifest
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          show-progress: false
+
+      - name: Syntax-check the runner
+        run: bash -n scripts/formal-check.sh
+
+      - name: Validate formal scope and declared paths
+        run: scripts/formal-check.sh manifest
+
+  c-and-smt:
+    name: Application model, CBMC and Z3
+    needs: manifest
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -51,11 +103,12 @@ jobs:
           extra_nix_config: |
             experimental-features = nix-command flakes
 
-      - name: Prove C and SMT contracts
+      - name: Prove application, C, and SMT contracts
         run: nix develop -c ./scripts/formal-check.sh
 
   rust-kani:
     name: Kani
+    needs: manifest
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

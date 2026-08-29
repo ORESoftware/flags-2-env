@@ -17,6 +17,8 @@ tests/env-audit-drift
 tests/env-audit-clean
 tests/env-audit-ignore
 tests/dotenv-global-override
+tests/doctor-findings
+tests/dotenv-files
 "
 
 cleanup_test_state() {
@@ -24,6 +26,7 @@ cleanup_test_state() {
   for fixture_dir in $MATERIALIZED_DOTENV_DIRS; do
     rm -f "$ROOT_DIR/$fixture_dir/.env"
   done
+  rm -f "$ROOT_DIR/tests/dotenv-files/.env.local"
 }
 trap cleanup_test_state EXIT
 trap 'cleanup_test_state; exit 130' HUP INT TERM
@@ -34,6 +37,8 @@ trap 'cleanup_test_state; exit 130' HUP INT TERM
 for fixture_dir in $MATERIALIZED_DOTENV_DIRS; do
   cp "$ROOT_DIR/$fixture_dir/fixture.dotenv" "$ROOT_DIR/$fixture_dir/.env"
 done
+cp "$ROOT_DIR/tests/dotenv-files/fixture.local.dotenv" \
+  "$ROOT_DIR/tests/dotenv-files/.env.local"
 
 run_case() {
   expected="$1"
@@ -41,6 +46,17 @@ run_case() {
   actual="$(cd "$FIXTURE_DIR" && "$CLI" "$@")"
   if [ "$actual" != "$expected" ]; then
     printf 'Expected: %s\nActual:   %s\n' "$expected" "$actual" >&2
+    exit 1
+  fi
+}
+
+run_config_case() {
+  config_dir="$1"
+  expected="$2"
+  shift 2
+  actual="$(cd "$config_dir" && "$CLI" "$@")"
+  if [ "$actual" != "$expected" ]; then
+    printf 'Config:   %s\nExpected: %s\nActual:   %s\n' "$config_dir" "$expected" "$actual" >&2
     exit 1
   fi
 }
@@ -58,6 +74,89 @@ run_case '{"PORT":"+7","DEBUG":"false","COLOR":"true"}' app --port +7
 run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true"}' app --no-port=8181
 run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true","HOST":"-internal"}' app --host=-internal
 run_case '{"PORT":"4000","DEBUG":"true","COLOR":"true","VERBOSE":"true"}' app -dv --listen-port=4000
+# getopt-style short bundles: boolean-only groups ("ls -la", "rm -rf") and
+# groups ending in one value-taking flag ("set -eo pipefail", "git commit -am").
+run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true","VERBOSE":"true"}' app -dv
+run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true","VERBOSE":"true"}' app -vd
+run_case '{"PORT":"8080","DEBUG":"true","COLOR":"true","VERBOSE":"true"}' app -dvp 8080
+run_case '{"PORT":"8080","DEBUG":"true","COLOR":"true","VERBOSE":"true"}' app -dvp8080
+run_case '{"PORT":"8080","DEBUG":"true","COLOR":"true","VERBOSE":"true"}' app -dvp=8080
+run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true","VERBOSE":"true","NODE_ENV":"production"}' app -dvm production
+# the value flag ends the bundle: later characters are its value, never flags
+run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true","NODE_ENV":"vc"}' app -dmvc
+# Exact real-world bundle shapes from the public docs.
+run_config_case "$ROOT_DIR/tests/short-bundles" '{"LONG":"true","ALL":"true"}' app -la
+run_config_case "$ROOT_DIR/tests/short-bundles" '{"RECURSIVE":"true","FORCE":"true"}' app -rf
+run_config_case "$ROOT_DIR/tests/short-bundles" '{"ERREXIT":"true","SHELL_OPTION":"pipefail"}' app -eo pipefail
+run_config_case "$ROOT_DIR/tests/short-bundles" '{"ERREXIT":"true","SHELL_OPTION":"pipefail"}' app -eo=pipefail
+# "tar -xvf archive.tar" shape: several leading bools, then a value flag
+run_config_case "$ROOT_DIR/tests/short-bundles" '{"LONG":"true","ALL":"true","RECURSIVE":"true","FORCE":"true"}' app -larf
+run_config_case "$ROOT_DIR/tests/short-bundles" '{"LONG":"true","ALL":"true","ERREXIT":"true","SHELL_OPTION":"pipefail"}' app -laeo pipefail
+# ...and an all-bool bundle never mistakes a following word for a value: -lae
+# ends in a bool, so "pipefail" stays a positional
+run_config_case "$ROOT_DIR/tests/short-bundles" '{"LONG":"true","ALL":"true","ERREXIT":"true"}' app -lae pipefail
+# The trailing bool of an all-bool bundle consumes a separated boolean value,
+# exactly as the lone spelling does. This is why "rm -rf false" sets FORCE
+# false rather than treating "false" as a filename - identical to "rm -r -f
+# false" today, and suppressed by require_equals (see the equals-only cases).
+run_config_case "$ROOT_DIR/tests/short-bundles" '{"RECURSIVE":"true","FORCE":"false"}' app -rf false
+run_config_case "$ROOT_DIR/tests/short-bundles" '{"RECURSIVE":"true","FORCE":"false"}' app -r -f false
+run_config_case "$ROOT_DIR/tests/short-bundles" '{"RECURSIVE":"true","FORCE":"true"}' app -rf archive.tar
+# Node accepts -pe (print + eval); the value-taking -e must end the bundle.
+run_config_case "$ROOT_DIR/tests/node-short-bundle" '{"PRINT":"true","EVAL":""}' app -pe ''
+run_config_case "$ROOT_DIR/tests/node-short-bundle" '{"PRINT":"true","EVAL":"1 + 1"}' app -pe '1 + 1'
+# ...and the reversed spelling stays getopt: -e takes a value, so "p" is that
+# value and the script that follows is positional. Same declaration, different
+# order, different meaning - which is the point of putting the value flag last.
+run_config_case "$ROOT_DIR/tests/node-short-bundle" '{"EVAL":"p"}' app -ep '1 + 1'
+# The literal tar letters, as the muscle memory spells them.
+TAR_DIR="$ROOT_DIR/tests/tar-short-bundle"
+run_config_case "$TAR_DIR" '{"EXTRACT":"true","VERBOSE":"true","FILE":"archive.tar"}' app -xvf archive.tar
+run_config_case "$TAR_DIR" '{"EXTRACT":"true","VERBOSE":"true","FILE":"archive.tar"}' app -xvfarchive.tar
+run_config_case "$TAR_DIR" '{"EXTRACT":"true","VERBOSE":"true","FILE":"archive.tar"}' app -xvf=archive.tar
+run_config_case "$TAR_DIR" '{"EXTRACT":"true","GZIP":"true","VERBOSE":"true","FILE":"archive.tgz"}' app -xzvf archive.tgz
+run_config_case "$TAR_DIR" '{"EXTRACT":"true","VERBOSE":"true","FILE":"archive.tar"}' app -x -v -f archive.tar
+# a suffix that reads as a boolean value for the first flag keeps that meaning
+# (compatibility): -dt is debug=true via true_aliases, never a bundle
+run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true"}' app -dt
+run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true"}' app -df
+# an undeclared character anywhere in the token means it is not a bundle
+run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true"}' app -dvz
+run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true"}' app -zdv
+# a bundle whose value flag is last but has no consumable value sets the
+# booleans and leaves the value flag untouched, like a bare -p would
+run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true","VERBOSE":"true"}' app -dvp
+run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true","VERBOSE":"true"}' app -dvp --debug
+
+# A bundle is shorthand for the same shorts written separately, so `-dv` must
+# mean exactly `-d -v` - including for the trailing short, the only one
+# adjacent to the next argv element and so the only one that can consume a
+# separated boolean value. Each pair below asserts that equivalence directly.
+run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true","VERBOSE":"false"}' app -dv false
+run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true","VERBOSE":"false"}' app -d -v false
+run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true","VERBOSE":"true"}' app -vd false
+run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true","VERBOSE":"true"}' app -v -d false
+# only a value the trailing flag would itself accept is consumed: "0" is a
+# false_alias of -d, never of -v, so it stays a positional either way
+run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true","VERBOSE":"true"}' app -dv 0
+run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true","VERBOSE":"true"}' app -d -v 0
+run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true","VERBOSE":"true"}' app -vd 0
+run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true","VERBOSE":"true"}' app -v -d 0
+# a non-boolean word is never consumed by a bundle's trailing bool
+run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true","VERBOSE":"true"}' app -dv notabool
+# a repeated short is still just its last occurrence, and the trailing one
+# still owns the separated value
+run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true","VERBOSE":"false"}' app -vv false
+# an explicit "=" makes an empty remainder a real assignment, so every
+# spelling of "set this to the empty string" agrees
+run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true","NODE_ENV":""}' app --mode=
+run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true","NODE_ENV":""}' app -m=
+run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true","VERBOSE":"true","NODE_ENV":""}' app -dvm=
+run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true","HOST":""}' app -h=
+run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true","VERBOSE":"true","HOST":""}' app -dvh=
+# an empty remainder with no "=" is still not a value: -dvm alone leaves the
+# value flag untouched rather than setting it to ""
+run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true","VERBOSE":"true"}' app -dvm
 run_case '{"PORT":"3000","DEBUG":"true","COLOR":"true"}' app --debug=t
 run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true"}' app --debug false
 run_case '{"PORT":"3000","DEBUG":"false","COLOR":"true"}' app --debug 0
@@ -77,6 +176,72 @@ actual="$(cd "$ROOT_DIR/tests/equals-only" && FLAGS2ENV_ALLOW_UNKNOWN=1 "$CLI" a
 expected="{\"PORT\":\"3000\",\"DEBUG\":\"false\",\"F2E_POSITIONALS\":\"[\\\"$CLI\\\",\\\"app\\\",\\\"value\\\"]\"}"
 if [ "$actual" != "$expected" ]; then
   printf 'Expected env allow-unknown parse: %s\nActual:                           %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+
+# require_equals applies inside mixed short bundles exactly as it does to a
+# lone short flag: inline values pass, a separated value stays positional
+actual="$(cd "$ROOT_DIR/tests/equals-only" && "$CLI" app -dp=8080)"
+expected="{\"PORT\":\"8080\",\"DEBUG\":\"true\",\"F2E_POSITIONALS\":\"[\\\"$CLI\\\",\\\"app\\\"]\"}"
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected equals-only bundle parse: %s\nActual:                           %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+actual="$(cd "$ROOT_DIR/tests/equals-only" && "$CLI" app -dp 8080)"
+expected="{\"PORT\":\"3000\",\"DEBUG\":\"true\",\"F2E_POSITIONALS\":\"[\\\"$CLI\\\",\\\"app\\\",\\\"8080\\\"]\"}"
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected equals-only bundle to leave separated value positional: %s\nActual: %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+
+# require_equals also suppresses the trailing bool's separated value, so a
+# bundle and its separated spelling stay equivalent under that setting too
+actual="$(cd "$ROOT_DIR/tests/equals-only" && "$CLI" app -d false)"
+expected="{\"PORT\":\"3000\",\"DEBUG\":\"true\",\"F2E_POSITIONALS\":\"[\\\"$CLI\\\",\\\"app\\\",\\\"false\\\"]\"}"
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected equals-only lone bool to leave separated value positional: %s\nActual: %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+
+# An undeclared character in a bundle-shaped token must be reported no matter
+# where it sits. Reporting used to depend on position: "-zd" failed the
+# token[1] lookup and was recorded, while "-dz" reached the parser's fallback
+# and vanished with no entry in any channel - the exact shape of a typo like
+# "rm -rF".
+for bundle_unknown in -zd -dz -dvz -zdv; do
+  actual="$(cd "$ROOT_DIR/tests/equals-only" && "$CLI" app "$bundle_unknown")"
+  expected="{\"PORT\":\"3000\",\"DEBUG\":\"false\",\"F2E_POSITIONALS\":\"[\\\"$CLI\\\",\\\"app\\\"]\",\"F2E_UNKNOWN_OPTIONS\":\"[\\\"$bundle_unknown\\\"]\"}"
+  if [ "$actual" != "$expected" ]; then
+    printf 'Expected %s to be reported as an unknown option: %s\nActual: %s\n' "$bundle_unknown" "$expected" "$actual" >&2
+    exit 1
+  fi
+done
+
+# The error channel names the character that is actually at fault. The old
+# fallback reported `flags.debug value "vz" is not a valid bool` - a flag that
+# is fine and a value nobody typed - which sent people looking in the wrong
+# place for a mistyped bundle.
+FAULT_DIR="$ROOT_DIR/tests/short-bundle-faults"
+run_config_case "$FAULT_DIR" '{"POSITIONALS":"[\"'"$CLI"'\",\"app\"]","UNKNOWN":"[\"-dvz\"]","ERRORS":"[\"\\\"-dvz\\\" is not a short flag bundle: -z is not a declared short flag\"]"}' app -dvz
+run_config_case "$FAULT_DIR" '{"POSITIONALS":"[\"'"$CLI"'\",\"app\"]","UNKNOWN":"[\"-dzv\"]","ERRORS":"[\"\\\"-dzv\\\" is not a short flag bundle: -z is not a declared short flag\"]"}' app -dzv
+# The same explanation regardless of where the bad character sits - that
+# symmetry is the whole point.
+run_config_case "$FAULT_DIR" '{"POSITIONALS":"[\"'"$CLI"'\",\"app\"]","UNKNOWN":"[\"-zdv\"]","ERRORS":"[\"\\\"-zdv\\\" is not a short flag bundle: -z is not a declared short flag\"]"}' app -zdv
+# A lone unrecognized short is just an unknown option; there is nothing about
+# a bundle to explain.
+run_config_case "$FAULT_DIR" '{"POSITIONALS":"[\"'"$CLI"'\",\"app\"]","UNKNOWN":"[\"-q\"]"}' app -q
+# allow_unknown silences both channels, as it does for any unknown option.
+run_config_case "$FAULT_DIR" '{"POSITIONALS":"[\"'"$CLI"'\",\"app\"]"}' app --allow-unknown -dvz
+# An invalid *value* is still reported against the flag that owns it.
+run_config_case "$FAULT_DIR" '{"DEBUG":"true","VERBOSE":"true","POSITIONALS":"[\"'"$CLI"'\",\"app\"]","ERRORS":"[\"flags.port value \\\"abc\\\" is not a valid integer\"]"}' app -dvpabc
+
+# ...but a character that is a *value* for the bundle's value-taking flag is
+# not an unknown option: "z" is -p's (invalid) value, reported through the
+# error channel instead, and the leading bools still apply
+actual="$(cd "$ROOT_DIR/tests/equals-only" && "$CLI" app -dpz)"
+expected="{\"PORT\":\"3000\",\"DEBUG\":\"true\",\"F2E_POSITIONALS\":\"[\\\"$CLI\\\",\\\"app\\\"]\"}"
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected mixed-bundle invalid value not to report an unknown option: %s\nActual: %s\n' "$expected" "$actual" >&2
   exit 1
 fi
 
@@ -192,6 +357,32 @@ actual="$(cd "$NATIVE_SCALARS_DIR" && "$CLI" app --debug 1 --payload true --port
 expected='{"PORT":"+12","DEBUG":"true","PAYLOAD":"true"}'
 if [ "$actual" != "$expected" ]; then
   printf 'Expected native scalar overrides: %s\nActual:                           %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+
+# a mixed bundle's invalid trailing value reports against the value-taking
+# flag through errors_env while the leading booleans still apply
+actual="$(cd "$NATIVE_SCALARS_DIR" && "$CLI" app -dpx)"
+expected='{"PORT":"3000","DEBUG":"true","PAYLOAD":"7","F2E_PARSE_ERRORS":"[\"flags.port value \\\"x\\\" is not a valid integer\"]"}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected mixed bundle error report: %s\nActual:                             %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+
+# typed bundle values ride the same validation as their long spellings: a
+# json-typed value flag consumes a separated bundle value, and a typed
+# negative number is accepted in separated form
+actual="$(cd "$NATIVE_SCALARS_DIR" && "$CLI" app -dj '{"a":1}')"
+expected='{"PORT":"3000","DEBUG":"true","PAYLOAD":"{\"a\":1}"}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected mixed bundle json value: %s\nActual:                           %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+
+actual="$(cd "$NATIVE_SCALARS_DIR" && "$CLI" app -dp -1)"
+expected='{"PORT":"-1","DEBUG":"true","PAYLOAD":"7"}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected mixed bundle negative int: %s\nActual:                             %s\n' "$expected" "$actual" >&2
   exit 1
 fi
 
@@ -320,6 +511,25 @@ case "$generated_schema" in
     ;;
 esac
 
+OUTPUT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/f2e-gen-out.XXXXXX")"
+OUTPUT_DART="$OUTPUT_DIR/generated/dart/env.dart"
+OUTPUT_SCHEMA="$OUTPUT_DIR/generated/json-schema/env.schema.json"
+"$CLI" generate dart "$CODEGEN_CONFIG" --name CliStuff --output "$OUTPUT_DART"
+"$CLI" generate json-schema "$CODEGEN_CONFIG" --name CliStuff --output "$OUTPUT_SCHEMA"
+if [ -w "$OUTPUT_DART" ] || [ -w "$OUTPUT_SCHEMA" ]; then
+  printf 'generate --output must chmod a-w the written files\n' >&2
+  rm -rf "$OUTPUT_DIR"
+  exit 1
+fi
+if ! grep -q 'final class CliStuff' "$OUTPUT_DART"; then
+  printf 'generate --output dart file missing class:\n%s\n' "$(cat "$OUTPUT_DART")" >&2
+  rm -rf "$OUTPUT_DIR"
+  exit 1
+fi
+python3 "$ROOT_DIR/scripts/check-generated-contract.py" --self-test
+python3 "$ROOT_DIR/scripts/check-generated-contract.py" --root "$ROOT_DIR" --freeze --require-readonly
+rm -rf "$OUTPUT_DIR"
+
 set +e
 "$CLI" generate unsupported "$CODEGEN_CONFIG" >/dev/null 2>/dev/null
 status=$?
@@ -420,6 +630,158 @@ if [ "$status" -eq 0 ] || [ "$actual" != "$expected" ]; then
   exit 1
 fi
 
+# a single-char boolean value alias that doubles as a sibling short flag makes
+# "-dt" ambiguous between "value for -d" and "bundle"; the audit must say so
+BUNDLE_ALIAS_DIR="$TMP_TEST_DIR/audit-bundle-alias"
+mkdir -p "$BUNDLE_ALIAS_DIR"
+cat > "$BUNDLE_ALIAS_DIR/.cli-flags.toml" <<'EOF'
+[flags.debug]
+env = "DEBUG"
+aliases = ["debug"]
+short = "d"
+type = "bool"
+true_aliases = ["t"]
+
+[flags.trace]
+env = "TRACE"
+aliases = ["trace"]
+short = "t"
+type = "bool"
+EOF
+actual="$("$CLI" audit "$BUNDLE_ALIAS_DIR/.cli-flags.toml")"
+expected='{"ok":true,"errorCount":0,"warningCount":1,"errors":[],"warnings":["flags.debug boolean value alias \"t\" doubles as short flag -t (flags.trace); \"-dt\" parses as a bundle, not a value for flags.debug"]}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected bundle-alias shadowing warning:\n%s\nActual: %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+# and the parser indeed reads the all-boolean token as a bundle
+actual="$(cd "$BUNDLE_ALIAS_DIR" && "$CLI" app -dt)"
+expected='{"DEBUG":"true","TRACE":"true"}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected -dt to parse as a bundle: %s\nActual: %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+
+# same collision against a value-taking short: the value-alias reading wins
+BUNDLE_ALIAS_VALUE_DIR="$TMP_TEST_DIR/audit-bundle-alias-value"
+mkdir -p "$BUNDLE_ALIAS_VALUE_DIR"
+cat > "$BUNDLE_ALIAS_VALUE_DIR/.cli-flags.toml" <<'EOF'
+[flags.debug]
+env = "DEBUG"
+aliases = ["debug"]
+short = "d"
+type = "bool"
+true_aliases = ["t"]
+
+[flags.tag]
+env = "TAG"
+aliases = ["tag"]
+short = "t"
+type = "string"
+EOF
+actual="$("$CLI" audit "$BUNDLE_ALIAS_VALUE_DIR/.cli-flags.toml")"
+expected='{"ok":true,"errorCount":0,"warningCount":1,"errors":[],"warnings":["flags.debug boolean value alias \"t\" doubles as short flag -t (flags.tag); \"-dt\" parses as a value for flags.debug, not a bundle"]}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected bundle-alias value shadowing warning:\n%s\nActual: %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+actual="$(cd "$BUNDLE_ALIAS_VALUE_DIR" && "$CLI" app -dt)"
+expected='{"DEBUG":"true"}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected -dt to stay a boolean value: %s\nActual: %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+
+# Reachability is scope-sensitive: a global boolean alias can collide with a
+# short flag introduced by an active child command, and audit must not miss it.
+SCOPED_BUNDLE_ALIAS_CONFIG="$ROOT_DIR/tests/audit-bundle-command/.cli-flags.toml"
+actual="$("$CLI" audit "$SCOPED_BUNDLE_ALIAS_CONFIG")"
+expected='{"ok":true,"errorCount":0,"warningCount":1,"errors":[],"warnings":["flags.debug boolean value alias \"t\" doubles as short flag -t (flags.trace) when command \"commit\" is active or when no command is selected; \"-dt\" parses as a bundle, not a value for flags.debug"]}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected command-scope bundle-alias warning:\n%s\nActual: %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+run_config_case "$ROOT_DIR/tests/audit-bundle-command" '{"FLAGS2ENV_COMMAND":"commit","DEBUG":"true","TRACE":"true"}' gitish commit -dt
+run_config_case "$ROOT_DIR/tests/audit-bundle-command" '{"FLAGS2ENV_COMMAND":"","DEBUG":"true","TRACE":"true"}' gitish -dt
+
+# A short flag is one character; everything past the first byte used to be
+# dropped in silence, shipping a CLI whose "-ab" was a bundle rather than the
+# two-letter flag the author wrote.
+MULTI_SHORT_DIR="$TMP_TEST_DIR/audit-multi-char-short"
+mkdir -p "$MULTI_SHORT_DIR"
+cat > "$MULTI_SHORT_DIR/.cli-flags.toml" <<'EOF'
+[flags.alpha]
+env = "ALPHA"
+aliases = ["alpha"]
+short = "ab"
+type = "bool"
+
+[flags.beta]
+env = "BETA"
+aliases = ["beta"]
+short = "b"
+type = "bool"
+EOF
+set +e
+actual="$("$CLI" audit "$MULTI_SHORT_DIR/.cli-flags.toml")"
+set -e
+expected='{"ok":false,"errorCount":1,"warningCount":0,"errors":["flags.alpha short \"ab\" is more than one character; only \"a\" is used, and \"-ab\" parses as a short flag bundle"],"warnings":[]}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected multi-character short error:\n%s\nActual: %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+# and the parse the author did not ask for is exactly the bundle
+actual="$(cd "$MULTI_SHORT_DIR" && "$CLI" app -ab)"
+expected='{"ALPHA":"true","BETA":"true"}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected -ab to parse as a bundle: %s\nActual: %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+
+# A multi-character boolean value alias can spell a whole bundle, and then two
+# spellings that differ only in whether a value is inline resolve to different
+# flags. The audit has to say so.
+MULTI_ALIAS_DIR="$TMP_TEST_DIR/audit-multi-char-alias"
+mkdir -p "$MULTI_ALIAS_DIR"
+cat > "$MULTI_ALIAS_DIR/.cli-flags.toml" <<'EOF'
+[flags.debug]
+env = "DEBUG"
+aliases = ["debug"]
+short = "d"
+type = "bool"
+true_aliases = ["vp"]
+
+[flags.verbose]
+env = "VERBOSE"
+aliases = ["verbose"]
+short = "v"
+type = "bool"
+
+[flags.port]
+env = "PORT"
+aliases = ["port"]
+short = "p"
+type = "integer"
+EOF
+actual="$("$CLI" audit "$MULTI_ALIAS_DIR/.cli-flags.toml")"
+expected='{"ok":true,"errorCount":0,"warningCount":1,"errors":[],"warnings":["flags.debug boolean value alias \"vp\" also spells a short flag bundle; \"-dvp\" is a value for flags.debug, but \"-dvp\" followed by anything parses as a bundle"]}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected multi-character alias bundle warning:\n%s\nActual: %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+actual="$(cd "$MULTI_ALIAS_DIR" && "$CLI" app -dvp)"
+expected='{"DEBUG":"true"}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected -dvp to stay a boolean value: %s\nActual: %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+actual="$(cd "$MULTI_ALIAS_DIR" && "$CLI" app -dvp8080)"
+expected='{"DEBUG":"true","VERBOSE":"true","PORT":"8080"}'
+if [ "$actual" != "$expected" ]; then
+  printf 'Expected -dvp8080 to parse as a bundle: %s\nActual: %s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+
 set +e
 "$CLI" completion bash mycli "$UNSAFE_CONFIG" >/dev/null 2>/dev/null
 status=$?
@@ -509,6 +871,14 @@ run_subcommand_case "{\"GITISH_COMMAND\":\"\",\"GITISH_VERBOSE\":\"false\",\"GIT
 run_subcommand_case "{\"GITISH_COMMAND\":\"add\",\"GITISH_CMD_ADD\":\"true\",\"GITISH_VERBOSE\":\"false\",\"GITISH_ADD_ALL\":\"true\",$BASE_POSITIONALS}" gitish add -A
 run_subcommand_case "{\"GITISH_COMMAND\":\"add\",\"GITISH_CMD_ADD\":\"true\",\"GITISH_VERBOSE\":\"true\",$BASE_POSITIONALS}" gitish add --verbose
 run_subcommand_case "{\"GITISH_COMMAND\":\"commit\",\"GITISH_VERBOSE\":\"false\",\"GITISH_COMMIT_ALL\":\"true\",\"GITISH_COMMIT_MESSAGE\":\"fix stuff\",$BASE_POSITIONALS}" gitish ci -a -m 'fix stuff'
+# the git-style mixed bundle spelling of the same invocation, resolved in the
+# commit command scope, plus an inherited global bool joining the bundle
+run_subcommand_case "{\"GITISH_COMMAND\":\"commit\",\"GITISH_VERBOSE\":\"false\",\"GITISH_COMMIT_ALL\":\"true\",\"GITISH_COMMIT_MESSAGE\":\"fix stuff\",$BASE_POSITIONALS}" gitish ci -am 'fix stuff'
+run_subcommand_case "{\"GITISH_COMMAND\":\"commit\",\"GITISH_VERBOSE\":\"true\",\"GITISH_COMMIT_ALL\":\"true\",\"GITISH_COMMIT_MESSAGE\":\"wip\",$BASE_POSITIONALS}" gitish ci -vam wip
+# The dry-run command resolver must consume a mixed bundle's separated value
+# exactly like the real pass, or it would mistake "Alex" for a positional and
+# fail to discover the following commit command.
+run_subcommand_case "{\"GITISH_COMMAND\":\"commit\",\"GITISH_VERBOSE\":\"true\",\"GITISH_AUTHOR\":\"Alex\",\"GITISH_COMMIT_ALL\":\"true\",\"GITISH_COMMIT_MESSAGE\":\"scoped\",$BASE_POSITIONALS}" gitish -vA Alex ci -am scoped
 run_subcommand_case "{\"GITISH_COMMAND\":\"remote add\",\"GITISH_CMD_REMOTE_ADD\":\"true\",\"GITISH_VERBOSE\":\"false\",\"GITISH_REMOTE_ADD_FETCH\":\"true\",\"GITISH_REMOTE_ADD_TRACK\":\"dev\",$BASE_POSITIONALS}" gitish remote add -f --track=dev
 run_subcommand_case "{\"GITISH_COMMAND\":\"remote\",\"GITISH_VERBOSE\":\"false\",\"GITISH_REMOTE_VERBOSE\":\"true\",$BASE_POSITIONALS}" gitish remote -v
 run_subcommand_case "{\"GITISH_COMMAND\":\"add\",\"GITISH_CMD_ADD\":\"true\",\"GITISH_VERBOSE\":\"false\",\"GITISH_POSITIONALS\":\"[\\\"$CLI\\\",\\\"gitish\\\",\\\"foo\\\",\\\"commit\\\"]\"}" gitish add foo commit
@@ -1049,7 +1419,10 @@ rm -f "$DOTENV_KIND_DIR/.env"
 # oversized input is bounded rather than truncating the rest of the file away
 DOTENV_BIG_DIR="$TMP_TEST_DIR/dotenv-big"
 mkdir -p "$DOTENV_BIG_DIR"
-cp "$DOTENV_DIR/.cli-flags.toml" "$DOTENV_BIG_DIR/.cli-flags.toml"
+{
+  cat "$DOTENV_DIR/.cli-flags.toml"
+  printf '\n[parse]\nerrors_env = "F2E_DOTENV_ERRORS"\n'
+} > "$DOTENV_BIG_DIR/.cli-flags.toml"
 {
   i=0
   while [ "$i" -lt 600 ]; do
@@ -1088,6 +1461,14 @@ case "$dotenv_big" in
     ;;
   *)
     printf 'The line after an over-long .env line must still be read:\n%s\n' "$dotenv_big" >&2
+    exit 1
+    ;;
+esac
+case "$dotenv_big" in
+  *'"F2E_DOTENV_ERRORS":"[\".env:1: line exceeds the 4095-byte read buffer; value was bounded and its tail skipped\"]"'*)
+    ;;
+  *)
+    printf 'An over-long .env line must be reported through errors_env:\n%s\n' "$dotenv_big" >&2
     exit 1
     ;;
 esac
@@ -1213,6 +1594,255 @@ separated="$("$CLI" shell-env --config "$LONG_VALUE_CONFIG" -- prog --path "$lon
 if [ "$separated" != "$inline" ]; then
   printf 'Inline and separated forms disagree:\nInline:    %s\nSeparated: %s\n' "$inline" "$separated" >&2
   exit 1
+fi
+
+# [env] files: several .env files, read in order, later ones winning.
+FILES_DIR="$ROOT_DIR/tests/dotenv-files"
+files_output="$(cd "$FILES_DIR" && "$CLI" shell-env --config .cli-flags.toml -- prog)"
+case "$files_output" in
+  *"export F2E_FILES_PORT='3000'"*) ;;
+  *) printf 'env.files did not read the first file:\n%s\n' "$files_output" >&2; exit 1 ;;
+esac
+case "$files_output" in
+  *"export F2E_FILES_HOST='override'"*) ;;
+  *) printf 'env.files: the later file should win:\n%s\n' "$files_output" >&2; exit 1 ;;
+esac
+
+# A path that escapes the working directory is an audit error, not a silent
+# fallback to ./.env -- the contract is that only the cwd is read.
+UNSAFE_DIR="$(mktemp -d)"
+printf '[env]\nfiles = ["../.env"]\n\n[flags.a]\nenv = "F2E_UNSAFE_A"\naliases = ["a"]\ntype = "string"\n' \
+  > "$UNSAFE_DIR/.cli-flags.toml"
+set +e
+unsafe_report="$("$CLI" audit "$UNSAFE_DIR/.cli-flags.toml")"
+unsafe_status=$?
+set -e
+rm -rf "$UNSAFE_DIR"
+if [ "$unsafe_status" -eq 0 ]; then
+  printf 'env.files with a ".." segment should fail the audit:\n%s\n' "$unsafe_report" >&2
+  exit 1
+fi
+case "$unsafe_report" in
+  *"env.files must be a list of paths inside the working directory"*) ;;
+  *) printf 'unexpected env.files audit message:\n%s\n' "$unsafe_report" >&2; exit 1 ;;
+esac
+
+# doctor: malformed lines are errors, ambiguous ones are warnings, and a key
+# listed in [env] ignore is neither.
+DOCTOR_DIR="$ROOT_DIR/tests/doctor-findings"
+set +e
+doctor_report="$(cd "$DOCTOR_DIR" && "$CLI" doctor .cli-flags.toml)"
+doctor_status=$?
+set -e
+if [ "$doctor_status" -eq 0 ]; then
+  printf 'doctor should exit non-zero on malformed .env lines:\n%s\n' "$doctor_report" >&2
+  exit 1
+fi
+for expected in \
+  'has an unterminated quote' \
+  'no \"=\"' \
+  'is not a valid environment variable name' \
+  'was already assigned at line 2' \
+  'F2E_DOCTOR_UNDECLARED is not declared'; do
+  case "$doctor_report" in
+    *"$expected"*) ;;
+    *) printf 'doctor did not report %s:\n%s\n' "$expected" "$doctor_report" >&2; exit 1 ;;
+  esac
+done
+# An [env] ignore entry is deliberately not reported as undeclared.
+case "$doctor_report" in
+  *"F2E_DOCTOR_IGNORED is not declared"*)
+    printf 'doctor reported an env.ignore key as undeclared:\n%s\n' "$doctor_report" >&2
+    exit 1 ;;
+  *) ;;
+esac
+# Values never appear in the report: a .env holds secrets.
+case "$doctor_report" in
+  *second*|*nope*)
+    printf 'doctor echoed a .env value:\n%s\n' "$doctor_report" >&2
+    exit 1 ;;
+  *) ;;
+esac
+
+# requires_tty: a flag that needs a terminal is refused without one.
+#
+# The failure being prevented is a CLI that waits forever on input nobody can
+# give -- in CI, in cron, or on the far side of a pipe. The suite itself runs
+# without a terminal, so the "no tty" cases need no setup; the "has tty" cases
+# use the F2E_FORCE_* overrides rather than allocating a pty, which keeps the
+# check identical on every platform.
+TTY_CONFIG="$ROOT_DIR/tests/requires-tty/.cli-flags.toml"
+
+tty_run() {
+  "$CLI" shell-env --config "$TTY_CONFIG" -- prog "$@" || [ "$?" -eq 2 ]
+}
+
+# Refused: every spelling of setting it, including inside a short bundle.
+for spelling in "--interactive" "-i" "-qi"; do
+  refused="$(tty_run $spelling)"
+  case "$refused" in
+    *"flags.interactive requires an interactive terminal"*) ;;
+    *) printf 'requires_tty did not refuse %s without a terminal:\n%s\n' \
+         "$spelling" "$refused" >&2; exit 1 ;;
+  esac
+  case "$refused" in
+    *"F2E_TTY_INTERACTIVE"*)
+      printf 'a refused requires_tty flag must not be exported (%s):\n%s\n' \
+        "$spelling" "$refused" >&2; exit 1 ;;
+    *) ;;
+  esac
+done
+
+# The separated form goes through a different code path than the bare one.
+separated="$(tty_run --interactive true)"
+case "$separated" in
+  *"requires an interactive terminal"*) ;;
+  *) printf 'requires_tty missed the separated form:\n%s\n' "$separated" >&2; exit 1 ;;
+esac
+
+# Turning it OFF must stay legal without a terminal: --no-interactive is
+# exactly how a caller says "do not prompt".
+negated="$(tty_run --no-interactive)"
+case "$negated" in
+  *"export F2E_TTY_INTERACTIVE='false'"*) ;;
+  *) printf '--no-interactive should be allowed without a terminal:\n%s\n' "$negated" >&2; exit 1 ;;
+esac
+
+# A flag without requires_tty is untouched.
+unrelated="$(tty_run --quiet)"
+case "$unrelated" in
+  *"export F2E_TTY_QUIET='true'"*) ;;
+  *) printf 'requires_tty leaked onto an unrelated flag:\n%s\n' "$unrelated" >&2; exit 1 ;;
+esac
+
+# Allowed once stdin and stderr are terminals outside CI.
+allowed="$(F2E_FORCE_STDIN_TTY=1 F2E_FORCE_STDERR_TTY=1 F2E_FORCE_CI=0 TERM=xterm tty_run --interactive)"
+case "$allowed" in
+  *"export F2E_TTY_INTERACTIVE='true'"*) ;;
+  *) printf 'requires_tty refused an interactive terminal:\n%s\n' "$allowed" >&2; exit 1 ;;
+esac
+
+# CI and TERM=dumb defeat a real terminal: nobody is there to answer.
+for hostile in "F2E_FORCE_CI=1" "TERM=dumb"; do
+  blocked="$(env F2E_FORCE_STDIN_TTY=1 F2E_FORCE_STDERR_TTY=1 $hostile \
+    "$CLI" shell-env --config "$TTY_CONFIG" -- prog --interactive)" || [ "$?" -eq 2 ]
+  case "$blocked" in
+    *"requires an interactive terminal"*) ;;
+    *) printf '%s should defeat a terminal for requires_tty:\n%s\n' "$hostile" "$blocked" >&2; exit 1 ;;
+  esac
+done
+
+# requires_tty = "stdout" asks about stdout specifically, not about prompting.
+progress_blocked="$(F2E_FORCE_STDIN_TTY=1 F2E_FORCE_STDERR_TTY=1 tty_run --progress)"
+case "$progress_blocked" in
+  *"flags.progress requires a terminal on stdout"*) ;;
+  *) printf 'requires_tty = stdout should check stdout:\n%s\n' "$progress_blocked" >&2; exit 1 ;;
+esac
+progress_allowed="$(F2E_FORCE_STDOUT_TTY=1 tty_run --progress)"
+case "$progress_allowed" in
+  *"export F2E_TTY_PROGRESS='true'"*) ;;
+  *) printf 'requires_tty = stdout refused a stdout terminal:\n%s\n' "$progress_allowed" >&2; exit 1 ;;
+esac
+
+# A misspelled requires_tty must fail the audit rather than quietly meaning
+# "no requirement" -- that would be a terminal check that silently is not one.
+TTY_BAD_DIR="$(mktemp -d)"
+printf '[flags.x]\nenv = "F2E_TTY_X"\naliases = ["x"]\ntype = "bool"\nrequires_tty = "sometimes"\n' \
+  > "$TTY_BAD_DIR/.cli-flags.toml"
+set +e
+tty_bad="$("$CLI" audit "$TTY_BAD_DIR/.cli-flags.toml")"
+tty_bad_status=$?
+set -e
+rm -rf "$TTY_BAD_DIR"
+if [ "$tty_bad_status" -eq 0 ]; then
+  printf 'an invalid requires_tty should fail the audit:\n%s\n' "$tty_bad" >&2
+  exit 1
+fi
+case "$tty_bad" in
+  *"requires_tty must be true, false, prompt, stdin, stdout, or stderr"*) ;;
+  *) printf 'unexpected requires_tty audit message:\n%s\n' "$tty_bad" >&2; exit 1 ;;
+esac
+
+# parser.c detects terminals on its own because it must stay compilable as a
+# single translation unit. terminal_context.c has its own detection. They have
+# to agree, so assert it under the same forcing rather than trusting them to.
+context_prompt="$(F2E_FORCE_STDIN_TTY=1 F2E_FORCE_STDERR_TTY=1 F2E_FORCE_CI=0 TERM=xterm \
+  "$CLI" context 2>/dev/null || true)"
+if [ -n "$context_prompt" ]; then
+  case "$context_prompt" in
+    *'"canPrompt": true'*|*'"canPrompt":true'*) ;;
+    *)
+      printf 'terminal context and parser disagree about canPrompt:\n%s\n' "$context_prompt" >&2
+      exit 1 ;;
+  esac
+fi
+
+# The forcing variables above are how the checks stay deterministic on every
+# platform, but they are only worth trusting if they match a real terminal.
+# When script(1) is available, run the two decisive cases through an actual pty
+# and require the same answers. Skipped rather than failed where the flavour of
+# script(1) differs, since this is corroboration, not the primary coverage.
+# Probes by round-tripping a marker rather than by checking an exit status:
+# whether script(1) can allocate a pty here depends on what stdin is, and the
+# thing we need to know is "can I run a command under a pty and read what it
+# printed", which is exactly what this asks.
+f2e_pty_flavour=""
+if script -q /dev/null printf f2e-pty-probe 2>/dev/null | grep -q f2e-pty-probe; then
+  f2e_pty_flavour="bsd"          # macOS/BSD takes the command directly
+elif script -q -c "printf f2e-pty-probe" /dev/null 2>/dev/null | grep -q f2e-pty-probe; then
+  f2e_pty_flavour="util-linux"   # util-linux needs -c
+fi
+
+f2e_pty_run() {
+  case "$f2e_pty_flavour" in
+    bsd)        script -q /dev/null "$@" 2>/dev/null | tr -d '\r' ;;
+    util-linux) script -q -c "$*" /dev/null 2>/dev/null | tr -d '\r' ;;
+    *)          return 1 ;;
+  esac
+}
+
+if pty_accepted="$(f2e_pty_run env -u COLUMNS -u CI -u GITHUB_ACTIONS TERM=xterm \
+     "$CLI" shell-env --config "$TTY_CONFIG" -- prog --interactive)"; then
+  case "$pty_accepted" in
+    *"F2E_TTY_INTERACTIVE='true'"*) ;;
+    *) printf 'a real terminal should allow --interactive:\n%s\n' "$pty_accepted" >&2; exit 1 ;;
+  esac
+
+  # CI must defeat a real terminal, not just a forced one.
+  pty_ci="$(f2e_pty_run env -u COLUMNS TERM=xterm CI=1 \
+    "$CLI" shell-env --config "$TTY_CONFIG" -- prog --interactive)"
+  case "$pty_ci" in
+    *"requires an interactive terminal"*) ;;
+    *) printf 'CI should defeat a real terminal:\n%s\n' "$pty_ci" >&2; exit 1 ;;
+  esac
+  printf 'requires_tty: verified against a real pty\n'
+else
+  printf 'requires_tty: no usable script(1); pty corroboration skipped\n'
+fi
+
+# Help width is deterministic without a terminal: the table must not depend on
+# the size of whatever terminal happened to launch the build.
+piped_help="$(env -u COLUMNS "$CLI" --help | head -1)"
+piped_width=${#piped_help}
+if [ "$piped_width" -ne 80 ]; then
+  printf 'piped --help should be 80 columns, got %s\n' "$piped_width" >&2
+  exit 1
+fi
+# COLUMNS is the explicit override and still wins when piped.
+wide_help="$(COLUMNS=140 "$CLI" --help | head -1)"
+if [ "${#wide_help}" -ne 140 ]; then
+  printf 'COLUMNS=140 should widen piped --help, got %s\n' "${#wide_help}" >&2
+  exit 1
+fi
+
+# The shared short-bundle contract: one declarative case list that both this
+# suite and the language clients assert against, so a binding cannot be green
+# without having actually parsed a bundle. See
+# scripts/verify-bundle-contract.py for why it exists.
+if command -v python3 >/dev/null 2>&1; then
+  python3 "$ROOT_DIR/scripts/verify-bundle-contract.py" --cli "$CLI" || exit 1
+else
+  printf 'bundle contract: no python3; skipped\n'
 fi
 
 printf 'flags2env tests passed\n'

@@ -2,6 +2,7 @@ build/
 dist/
 node_modules/
 target/
+/Cargo.lock
 clients/rust/Cargo.lock
 clients/*/.gradle/
 .dart_tool/
@@ -29,6 +30,7 @@ temp/worktrees
 .env.*
 *.env.*
 !.env.example
+!clients/browser/toolchain.env
 # END ORESoftware plaintext dotenv boundary
 
 # DEN-2846 prebuilt harness staging output (certified artifacts land via DEN-2848)

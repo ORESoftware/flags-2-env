@@ -16,6 +16,12 @@
       "refs/tags/*"
     ]
   },
+  "cutoff": {
+    "state": "complete",
+    "completedOn": "2026-08-22",
+    "mirrorDisposition": "read-only-historical-source",
+    "pendingObligations": []
+  },
   "zedPackage": {
     "version": "0.3.0",
     "canonicalIdentity": "flags-2-env/flags-2-env",

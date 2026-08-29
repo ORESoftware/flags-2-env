@@ -1,0 +1,9 @@
+[flags.print]
+env = "PRINT"
+short = "p"
+type = "bool"
+
+[flags.eval]
+env = "EVAL"
+short = "e"
+type = "string"

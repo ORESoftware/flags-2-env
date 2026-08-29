@@ -1,4 +1,10 @@
 import { createFlags2Env } from "./lib.mjs";
+import {
+  WorkerHostEvent,
+  WorkerHostPhase,
+  initialWorkerHostState,
+  reduceWorkerHostLifecycle,
+} from "./lifecycle.mjs";
 
 const MAX_RPC_BYTES = 4 * 1024 * 1024;
 const encoder = new TextEncoder();
@@ -20,7 +26,22 @@ const ERROR_NAMES = new Set([
 ]);
 
 let client = null;
-let initializing = false;
+let lifecycle = initialWorkerHostState();
+
+function transition(event) {
+  const outcome = reduceWorkerHostLifecycle(lifecycle, event);
+  lifecycle = outcome.state;
+  return outcome;
+}
+
+function assertHostInvariant() {
+  const ready = lifecycle.phase === WorkerHostPhase.READY;
+  if (ready !== (client !== null)) {
+    client = null;
+    lifecycle = reduceWorkerHostLifecycle(lifecycle, WorkerHostEvent.FAULT).state;
+    throw new Error("flags2env worker lifecycle failed closed");
+  }
+}
 
 function safeSize(value) {
   if (value === undefined) return;
@@ -68,25 +89,38 @@ self.addEventListener("message", async (event) => {
     }
 
     if (request.method === "__init") {
-      if (client || initializing) {
-        throw new Error("flags2env worker is already initialized");
-      }
       if (request.args.length !== 1 || typeof request.args[0] !== "string") {
         throw new TypeError("worker initialization requires config text");
       }
-      initializing = true;
+      const started = transition(WorkerHostEvent.INITIALIZE_REQUESTED);
+      if (!started.accepted) {
+        throw new Error("flags2env worker is already initialized or failed");
+      }
       try {
         client = await createFlags2Env({ configText: request.args[0] });
-      } finally {
-        initializing = false;
+        const initialized = transition(WorkerHostEvent.INITIALIZED);
+        if (!initialized.accepted) {
+          throw new Error("flags2env worker initialization lifecycle failed closed");
+        }
+        assertHostInvariant();
+      } catch (error) {
+        client = null;
+        if (lifecycle.phase === WorkerHostPhase.INITIALIZING) {
+          transition(WorkerHostEvent.INITIALIZATION_FAILED);
+        } else if (lifecycle.phase !== WorkerHostPhase.FAILED) {
+          transition(WorkerHostEvent.FAULT);
+        }
+        throw error;
       }
       response(id, true);
       return;
     }
 
-    if (!client) {
+    const requested = transition(WorkerHostEvent.CALL_REQUESTED);
+    if (!requested.accepted) {
       throw new Error("flags2env worker is not initialized");
     }
+    assertHostInvariant();
     if (!METHODS.has(request.method)) {
       throw new TypeError(`unsupported flags2env worker method: ${request.method}`);
     }
