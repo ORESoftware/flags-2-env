@@ -74,6 +74,7 @@ def main() -> None:
                   ]);
                   const closingPromise = graceful.close({timeoutMs: 5000});
                   const closingState = graceful.closing;
+                  const closingPhase = graceful.state;
                   let rejectedWhileClosing;
                   try {
                     await graceful.parse(["tool"]);
@@ -140,15 +141,22 @@ def main() -> None:
                     busy,
                     acceptedPorts: accepted.map((value) => value.PORT),
                     boundedClosed: bounded.closed,
+                    boundedPhase: bounded.state,
                     closingState,
+                    closingPhase,
                     acceptedClosePort: acceptedCloseValue.PORT,
                     rejectedWhileClosing,
                     gracefulClosed: graceful.closed,
+                    gracefulPhase: graceful.state,
                     closeTimeout,
                     stalledRequestError,
                     stalledClosed: stalled.closed,
+                    stalledPhase: stalled.state,
+                    stalledFailed: stalled.failed,
                     abortResult,
                     abortedClosed: aborted.closed,
+                    abortedPhase: aborted.state,
+                    abortedFailed: aborted.failed,
                     alreadyAborted,
                   };
                 }""",
@@ -161,16 +169,23 @@ def main() -> None:
             assert "2 pending requests" in result["busy"]["message"]
             assert result["acceptedPorts"] == ["8101", "8102"]
             assert result["boundedClosed"] is True
+            assert result["boundedPhase"] == "closed"
             assert result["closingState"] is True
+            assert result["closingPhase"] == "draining"
             assert result["acceptedClosePort"] == "8201"
             assert "closing" in result["rejectedWhileClosing"]
             assert result["gracefulClosed"] is True
+            assert result["gracefulPhase"] == "closed"
             assert result["closeTimeout"]["name"] == "TimeoutError"
             assert "close timed out" in result["closeTimeout"]["message"]
             assert result["stalledRequestError"]["name"] == "TimeoutError"
             assert result["stalledClosed"] is True
+            assert result["stalledPhase"] == "failed"
+            assert result["stalledFailed"] is True
             assert result["abortResult"]["name"] == "AbortError"
             assert result["abortedClosed"] is True
+            assert result["abortedPhase"] == "closed"
+            assert result["abortedFailed"] is False
             assert result["alreadyAborted"]["name"] == "AbortError"
             assert not external_requests, external_requests
             assert not errors, errors

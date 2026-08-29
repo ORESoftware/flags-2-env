@@ -55,7 +55,8 @@ if find "$ROOT" -maxdepth "$ORES_LINT_DEPTH" \
 fi
 
 # House rule shared across Rust / Dart / Gleam (TypeScript is ores/require-send).
-if command -v node >/dev/null 2>&1 && [ -f "$DIR/require-send.mjs" ]; then
+if [ "${ORES_LINT_SKIP_REQUIRE_SEND}" != "1" ] && \
+   command -v node >/dev/null 2>&1 && [ -f "$DIR/require-send.mjs" ]; then
   if find "$ROOT" -maxdepth "$ORES_LINT_DEPTH" \
        \( -name node_modules -o -name target -o -name .git -o -name vendor -o -name .vendor -o -name build \) -prune -o \
        -type f \( -name '*.rs' -o -name '*.dart' -o -name '*.gleam' \) -print 2>/dev/null | head -1 | grep -q .; then

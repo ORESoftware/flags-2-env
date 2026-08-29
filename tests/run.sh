@@ -1419,7 +1419,10 @@ rm -f "$DOTENV_KIND_DIR/.env"
 # oversized input is bounded rather than truncating the rest of the file away
 DOTENV_BIG_DIR="$TMP_TEST_DIR/dotenv-big"
 mkdir -p "$DOTENV_BIG_DIR"
-cp "$DOTENV_DIR/.cli-flags.toml" "$DOTENV_BIG_DIR/.cli-flags.toml"
+{
+  cat "$DOTENV_DIR/.cli-flags.toml"
+  printf '\n[parse]\nerrors_env = "F2E_DOTENV_ERRORS"\n'
+} > "$DOTENV_BIG_DIR/.cli-flags.toml"
 {
   i=0
   while [ "$i" -lt 600 ]; do
@@ -1458,6 +1461,14 @@ case "$dotenv_big" in
     ;;
   *)
     printf 'The line after an over-long .env line must still be read:\n%s\n' "$dotenv_big" >&2
+    exit 1
+    ;;
+esac
+case "$dotenv_big" in
+  *'"F2E_DOTENV_ERRORS":"[\".env:1: line exceeds the 4095-byte read buffer; value was bounded and its tail skipped\"]"'*)
+    ;;
+  *)
+    printf 'An over-long .env line must be reported through errors_env:\n%s\n' "$dotenv_big" >&2
     exit 1
     ;;
 esac

@@ -3,9 +3,9 @@
 The failure mode guarded here is the one that actually happened: the
 compatibility window is a dated promise, the checker never looked at a
 calendar, and so it kept printing a tick after the promise expired. Every
-test below therefore pins an explicit evaluation date, and two of them assert
-that the *same* manifest is accepted before the window closes and rejected
-after it -- a checker that ignored the date would pass both and go unnoticed.
+test below therefore pins an explicit evaluation date. The generic pending
+record tests prove the calendar boundary, while the shipped-record test proves
+that the completed external obligations remain recorded.
 """
 
 from __future__ import annotations
@@ -162,14 +162,24 @@ class ShippedManifestTest(unittest.TestCase):
             env=environment,
         )
 
-    def test_shipped_manifest_is_valid_inside_the_window(self) -> None:
-        result = self.run_script(WITHIN_WINDOW)
-        self.assertEqual(result.returncode, 0, result.stderr)
-
-    def test_shipped_manifest_reports_the_outstanding_cutoff(self) -> None:
+    def test_shipped_manifest_records_the_completed_cutoff(self) -> None:
         result = self.run_script(AFTER_WINDOW)
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("cutoff is still pending", result.stderr)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("metadata valid", result.stdout)
+        manifest = json.loads(
+            (REPO_ROOT / "docs" / "source-migration.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(
+            manifest["cutoff"],
+            {
+                "state": "complete",
+                "completedOn": AFTER_WINDOW,
+                "mirrorDisposition": "read-only-historical-source",
+                "pendingObligations": [],
+            },
+        )
 
 
 class CutoffDateIsSingleSourcedTest(unittest.TestCase):

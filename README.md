@@ -4,6 +4,13 @@
 
 The native core is C. Runtime clients bind to the same small ABI and convert the returned JSON object into each language's native map type.
 
+The stateful browser/Web Worker application runtime uses one explicit,
+fail-closed lifecycle reducer. Its actual transition code is exhaustively model
+checked, its parameterized worker invariants are proved with Z3, and its timer,
+promise, and termination effects are exercised in Chromium, Firefox, and
+WebKit. See [`formal/README.md`](formal/README.md) for the exact guarantee,
+desktop-application inventory gate, commands, and environmental boundaries.
+
 ## Source repository transition
 
 The canonical source repository is
@@ -671,6 +678,20 @@ build/flags2env install-completion zsh mycli .cli-flags.toml
 Bash installs to `${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions/<command>` and adds an idempotent source block to `~/.bashrc`. Zsh installs to `${ZDOTDIR:-$HOME}/.zfunc/_<command>` and adds an idempotent `fpath`/`compinit` block to `~/.zshrc`. Tests and package scripts can override these paths with `F2E_COMPLETION_DIR`, `F2E_BASH_COMPLETION_DIR`, `F2E_ZSH_COMPLETION_DIR`, `F2E_BASHRC`, and `F2E_ZSHRC`.
 
 ## Runtime Clients
+
+The repository root is a Cargo workspace, so Rust applications can pin the
+client directly to an immutable repository revision while releases continue to
+publish the package from `clients/rust`:
+
+```toml
+[dependencies]
+flags2env = { git = "https://github.com/flags-2-env/flags-2-env.git", rev = "<full-commit-sha>" }
+```
+
+CI installs that git dependency into an isolated consumer, executes the bundled
+parser, and separately runs the package-only checks from `clients/rust`. A
+source checkout is therefore not counted as integration until a downstream
+binary resolves and executes the actual package.
 
 Client sources live under `clients/<runtime>/`. For package publishing, render or copy only the target runtime client plus the C source or a platform-specific native artifact.
 
