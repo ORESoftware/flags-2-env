@@ -4,7 +4,9 @@
   "description": "Solidity helpers for consuming off-chain flags2env outputs.",
   "license": "MIT",
   "scripts": {
-    "test": "solcjs --bin contracts/Flags2Env.sol --output-dir /tmp/flags2env-solidity"
+    "test": "solcjs --bin contracts/Flags2Env.sol --output-dir /tmp/flags2env-solidity",
+    "lint:ores": "if [ -f ../../../../.ores-lint/lint.sh ]; then sh ../../../../.ores-lint/lint.sh; else echo 'ores-lint not installed'; fi",
+    "prepublishOnly": "npm run lint:ores"
   },
   "files": [
     "contracts",
@@ -20,5 +22,13 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/flags-2-env/flags-2-env.git"
+  },
+  "oresLint": {
+    "note": "Declared, not installed. ores-lint resolves these from a global install - see .ores-lint/README.md",
+    "requires": {
+      "eslint": ">=9",
+      "typescript-eslint": ">=8 (optional; without it .ts files are skipped)"
+    },
+    "install": "npm i -g eslint typescript-eslint"
   }
 }
