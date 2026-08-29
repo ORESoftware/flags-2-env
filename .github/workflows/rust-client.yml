@@ -3,12 +3,18 @@ name: Rust client
 on:
   pull_request:
     paths:
+      - 'Cargo.toml'
       - 'clients/rust/**'
+      - 'scripts/test-rust-git-consumer.sh'
+      - 'tests/fixtures/rust-git-consumer/**'
       - '.github/workflows/rust-client.yml'
   push:
     branches: [main]
     paths:
+      - 'Cargo.toml'
       - 'clients/rust/**'
+      - 'scripts/test-rust-git-consumer.sh'
+      - 'tests/fixtures/rust-git-consumer/**'
       - '.github/workflows/rust-client.yml'
 
 permissions:
@@ -39,3 +45,6 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
       - name: Verify publishable package
         run: cargo package --allow-dirty
+      - name: Exercise as an isolated git dependency
+        working-directory: .
+        run: bash scripts/test-rust-git-consumer.sh

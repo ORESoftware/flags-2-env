@@ -61,6 +61,9 @@ def run_suite(browser: Browser, base_url: str) -> None:
     try:
         page.goto(f"{base_url}/clients/browser/demo/", wait_until="networkidle")
         page.locator("#status[data-ready='true']").wait_for()
+        assert page.locator("#status").get_attribute("data-phase") == "ready"
+        assert page.evaluate("window.__flags2env.state") == "ready"
+        assert page.evaluate("window.__flags2env.failed") is False
 
         page.get_by_role("button", name="Parse", exact=True).click()
         parsed = output_json(page)
@@ -163,6 +166,7 @@ def run_suite(browser: Browser, base_url: str) -> None:
             }"""
         )
         assert "between 1 and 1000" in columns_error
+        assert page.evaluate("window.__flags2env.state") == "ready"
 
         page.set_viewport_size({"width": 390, "height": 844})
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")

@@ -1,3 +1,7 @@
+#if defined(__linux__) && !defined(_XOPEN_SOURCE)
+#define _XOPEN_SOURCE 700
+#endif
+
 #if defined(__linux__) && !defined(_POSIX_C_SOURCE)
 #define _POSIX_C_SOURCE 200809L
 #endif
@@ -25,8 +29,18 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #elif defined(_WIN32)
+#include <io.h>
 #include <windows.h>
 #include <shellapi.h>
+#endif
+
+/*
+ * Some single-translation-unit harnesses include parser.c after their own
+ * system headers. Feature-test macros are necessarily too late in that form,
+ * so keep the XSI realpath declaration available at the actual call site too.
+ */
+#if (defined(__APPLE__) || defined(__unix__)) && !defined(__EMSCRIPTEN__)
+extern char *realpath(const char *restrict path, char *restrict resolved_path);
 #endif
 
 #ifndef PATH_MAX
@@ -49,6 +63,15 @@
 #define F2E_SCOPE_LENIENT (-2)
 #define F2E_MAX_PAIRS (F2E_MAX_FLAGS + F2E_MAX_META_PAIRS + F2E_MAX_COMMANDS)
 #define F2E_MAX_ENV_FILE_KEYS 512
+/* [flags.*] requires_tty */
+#define F2E_TTY_NONE 0
+#define F2E_TTY_PROMPT 1
+#define F2E_TTY_STDIN 2
+#define F2E_TTY_STDOUT 3
+#define F2E_TTY_STDERR 4
+
+#define F2E_MAX_DOTENV_FILES 16
+#define F2E_MAX_ENV_FILE_PATH 256
 #define F2E_DEFAULT_COMMAND_ENV "FLAGS2ENV_COMMAND"
 
 #define F2E_HELP_COL_OPTIONS (1u << 0)
@@ -103,6 +126,9 @@ typedef struct {
   char false_aliases[F2E_MAX_ALIASES][F2E_MAX_NAME];
   size_t false_alias_count;
   char short_name;
+  /* the `short` value exactly as declared; only its first byte becomes
+     short_name, so keeping the rest is what lets audit catch `short = "ab"` */
+  char short_declared[F2E_MAX_NAME];
   F2EValueType type;
   int invalid_type;
   char type_value[F2E_MAX_VALUE];
@@ -111,6 +137,13 @@ typedef struct {
   char help[F2E_MAX_VALUE];
   int dotenv_override;     /* this key's .env value outranks the live environment */
   int dotenv_override_set; /* the flag declared it, so [env] override does not apply */
+  /* requires_tty: the flag only means something with a terminal attached.
+     F2E_TTY_NONE when undeclared; otherwise the stream that must be a tty, or
+     F2E_TTY_PROMPT for "can actually prompt" (stdin + stderr, not CI, not
+     dumb). Enforced when the flag is set, so `--interactive` in CI is a parse
+     error rather than a process that blocks on input nobody can supply. */
+  int requires_tty;
+  int invalid_requires_tty;
   int command; /* index into F2EConfig.commands; F2E_SCOPE_ROOT for global flags */
 } F2EFlag;
 
@@ -143,8 +176,15 @@ typedef struct {
   char env_audit_ignored_keys[F2E_MAX_ENV_FILE_KEYS][F2E_MAX_ENV];
   size_t env_audit_ignored_count;
   int invalid_env_audit_ignore;
-  int dotenv_enabled;  /* read ./.env at parse time; default on */
+  int dotenv_enabled;  /* read the .env files at parse time; default on */
   int dotenv_override; /* default for flags that do not declare dotenv_override */
+  /* [env] files. Empty means the default single "./.env". Read in order, so a
+     later file's value replaces an earlier one's — `[".env", ".env.local"]`
+     reads the way the names suggest. */
+  char dotenv_files[F2E_MAX_DOTENV_FILES][F2E_MAX_ENV_FILE_PATH];
+  size_t dotenv_file_count;
+  int dotenv_files_set;   /* the table declared the key, even if the list was empty */
+  int invalid_dotenv_files; /* a malformed list, or a path that escapes the cwd */
   F2EEnvOrder env_orders[F2E_MAX_FLAGS]; /* [order-of-preference] entries */
   size_t env_order_count;
   F2ESourceOrder default_order; /* [env] order, applied to unlisted keys */
@@ -160,6 +200,8 @@ typedef struct {
   int invalid_help_columns;
   int invalid_help_exclude_columns;
 } F2EConfig;
+
+static int f2e_dotenv_path_containment(const char *relative_path);
 
 typedef struct {
   char key[F2E_MAX_ENV];
@@ -227,6 +269,19 @@ static size_t f2e_strlcpy(char *dst, const char *src, size_t dst_size) {
     dst[copy_len] = '\0';
   }
   return src_len;
+}
+
+/* Truncating append, the strlcpy counterpart. Used for building audit
+   messages, where losing the tail of a long list beats writing past the end. */
+static size_t f2e_strlcat(char *dst, const char *src, size_t dst_size) {
+  size_t dst_len = 0;
+  while (dst_len < dst_size && dst[dst_len] != '\0') {
+    dst_len++;
+  }
+  if (dst_len >= dst_size) {
+    return dst_len + (src ? strlen(src) : 0);
+  }
+  return dst_len + f2e_strlcpy(dst + dst_len, src, dst_size - dst_len);
 }
 
 static char *f2e_strdup(const char *value) {
@@ -910,6 +965,12 @@ static F2EOrderProblem f2e_parse_source_order(const char *value, F2ESourceOrder 
   for (size_t i = 0; i < F2E_SOURCE_COUNT; i++) {
     F2ESource source = (F2ESource)F2E_DEFAULT_SOURCE_ORDER[i];
     if (!f2e_source_order_contains(out, source)) {
+      /* A valid partial order can omit at most F2E_SOURCE_COUNT entries, but
+         keep the write guarded so both the compiler and future enum changes
+         can see that this fixed-size array is never indexed at its bound. */
+      if (out->count >= F2E_SOURCE_COUNT) {
+        return F2E_ORDER_DUPLICATE_SOURCE;
+      }
       out->sources[out->count++] = (unsigned char)source;
     }
   }
@@ -959,6 +1020,106 @@ static int f2e_add_env_key_to_list(char keys[][F2E_MAX_ENV], size_t *key_count, 
   f2e_strlcpy(keys[*key_count], key, F2E_MAX_ENV);
   (*key_count)++;
   return 1;
+}
+
+/*
+ * Is `path` safe to read as a .env file?
+ *
+ * The contract has always been that only the working directory is consulted:
+ * no upward walk, and no lookup beside an explicitly passed config path. A list
+ * of files must not become a way around that, so a path may name a
+ * subdirectory but never climb out of the tree or start from the filesystem
+ * root. Otherwise `[env] files = ["../../.env"]` in a checked-in config would
+ * read a file the project does not own.
+ */
+static int f2e_dotenv_path_is_safe(const char *path) {
+  if (!path || path[0] == '\0') {
+    return 0;
+  }
+  if (path[0] == '/' || path[0] == '\\') {
+    return 0; /* absolute */
+  }
+  if (isalpha((unsigned char)path[0]) && path[1] == ':') {
+    return 0; /* windows drive-qualified */
+  }
+
+  /* Reject any ".." segment rather than trying to resolve the path: a
+     canonicalizing check would have to follow symlinks, and refusing the
+     spelling outright is both simpler and easier to explain. */
+  const char *cursor = path;
+  while (*cursor) {
+    const char *segment_end = cursor;
+    while (*segment_end && *segment_end != '/' && *segment_end != '\\') {
+      segment_end++;
+    }
+    size_t length = (size_t)(segment_end - cursor);
+    if (length == 2 && cursor[0] == '.' && cursor[1] == '.') {
+      return 0;
+    }
+    cursor = *segment_end ? segment_end + 1 : segment_end;
+  }
+  return 1;
+}
+
+/*
+ * Parses `[env] files = [".env", ".env.local"]` into `paths`.
+ *
+ * Returns 0 on a malformed list or an unsafe path, in which case the caller
+ * records the problem and the audit reports it — a config whose .env list
+ * cannot be read must not quietly fall back to the default file.
+ */
+static int f2e_parse_dotenv_file_list(char paths[][F2E_MAX_ENV_FILE_PATH], size_t *path_count,
+                                      const char *value) {
+  *path_count = 0;
+  const char *cursor = f2e_trim_left((char *)value);
+  if (*cursor != '[') {
+    return 0;
+  }
+  cursor++;
+
+  while (*cursor) {
+    cursor = f2e_trim_left((char *)cursor);
+    if (*cursor == ']') {
+      cursor = f2e_trim_left((char *)cursor + 1);
+      return *cursor == '\0';
+    }
+    char quote = *cursor;
+    if (quote != '"' && quote != '\'') {
+      return 0;
+    }
+    cursor++;
+
+    char entry[F2E_MAX_ENV_FILE_PATH];
+    size_t length = 0;
+    while (*cursor && *cursor != quote) {
+      if (length + 1 >= sizeof(entry)) {
+        return 0;
+      }
+      entry[length++] = *cursor++;
+    }
+    if (*cursor != quote) {
+      return 0;
+    }
+    cursor++;
+    entry[length] = '\0';
+
+    if (!f2e_dotenv_path_is_safe(entry)) {
+      return 0;
+    }
+    if (*path_count >= F2E_MAX_DOTENV_FILES) {
+      return 0;
+    }
+    f2e_strlcpy(paths[*path_count], entry, F2E_MAX_ENV_FILE_PATH);
+    (*path_count)++;
+
+    cursor = f2e_trim_left((char *)cursor);
+    if (*cursor == ',') {
+      cursor++;
+    } else if (*cursor != ']') {
+      return 0;
+    }
+  }
+  return 0; /* unterminated */
 }
 
 static int f2e_parse_env_key_list(char keys[][F2E_MAX_ENV], size_t *key_count, const char *value) {
@@ -1468,7 +1629,8 @@ static int f2e_load_config(const char *config_path, F2EConfig *config) {
   F2EConfigSection section = F2E_SECTION_NONE;
   char line[F2E_MAX_LINE];
   char logical_line[F2E_MAX_LOGICAL_LINE];
-  while (fgets(line, sizeof(line), file)) {
+  int stream_exhausted = 0;
+  while (!stream_exhausted && fgets(line, sizeof(line), file)) {
     f2e_strip_comment(line);
     char *trimmed = f2e_trim(line);
     if (trimmed[0] == '\0') {
@@ -1482,6 +1644,7 @@ static int f2e_load_config(const char *config_path, F2EConfig *config) {
       while ((*logical_value == '[' || *logical_value == '(') &&
              !f2e_array_value_is_complete(logical_value)) {
         if (!fgets(line, sizeof(line), file)) {
+          stream_exhausted = 1;
           break;
         }
         f2e_strip_comment(line);
@@ -1685,6 +1848,20 @@ static int f2e_load_config(const char *config_path, F2EConfig *config) {
                                     value)) {
           config->invalid_env_audit_ignore = 1;
         }
+      } else if (f2e_streq(key, "files") ||
+                 f2e_streq(key, "file") ||
+                 f2e_streq(key, "dotenv_files") ||
+                 f2e_streq(key, "env_files") ||
+                 f2e_streq(key, "paths")) {
+        /* Declaring the key at all is meaningful: `files = []` means "read no
+           .env at all", which is not the same as leaving the key out. */
+        config->dotenv_files_set = 1;
+        if (!f2e_parse_dotenv_file_list(config->dotenv_files,
+                                        &config->dotenv_file_count,
+                                        value)) {
+          config->invalid_dotenv_files = 1;
+          config->dotenv_file_count = 0;
+        }
       } else if (f2e_streq(key, "load") ||
                  f2e_streq(key, "load_dotenv") ||
                  f2e_streq(key, "dotenv") ||
@@ -1782,6 +1959,7 @@ static int f2e_load_config(const char *config_path, F2EConfig *config) {
       char parsed[F2E_MAX_VALUE];
       if (f2e_parse_bare_value(value, parsed, sizeof(parsed)) && parsed[0] != '\0') {
         current->short_name = parsed[0];
+        f2e_strlcpy(current->short_declared, parsed, sizeof(current->short_declared));
       }
     } else if (f2e_streq(key, "type")) {
       char parsed[F2E_MAX_VALUE];
@@ -1797,6 +1975,27 @@ static int f2e_load_config(const char *config_path, F2EConfig *config) {
       if (f2e_parse_bare_value(value, parsed, sizeof(parsed))) {
         current->has_default = 1;
         f2e_strlcpy(current->default_value, parsed, sizeof(current->default_value));
+      }
+    } else if (f2e_streq(key, "requires_tty") ||
+               f2e_streq(key, "requires_terminal") ||
+               f2e_streq(key, "needs_tty")) {
+      char parsed[F2E_MAX_VALUE];
+      if (!f2e_parse_bare_value(value, parsed, sizeof(parsed))) {
+        current->invalid_requires_tty = 1;
+      } else if (f2e_streq(parsed, "true") || f2e_streq(parsed, "prompt")) {
+        /* The useful default: `--interactive` wants to ask a question, which
+           needs somewhere to ask and someone to answer. */
+        current->requires_tty = F2E_TTY_PROMPT;
+      } else if (f2e_streq(parsed, "false")) {
+        current->requires_tty = F2E_TTY_NONE;
+      } else if (f2e_streq(parsed, "stdin")) {
+        current->requires_tty = F2E_TTY_STDIN;
+      } else if (f2e_streq(parsed, "stdout")) {
+        current->requires_tty = F2E_TTY_STDOUT;
+      } else if (f2e_streq(parsed, "stderr")) {
+        current->requires_tty = F2E_TTY_STDERR;
+      } else {
+        current->invalid_requires_tty = 1;
       }
     } else if (f2e_streq(key, "dotenv_override") ||
                f2e_streq(key, "env_file_override") ||
@@ -2463,23 +2662,204 @@ static void f2e_report_invalid_value(F2EJsonList *errors, const F2EFlag *flag, c
   f2e_json_list_append(errors, message);
 }
 
+/*
+ * TTY detection for requires_tty.
+ *
+ * Deliberately implemented here rather than called from terminal_context.c:
+ * parser.c is compiled on its own by the Rust build script, the README
+ * snippet tests, and the other client bindings, so it cannot depend on a
+ * second translation unit. The two must agree, and tests/run.sh asserts they
+ * do under the same F2E_FORCE_* settings rather than trusting them to.
+ */
+static int f2e_tty_ascii_equal_ci(const char *left, const char *right) {
+  if (!left || !right) {
+    return 0;
+  }
+  while (*left && *right) {
+    if (tolower((unsigned char)*left) != tolower((unsigned char)*right)) {
+      return 0;
+    }
+    left++;
+    right++;
+  }
+  return *left == '\0' && *right == '\0';
+}
+
+static int f2e_tty_value_truthy(const char *value) {
+  if (!value || !*value) {
+    return 0;
+  }
+  return !(f2e_tty_ascii_equal_ci(value, "0") ||
+           f2e_tty_ascii_equal_ci(value, "false") ||
+           f2e_tty_ascii_equal_ci(value, "no") ||
+           f2e_tty_ascii_equal_ci(value, "off") ||
+           f2e_tty_ascii_equal_ci(value, "never"));
+}
+
+static int f2e_tty_forced(const char *name, int detected) {
+  const char *value = getenv(name);
+  if (!value || value[0] == '\0' || f2e_tty_ascii_equal_ci(value, "auto")) {
+    return detected;
+  }
+  return f2e_tty_value_truthy(value);
+}
+
+#if defined(_WIN32)
+#define F2E_STDIN_FD 0
+#define F2E_STDOUT_FD 1
+#define F2E_STDERR_FD 2
+#else
+#define F2E_STDIN_FD STDIN_FILENO
+#define F2E_STDOUT_FD STDOUT_FILENO
+#define F2E_STDERR_FD STDERR_FILENO
+#endif
+
+static int f2e_tty_fd_is_tty(int fd) {
+#if defined(_WIN32)
+  return _isatty(fd) != 0;
+#elif defined(__unix__) || defined(__APPLE__)
+  return isatty(fd) != 0;
+#else
+  (void)fd;
+  return 0;
+#endif
+}
+
+static int f2e_tty_stdin(void) {
+  return f2e_tty_forced("F2E_FORCE_STDIN_TTY", f2e_tty_fd_is_tty(F2E_STDIN_FD));
+}
+
+static int f2e_tty_stdout(void) {
+  return f2e_tty_forced("F2E_FORCE_STDOUT_TTY", f2e_tty_fd_is_tty(F2E_STDOUT_FD));
+}
+
+static int f2e_tty_stderr(void) {
+  return f2e_tty_forced("F2E_FORCE_STDERR_TTY", f2e_tty_fd_is_tty(F2E_STDERR_FD));
+}
+
+/* Mirrors terminal_context.c, including false-like marker values. */
+static int f2e_tty_ci(void) {
+  static const char *names[] = {"CI", "CONTINUOUS_INTEGRATION", "BUILD_NUMBER",
+                                "GITHUB_ACTIONS", "GITLAB_CI", "BUILDKITE",
+                                "CIRCLECI", "TEAMCITY_VERSION", "TF_BUILD",
+                                "JENKINS_URL", "BUILD_BUILDID"};
+  for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+    if (f2e_tty_value_truthy(getenv(names[i]))) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int f2e_tty_dumb(void) {
+  return f2e_tty_ascii_equal_ci(getenv("TERM"), "dumb");
+}
+
+/* Terminal stdin and stderr, outside CI, not dumb. Stdout may be redirected:
+   data can be piped while the prompt stays on stderr. */
+static int f2e_tty_can_prompt(void) {
+  return f2e_tty_forced("F2E_FORCE_CI", f2e_tty_ci()) ? 0
+         : f2e_tty_dumb()                            ? 0
+                                                     : (f2e_tty_stdin() && f2e_tty_stderr());
+}
+
+/*
+ * Enforces [flags.*] requires_tty for a flag that argv actually set.
+ *
+ * The failure this prevents is a CLI that waits forever on input nobody can
+ * give: `--interactive` in a CI job, a cron entry, or the far side of a pipe.
+ * Reporting it through the same errors channel invalid values use means every
+ * client already fails closed on it -- no new plumbing, and no client that
+ * silently ignores the finding.
+ *
+ * Only a *truthy* boolean triggers it. `--no-interactive` is exactly how a
+ * caller says "do not prompt", so it must stay legal without a terminal.
+ */
+static int f2e_check_requires_tty(const F2EFlag *flag, const char *normalized,
+                                  F2EJsonList *errors) {
+  if (flag->requires_tty == F2E_TTY_NONE) {
+    return 1;
+  }
+  if (flag->type == F2E_TYPE_BOOL && normalized && f2e_streq(normalized, "false")) {
+    return 1;
+  }
+
+  const char *stream = NULL;
+  int available = 0;
+  switch (flag->requires_tty) {
+    case F2E_TTY_STDIN:
+      stream = "stdin";
+      available = f2e_tty_stdin();
+      break;
+    case F2E_TTY_STDOUT:
+      stream = "stdout";
+      available = f2e_tty_stdout();
+      break;
+    case F2E_TTY_STDERR:
+      stream = "stderr";
+      available = f2e_tty_stderr();
+      break;
+    default:
+      stream = NULL;
+      available = f2e_tty_can_prompt();
+      break;
+  }
+  if (available) {
+    return 1;
+  }
+
+  char message[512];
+  if (stream) {
+    snprintf(message, sizeof(message),
+             "flags.%s requires a terminal on %s, which is not attached",
+             f2e_audit_flag_name(flag), stream);
+  } else {
+    /* Deliberately vague about *which* precondition failed: stdin, stderr, CI,
+       and TERM=dumb all mean the same thing to the caller -- nobody is there
+       to answer -- and naming one invites working around it. */
+    snprintf(message, sizeof(message),
+             "flags.%s requires an interactive terminal; stdin and stderr must be a "
+             "terminal, outside CI, with TERM set",
+             f2e_audit_flag_name(flag));
+  }
+  f2e_json_list_append(errors, message);
+  return 0;
+}
+
 static int f2e_try_set_flag_value(F2EFlag *flag, F2EPair *pairs, size_t pair_count, const char *value, F2EJsonList *errors) {
   char normalized[F2E_MAX_VALUE];
   if (!f2e_normalize_flag_value(flag, value, normalized, sizeof(normalized))) {
     f2e_report_invalid_value(errors, flag, value);
     return 0;
   }
+  if (!f2e_check_requires_tty(flag, normalized, errors)) {
+    return 0;
+  }
   f2e_set_pair(pairs, pair_count, flag->env, normalized);
   return 1;
 }
 
-static int f2e_try_set_bool_value(F2EFlag *flag, F2EPair *pairs, size_t pair_count, const char *value) {
+static int f2e_try_set_bool_value(F2EFlag *flag, F2EPair *pairs, size_t pair_count,
+                                  const char *value, F2EJsonList *errors) {
   const char *canonical = NULL;
   if (!f2e_bool_value_alias(flag, value, &canonical)) {
     return 0;
   }
+  if (!f2e_check_requires_tty(flag, canonical, errors)) {
+    /* The token was consumed and reported; not setting the pair is the point. */
+    return 1;
+  }
   f2e_set_pair(pairs, pair_count, flag->env, canonical);
   return 1;
+}
+
+/* Sets a bare boolean (`--interactive`, `-i`) to true, subject to requires_tty. */
+static void f2e_set_bare_bool(F2EFlag *flag, F2EPair *pairs, size_t pair_count,
+                              F2EJsonList *errors) {
+  if (!f2e_check_requires_tty(flag, "true", errors)) {
+    return;
+  }
+  f2e_set_pair(pairs, pair_count, flag->env, "true");
 }
 
 static int f2e_token_looks_like_known_option(F2EConfig *config, int scope, const char *token) {
@@ -2659,6 +3039,95 @@ static void f2e_apply_defaults_for_path(F2EConfig *config, F2EPair *pairs, size_
   }
 }
 
+/* Why a single-dash token could not be read as short flags. The token's first
+   character resolving is not enough: every character up to the value-taking
+   one has to resolve too, and when one does not, the offending character is
+   what the caller needs to hear about. Blaming the token's first flag for a
+   "value" made of the remaining characters names the wrong thing. */
+typedef enum {
+  F2E_SHORT_FAULT_NONE = 0,
+  F2E_SHORT_FAULT_UNDECLARED,   /* the character is no flag's short, anywhere */
+  F2E_SHORT_FAULT_OUT_OF_SCOPE, /* declared, but not by the active scope chain */
+  F2E_SHORT_FAULT_AMBIGUOUS,    /* declared by several scopes, none of them active */
+  F2E_SHORT_FAULT_NO_ENV        /* declared here, but targets no env var */
+} F2EShortFault;
+
+/* Reports the first character of `shorts` that stops the token from reading as
+   a bundle. Scanning stops at the first value-taking short because everything
+   after it is that flag's value, not more flags. */
+static F2EShortFault f2e_short_token_fault(F2EConfig *config, int scope, const char *shorts,
+                                           char *offender, const F2EFlag **owner) {
+  for (const char *cursor = shorts; *cursor; cursor++) {
+    F2EFlag *flag = f2e_find_flag_by_short(config, scope, *cursor);
+    if (!flag) {
+      int ambiguous = 0;
+      const F2EFlag *elsewhere = f2e_find_flag_any_scope_by_short(config, *cursor, &ambiguous);
+      if (offender) {
+        *offender = *cursor;
+      }
+      if (owner) {
+        *owner = elsewhere;
+      }
+      if (ambiguous) {
+        return F2E_SHORT_FAULT_AMBIGUOUS;
+      }
+      return elsewhere ? F2E_SHORT_FAULT_OUT_OF_SCOPE : F2E_SHORT_FAULT_UNDECLARED;
+    }
+    if (flag->env[0] == '\0') {
+      if (offender) {
+        *offender = *cursor;
+      }
+      if (owner) {
+        *owner = flag;
+      }
+      return F2E_SHORT_FAULT_NO_ENV;
+    }
+    if (flag->type != F2E_TYPE_BOOL) {
+      /* A value-taking short ends the token; the rest is its value. */
+      return F2E_SHORT_FAULT_NONE;
+    }
+  }
+  return F2E_SHORT_FAULT_NONE;
+}
+
+/* The `errors_env` line for a token that did not read as flags. Names the
+   character at fault and why, instead of quoting the token's tail back as a
+   value the caller never wrote. */
+static void f2e_report_short_token_fault(F2EConfig *config, int scope, const char *token,
+                                         F2EJsonList *errors) {
+  if (!errors) {
+    return;
+  }
+  char offender = '\0';
+  const F2EFlag *owner = NULL;
+  char message[512];
+  switch (f2e_short_token_fault(config, scope, token + 1, &offender, &owner)) {
+    case F2E_SHORT_FAULT_UNDECLARED:
+      snprintf(message, sizeof(message),
+               "\"%s\" is not a short flag bundle: -%c is not a declared short flag",
+               token, offender);
+      break;
+    case F2E_SHORT_FAULT_OUT_OF_SCOPE:
+      snprintf(message, sizeof(message),
+               "\"%s\" is not a short flag bundle: -%c belongs to flags.%s, which this command scope does not reach",
+               token, offender, f2e_audit_flag_name(owner));
+      break;
+    case F2E_SHORT_FAULT_AMBIGUOUS:
+      snprintf(message, sizeof(message),
+               "\"%s\" is not a short flag bundle: -%c is declared by more than one command, and none is active",
+               token, offender);
+      break;
+    case F2E_SHORT_FAULT_NO_ENV:
+      snprintf(message, sizeof(message),
+               "\"%s\" is not a short flag bundle: -%c is flags.%s, which declares no env target",
+               token, offender, f2e_audit_flag_name(owner));
+      break;
+    default:
+      return;
+  }
+  f2e_json_list_append(errors, message);
+}
+
 static int f2e_can_bundle_bool_shorts(F2EConfig *config, int scope, const char *shorts) {
   if (!shorts || shorts[0] == '\0') {
     return 0;
@@ -2672,12 +3141,106 @@ static int f2e_can_bundle_bool_shorts(F2EConfig *config, int scope, const char *
   return 1;
 }
 
-static void f2e_apply_bool_short_bundle(F2EConfig *config, int scope, F2EPair *pairs, size_t pair_count, const char *shorts) {
-  for (const char *cursor = shorts; *cursor; cursor++) {
-    F2EFlag *flag = f2e_find_flag_by_short(config, scope, *cursor);
-    if (flag && flag->env[0] != '\0' && flag->type == F2E_TYPE_BOOL) {
-      f2e_set_pair(pairs, pair_count, flag->env, "true");
+/* An all-boolean bundle is shorthand for the same shorts written separately:
+   `-dv` must mean exactly `-d -v`. That equivalence was broken for the
+   trailing short, which alone is adjacent to the next argv element and so is
+   the only one that can consume a separated boolean value. `-d -v false` set
+   VERBOSE=false while `-dv false` set VERBOSE=true and left "false" as a
+   positional, so adding one character to a token silently changed the meaning
+   of the *next* argument. Only the last short gets the separated-value
+   reading, and only under the same guards as the lone spelling: the value
+   must be one this flag would itself accept. */
+static void f2e_apply_bool_short_bundle(F2EConfig *config, int scope, F2EPair *pairs, size_t pair_count, const char *shorts, int *index, int argc, const char *const argv[], F2EJsonList *errors) {
+  size_t count = shorts ? strlen(shorts) : 0;
+  for (size_t k = 0; k < count; k++) {
+    F2EFlag *flag = f2e_find_flag_by_short(config, scope, shorts[k]);
+    if (!flag || flag->env[0] == '\0' || flag->type != F2E_TYPE_BOOL) {
+      continue;
     }
+    if (k + 1 == count &&
+        config->allow_separated_values &&
+        index && *index + 1 < argc &&
+        f2e_can_consume_separated_value(flag, argv[*index + 1]) &&
+        f2e_try_set_bool_value(flag, pairs, pair_count, argv[*index + 1], errors)) {
+      (*index)++;
+      continue;
+    }
+    /* A bundled -i is still an -i, so requires_tty applies here too. */
+    f2e_set_bare_bool(flag, pairs, pair_count, errors);
+  }
+}
+
+/* getopt-style mixed bundle: one or more leading boolean shorts followed by
+   exactly one value-taking short, which consumes the rest of the token
+   (`-dvp8080`, `tar -xzf archive.tar`) or, when the token ends at the value
+   flag, the next argument (`set -eo pipefail`). Everything before the value
+   flag must be a declared boolean short with an env target; the caller has
+   already handled all-boolean bundles and tokens whose first short takes a
+   value. Returns 1 when the token matched this shape and was applied, 0 to
+   let the caller keep the historical fallback (an inline value for the first
+   flag), so no previously-valid spelling changes meaning. */
+static int f2e_apply_mixed_short_bundle(F2EConfig *config, int scope, F2EPair *pairs, size_t pair_count, const char *shorts, int *index, int argc, const char *const argv[], F2EJsonList *errors) {
+  size_t split = 0;
+  F2EFlag *value_flag = NULL;
+  for (size_t k = 0; shorts[k] != '\0'; k++) {
+    F2EFlag *flag = f2e_find_flag_by_short(config, scope, shorts[k]);
+    if (!flag || flag->env[0] == '\0') {
+      return 0;
+    }
+    if (flag->type == F2E_TYPE_BOOL) {
+      continue;
+    }
+    if (k == 0) {
+      return 0;
+    }
+    value_flag = flag;
+    split = k;
+    break;
+  }
+  if (!value_flag) {
+    return 0;
+  }
+  for (size_t k = 0; k < split; k++) {
+    F2EFlag *flag = f2e_find_flag_by_short(config, scope, shorts[k]);
+    if (flag && flag->env[0] != '\0' && flag->type == F2E_TYPE_BOOL) {
+      /* A bundled -i is still an -i, so requires_tty applies here too. */
+      f2e_set_bare_bool(flag, pairs, pair_count, errors);
+    }
+  }
+  const char *value = shorts + split + 1;
+  int explicit_value = 0;
+  if (*value == '=') {
+    /* Mirrors the single-short spelling `-p=8080`, so `-dvp=8080` and
+       `-dvp8080` agree. An explicit `=` also makes an *empty* remainder a
+       real value: `--mode=` sets the env var to "", so `-dvm=` must too
+       rather than silently dropping the assignment. */
+    value++;
+    explicit_value = 1;
+  }
+  if (explicit_value || *value != '\0') {
+    f2e_try_set_flag_value(value_flag, pairs, pair_count, value, errors);
+  } else if (config->allow_separated_values &&
+             *index + 1 < argc &&
+             f2e_can_consume_separated_value(value_flag, argv[*index + 1])) {
+    (*index)++;
+    f2e_try_set_flag_value(value_flag, pairs, pair_count, argv[*index], errors);
+  }
+  return 1;
+}
+
+/* One reporting path for every single-dash token that did not read as flags,
+   whichever check rejected it. `unknown_options_env` is the channel, as it has
+   always been for a token whose *first* character was undeclared; a token with
+   two or more characters after the dash is someone spelling a bundle, so
+   `errors_env` also gets the reason. A lone `-q` needs no explanation, and
+   `allow_unknown` silences both - the caller checks it before calling. */
+static void f2e_report_unusable_token(F2EConfig *config, int scope, const char *token,
+                                      F2EJsonList *unknown_options, F2EJsonList *errors) {
+  if (unknown_options) {
+    f2e_json_list_append(unknown_options, token);
+  }
+  if (token[0] == '-' && token[1] != '-' && token[1] != '\0' && token[2] != '\0') {
+    f2e_report_short_token_fault(config, scope, token, errors);
   }
 }
 
@@ -2729,10 +3292,10 @@ static void f2e_apply_long_arg(F2EConfig *config, int scope, F2EPair *pairs, siz
     } else if (config->allow_separated_values &&
                *index + 1 < argc &&
                f2e_can_consume_separated_value(flag, argv[*index + 1]) &&
-               f2e_try_set_bool_value(flag, pairs, pair_count, argv[*index + 1])) {
+               f2e_try_set_bool_value(flag, pairs, pair_count, argv[*index + 1], errors)) {
       (*index)++;
     } else {
-      f2e_set_pair(pairs, pair_count, flag->env, "true");
+      f2e_set_bare_bool(flag, pairs, pair_count, errors);
     }
     return;
   }
@@ -2747,15 +3310,27 @@ static void f2e_apply_long_arg(F2EConfig *config, int scope, F2EPair *pairs, siz
   }
 }
 
-static void f2e_apply_short_arg(F2EConfig *config, int scope, F2EPair *pairs, size_t pair_count, const char *token, int *index, int argc, const char *const argv[], F2EJsonList *errors) {
+/* Returns 1 when the token was handled, 0 only for a bundle-shaped token that
+   no reading could apply; the caller then reports it in `unknown_options_env`.
+   That channel used to depend on *where* the undeclared character sat: `-zd`
+   was reported because `f2e_token_looks_like_known_option` failed on token[1]
+   before this function ran, while `-dz` and `-rF` reached the fallback below
+   and vanished with no entry anywhere - the exact shape of a mistyped bundle.
+
+   The early bails below stay 1 on purpose. A short that resolves to no flag
+   here has already been screened by the caller, so reaching this point means
+   it is declared but deliberately not applicable in this scope - an ambiguous
+   short under F2E_SCOPE_LENIENT, or a flag with no env target. Those are
+   accepted and not applied, never reported as unknown. */
+static int f2e_apply_short_arg(F2EConfig *config, int scope, F2EPair *pairs, size_t pair_count, const char *token, int *index, int argc, const char *const argv[], F2EJsonList *errors) {
   if (token[1] == '\0') {
-    return;
+    return 1;
   }
 
   char short_name = token[1];
   F2EFlag *first = f2e_find_flag_by_short(config, scope, short_name);
   if (!first || first->env[0] == '\0') {
-    return;
+    return 1;
   }
 
   const char *rest = token + 2;
@@ -2766,7 +3341,10 @@ static void f2e_apply_short_arg(F2EConfig *config, int scope, F2EPair *pairs, si
   }
 
   if (first->type != F2E_TYPE_BOOL) {
-    if (*rest) {
+    /* `has_inline_value` marks an explicit `=`, which makes even an empty
+       remainder a real assignment. Ignoring it made `-m=` a no-op while
+       `--mode=` set "" - the same flag, two spellings, two meanings. */
+    if (has_inline_value || *rest) {
       f2e_try_set_flag_value(first, pairs, pair_count, rest, errors);
     } else if (config->allow_separated_values &&
                *index + 1 < argc &&
@@ -2774,32 +3352,57 @@ static void f2e_apply_short_arg(F2EConfig *config, int scope, F2EPair *pairs, si
       (*index)++;
       f2e_try_set_flag_value(first, pairs, pair_count, argv[*index], errors);
     }
-    return;
+    return 1;
   }
 
   if (has_inline_value) {
     f2e_try_set_flag_value(first, pairs, pair_count, rest, errors);
-    return;
+    return 1;
   }
 
   if (*rest == '\0') {
     if (config->allow_separated_values &&
         *index + 1 < argc &&
         f2e_can_consume_separated_value(first, argv[*index + 1]) &&
-        f2e_try_set_bool_value(first, pairs, pair_count, argv[*index + 1])) {
+        f2e_try_set_bool_value(first, pairs, pair_count, argv[*index + 1], errors)) {
       (*index)++;
-      return;
+      return 1;
     }
-    f2e_set_pair(pairs, pair_count, first->env, "true");
-    return;
+    f2e_set_bare_bool(first, pairs, pair_count, errors);
+    return 1;
   }
 
   if (f2e_can_bundle_bool_shorts(config, scope, token + 1)) {
-    f2e_apply_bool_short_bundle(config, scope, pairs, pair_count, token + 1);
-    return;
+    f2e_apply_bool_short_bundle(config, scope, pairs, pair_count, token + 1, index, argc, argv, errors);
+    return 1;
   }
 
-  f2e_try_set_flag_value(first, pairs, pair_count, rest, errors);
+  /* Compatibility before bundling: a suffix that reads as a boolean value for
+     the first flag keeps meaning exactly that (`-dtrue`, `-d1`, `-dt` with a
+     `t` alias), even if its characters could also spell a mixed bundle. Only
+     tokens that were previously parse errors gain the bundle reading below. */
+  {
+    const char *canonical = NULL;
+    if (f2e_bool_value_alias(first, rest, &canonical)) {
+      f2e_try_set_flag_value(first, pairs, pair_count, rest, errors);
+      return 1;
+    }
+  }
+
+  if (f2e_apply_mixed_short_bundle(config, scope, pairs, pair_count, token + 1, index, argc, argv, errors)) {
+    return 1;
+  }
+
+  /* Every bundle reading failed. The historical fallback treated the suffix as
+     an inline value for the first flag, which for a boolean is invalid by
+     construction (a valid one was already taken by the alias check above), so
+     the token sets nothing either way - but it reported the failure as
+     `flags.<first> value "<tail>" is not a valid bool`, naming a flag that is
+     usually fine and a value nobody typed. Return 0 instead and let the caller
+     report the token, so a bad character in position three is reported exactly
+     like the same bad character in position one. */
+  (void)errors;
+  return 0;
 }
 
 static const char *f2e_audit_flag_name(const F2EFlag *flag) {
@@ -2974,6 +3577,104 @@ static void f2e_audit_command_semantics(const F2EConfig *config, F2EAudit *audit
   }
 }
 
+/* Names one lookup context for an audit message. Root needs no wording: a
+   collision reachable at the top level is reachable in every invocation. */
+static void f2e_audit_scope_label(const F2EConfig *config, int scope, char *out, size_t out_size) {
+  if (scope == F2E_SCOPE_LENIENT) {
+    f2e_strlcpy(out, "when no command is selected", out_size);
+    return;
+  }
+  char command_label[F2E_MAX_VALUE];
+  if (!f2e_command_path_label(config, scope, command_label, sizeof(command_label))) {
+    f2e_strlcpy(command_label, config->commands[scope].name, sizeof(command_label));
+  }
+  snprintf(out, out_size, "when command \"%s\" is active", command_label);
+}
+
+/* Every context in which `alias_short` can be read directly after `flag`'s own
+   short. Checking only flag->command misses two real bundle contexts:
+
+   - a global flag followed by a short declared by an active child command;
+   - lenient lookup, where globally-unique scoped shorts remain available when
+     argv selects no command.
+
+   Requiring both shorts to resolve to the concrete flags in the same context
+   also avoids warning about child declarations that shadow the first short.
+
+   Collecting *all* of them matters: the same collision is routinely reachable
+   from a command scope and from the no-command lenient lookup, and naming only
+   the first left the config author fixing one spelling and keeping the other.
+   `want_value_flag` selects which of the two readings to collect, so a
+   collision that resolves to a boolean in one context and a value-taking flag
+   in another is reported as the two distinct hazards it is. */
+static const F2EFlag *f2e_collect_bundle_alias_contexts(const F2EConfig *config,
+                                                        const F2EFlag *flag,
+                                                        char alias_short,
+                                                        int want_value_flag,
+                                                        char *contexts,
+                                                        size_t contexts_size) {
+  const F2EFlag *first = NULL;
+  size_t named = 0;
+  if (contexts && contexts_size > 0) {
+    contexts[0] = '\0';
+  }
+  size_t context_count = config->command_count + 2;
+  for (size_t context = 0; context < context_count; context++) {
+    int scope = context == 0
+                    ? F2E_SCOPE_ROOT
+                    : context <= config->command_count
+                          ? (int)(context - 1)
+                          : F2E_SCOPE_LENIENT;
+    F2EFlag *resolved_flag = f2e_find_flag_by_short((F2EConfig *)config, scope, flag->short_name);
+    if (resolved_flag != flag) {
+      continue;
+    }
+    F2EFlag *other = f2e_find_flag_by_short((F2EConfig *)config, scope, alias_short);
+    if (!other || other == flag) {
+      continue;
+    }
+    if ((other->type != F2E_TYPE_BOOL) != (want_value_flag != 0)) {
+      continue;
+    }
+    if (!first) {
+      first = other;
+    }
+    if (scope == F2E_SCOPE_ROOT) {
+      /* Reachable everywhere; further context wording would only add noise. */
+      if (contexts && contexts_size > 0) {
+        contexts[0] = '\0';
+      }
+      return first;
+    }
+    if (!contexts || contexts_size == 0) {
+      continue;
+    }
+    if (named >= 3) {
+      if (named == 3) {
+        f2e_strlcat(contexts, ", and in other command scopes", contexts_size);
+      }
+      named++;
+      continue;
+    }
+    char label[F2E_MAX_VALUE + 64];
+    f2e_audit_scope_label(config, scope, label, sizeof(label));
+    f2e_strlcat(contexts, named == 0 ? " " : " or ", contexts_size);
+    f2e_strlcat(contexts, label, contexts_size);
+    named++;
+  }
+  return first;
+}
+
+/* True when `shorts` reads as a bundle in `scope`: every character before the
+   value-taking one is a declared boolean short with an env target. This is the
+   parser's own predicate, so audit and parse cannot drift apart. */
+static int f2e_shorts_spell_bundle(const F2EConfig *config, int scope, const char *shorts) {
+  if (!shorts || shorts[0] == '\0') {
+    return 0;
+  }
+  return f2e_short_token_fault((F2EConfig *)config, scope, shorts, NULL, NULL) == F2E_SHORT_FAULT_NONE;
+}
+
 static void f2e_audit_config_semantics(const F2EConfig *config, F2EAudit *audit) {
   if (config->flag_count == 0 && config->command_count == 0) {
     f2e_audit_add(audit, 1, "no [flags.*] or [commands.*] tables declared");
@@ -3008,12 +3709,101 @@ static void f2e_audit_config_semantics(const F2EConfig *config, F2EAudit *audit)
     if (flag->short_name != '\0' && !isalnum((unsigned char)flag->short_name)) {
       f2e_audit_add(audit, 1, "flags.%s has invalid short flag \"%c\"", f2e_audit_flag_name(flag), flag->short_name);
     }
+    /* A short flag is one character by definition, and everything past the
+       first byte was being dropped in silence - so `short = "ab"` quietly
+       shipped a CLI whose `-ab` meant "-a bundled with whatever -b is" rather
+       than the two-letter flag the author wrote. */
+    if (flag->short_declared[0] != '\0' && flag->short_declared[1] != '\0') {
+      f2e_audit_add(audit, 1,
+                    "flags.%s short \"%s\" is more than one character; only \"%c\" is used, and \"-%s\" parses as a short flag bundle",
+                    f2e_audit_flag_name(flag),
+                    flag->short_declared,
+                    flag->short_name,
+                    flag->short_declared);
+    }
     if (flag->invalid_type) {
       f2e_audit_add(audit, 1, "flags.%s type \"%s\" is not supported",
                     f2e_audit_flag_name(flag),
                     flag->type_value);
     }
     f2e_audit_bool_value_aliases(flag, audit);
+
+    /* A boolean value alias that also reads as short flags makes
+       `-<short><alias>` ambiguous between "value for the boolean" and "short
+       bundle". Surface the shadowing in every lookup context where the two
+       readings can actually resolve together. */
+    if (flag->type == F2E_TYPE_BOOL && flag->short_name != '\0') {
+      for (size_t j = 0; j < flag->true_alias_count + flag->false_alias_count; j++) {
+        const char *alias = j < flag->true_alias_count
+                                ? flag->true_aliases[j]
+                                : flag->false_aliases[j - flag->true_alias_count];
+        if (alias[0] == '\0') {
+          continue;
+        }
+        if (alias[1] != '\0') {
+          /* A multi-character alias can spell a whole bundle. That reading is
+             the more dangerous one, because it only appears once a value is
+             appended: with true_aliases = ["vp"], `-dvp` is a value for the
+             boolean while `-dvp8080` is `-v` plus `-p 8080`. Two spellings
+             that differ only in whether a value is inline must not resolve to
+             different flags in silence. */
+          for (size_t context = 0; context <= config->command_count + 1; context++) {
+            int scope = context == 0
+                            ? F2E_SCOPE_ROOT
+                            : context <= config->command_count
+                                  ? (int)(context - 1)
+                                  : F2E_SCOPE_LENIENT;
+            if (f2e_find_flag_by_short((F2EConfig *)config, scope, flag->short_name) != flag) {
+              continue;
+            }
+            if (!f2e_shorts_spell_bundle(config, scope, alias)) {
+              continue;
+            }
+            char collision_context[F2E_MAX_VALUE + 64] = "";
+            if (scope != F2E_SCOPE_ROOT) {
+              char label[F2E_MAX_VALUE + 64];
+              f2e_audit_scope_label(config, scope, label, sizeof(label));
+              f2e_strlcpy(collision_context, " ", sizeof(collision_context));
+              f2e_strlcat(collision_context, label, sizeof(collision_context));
+            }
+            f2e_audit_add(audit, 0,
+                          "flags.%s boolean value alias \"%s\" also spells a short flag bundle%s; \"-%c%s\" is a value for flags.%s, but \"-%c%s\" followed by anything parses as a bundle",
+                          f2e_audit_flag_name(flag),
+                          alias,
+                          collision_context,
+                          flag->short_name,
+                          alias,
+                          f2e_audit_flag_name(flag),
+                          flag->short_name,
+                          alias);
+            break;
+          }
+          continue;
+        }
+        /* Which reading wins matches the parser: an all-boolean token is a
+           bundle; otherwise the value-alias reading is kept. */
+        for (int want_value_flag = 0; want_value_flag <= 1; want_value_flag++) {
+          char collision_context[F2E_MAX_VALUE + 64] = "";
+          const F2EFlag *other = f2e_collect_bundle_alias_contexts(config, flag, alias[0], want_value_flag,
+                                                                   collision_context, sizeof(collision_context));
+          if (!other) {
+            continue;
+          }
+          f2e_audit_add(audit, 0,
+                        want_value_flag
+                            ? "flags.%s boolean value alias \"%s\" doubles as short flag -%c (flags.%s)%s; \"-%c%c\" parses as a value for flags.%s, not a bundle"
+                            : "flags.%s boolean value alias \"%s\" doubles as short flag -%c (flags.%s)%s; \"-%c%c\" parses as a bundle, not a value for flags.%s",
+                        f2e_audit_flag_name(flag),
+                        alias,
+                        alias[0],
+                        f2e_audit_flag_name(other),
+                        collision_context,
+                        flag->short_name,
+                        alias[0],
+                        f2e_audit_flag_name(flag));
+        }
+      }
+    }
 
     if (config->positionals_env[0] != '\0' && f2e_streq(config->positionals_env, flag->env)) {
       f2e_audit_add(audit, 1, "parse.positionals_env collides with flags.%s env \"%s\"",
@@ -3055,6 +3845,29 @@ static void f2e_audit_config_semantics(const F2EConfig *config, F2EAudit *audit)
   }
   if (config->invalid_env_audit_ignore) {
     f2e_audit_add(audit, 1, "env.ignore must be a list of env var names");
+  }
+  for (size_t i = 0; i < config->flag_count; i++) {
+    if (config->flags[i].invalid_requires_tty) {
+      f2e_audit_add(audit, 1,
+                    "flags.%s requires_tty must be true, false, prompt, stdin, stdout, or stderr",
+                    f2e_audit_flag_name(&config->flags[i]));
+    }
+  }
+  if (config->invalid_dotenv_files) {
+    /* An error, not a warning: the config asked for specific .env files and
+       none of them will be read, so every value in them is silently missing. */
+    f2e_audit_add(audit, 1,
+                  "env.files must be a list of paths inside the working directory "
+                  "(no absolute paths and no \"..\" segments)");
+  }
+  if (config->dotenv_files_set && !config->invalid_dotenv_files) {
+    for (size_t i = 0; i < config->dotenv_file_count; i++) {
+      if (f2e_dotenv_path_containment(config->dotenv_files[i]) == 0) {
+        f2e_audit_add(audit, 1,
+                      "env.files path \"%s\" resolves outside the working directory",
+                      config->dotenv_files[i]);
+      }
+    }
   }
   for (size_t i = 0; i < config->env_audit_ignored_count; i++) {
     if (!f2e_env_name_is_valid(config->env_audit_ignored_keys[i])) {
@@ -3595,6 +4408,98 @@ static char *f2e_cwd_path(const char *file_name) {
   return path;
 }
 
+static int f2e_path_char_equal(char left, char right, int fold_case) {
+  if (fold_case) {
+    return tolower((unsigned char)left) == tolower((unsigned char)right);
+  }
+  return left == right;
+}
+
+static int f2e_path_is_within_root(const char *root, const char *path,
+                                   int fold_case) {
+  if (!root || !path || root[0] == '\0' || path[0] == '\0') {
+    return 0;
+  }
+  size_t root_len = strlen(root);
+  for (size_t i = 0; i < root_len; i++) {
+    if (path[i] == '\0' || !f2e_path_char_equal(root[i], path[i], fold_case)) {
+      return 0;
+    }
+  }
+  if (path[root_len] == '\0') {
+    return 1;
+  }
+  if (root[root_len - 1] == '/' || root[root_len - 1] == '\\') {
+    return 1;
+  }
+  return path[root_len] == '/' || path[root_len] == '\\';
+}
+
+/* Returns 1 when an existing explicit dotenv path resolves inside the physical
+   working directory, 0 when it resolves outside, and -1 when it cannot yet be
+   resolved (for example because the explicitly listed file is missing). */
+static int f2e_dotenv_path_containment(const char *relative_path) {
+  char *candidate = f2e_cwd_path(relative_path);
+  if (!candidate) {
+    return -1;
+  }
+
+#if defined(_WIN32)
+  char cwd[PATH_MAX];
+  if (GetCurrentDirectoryA((DWORD)sizeof(cwd), cwd) == 0) {
+    free(candidate);
+    return -1;
+  }
+  HANDLE root_handle = CreateFileA(
+      cwd, FILE_READ_ATTRIBUTES,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
+      OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+  HANDLE path_handle = CreateFileA(
+      candidate, FILE_READ_ATTRIBUTES,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
+      OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+  free(candidate);
+  if (root_handle == INVALID_HANDLE_VALUE || path_handle == INVALID_HANDLE_VALUE) {
+    if (root_handle != INVALID_HANDLE_VALUE) {
+      CloseHandle(root_handle);
+    }
+    if (path_handle != INVALID_HANDLE_VALUE) {
+      CloseHandle(path_handle);
+    }
+    return -1;
+  }
+  char resolved_root[PATH_MAX];
+  char resolved_path[PATH_MAX];
+  DWORD root_len = GetFinalPathNameByHandleA(
+      root_handle, resolved_root, (DWORD)sizeof(resolved_root), FILE_NAME_NORMALIZED);
+  DWORD path_len = GetFinalPathNameByHandleA(
+      path_handle, resolved_path, (DWORD)sizeof(resolved_path), FILE_NAME_NORMALIZED);
+  CloseHandle(root_handle);
+  CloseHandle(path_handle);
+  if (root_len == 0 || path_len == 0 || root_len >= sizeof(resolved_root) ||
+      path_len >= sizeof(resolved_path)) {
+    return -1;
+  }
+  return f2e_path_is_within_root(resolved_root, resolved_path, 1);
+#elif defined(__APPLE__) || (defined(__unix__) && !defined(__EMSCRIPTEN__))
+  char cwd[PATH_MAX];
+  char resolved_root[PATH_MAX];
+  char resolved_path[PATH_MAX];
+  if (!getcwd(cwd, sizeof(cwd)) || !realpath(cwd, resolved_root) ||
+      !realpath(candidate, resolved_path)) {
+    free(candidate);
+    return -1;
+  }
+  free(candidate);
+  return f2e_path_is_within_root(resolved_root, resolved_path, 0);
+#else
+  /* Emscripten's isolated virtual filesystem has no host filesystem escape.
+     The lexical absolute/parent-segment gate remains authoritative there. */
+  free(candidate);
+  return 1;
+#endif
+}
+
 static const F2EFlag *f2e_flag_declaring_env(const F2EConfig *config, const char *key) {
   if (!config || !key || key[0] == '\0') {
     return NULL;
@@ -3739,11 +4644,74 @@ static FILE *f2e_dotenv_fopen(const char *path) {
 #endif
 }
 
-/* Reads ./.env into `dotenv`. Returns 0 when there is no readable ./.env. */
-static int f2e_dotenv_load(F2EDotEnv *dotenv, const F2EConfig *config) {
-  memset(dotenv, 0, sizeof(*dotenv));
+/*
+ * The .env files this config reads, in order.
+ *
+ * `[env] files` replaces the default entirely, so a config that lists
+ * `[".env.shared", ".env"]` reads exactly those two. Declaring an empty list
+ * means "read none", which is why `dotenv_files_set` is consulted rather than
+ * just the count.
+ */
+static size_t f2e_dotenv_file_count(const F2EConfig *config) {
+  if (config && config->dotenv_files_set) {
+    return config->dotenv_file_count;
+  }
+  return 1; /* the implicit "./.env" */
+}
 
-  char *path = f2e_cwd_path(".env");
+static const char *f2e_dotenv_file_at(const F2EConfig *config, size_t index) {
+  if (config && config->dotenv_files_set) {
+    return index < config->dotenv_file_count ? config->dotenv_files[index] : NULL;
+  }
+  return index == 0 ? ".env" : NULL;
+}
+
+/* Pure formatting step; the caller owns the error-channel side effect. */
+static int f2e_dotenv_truncation_message(const char *relative_path,
+                                         size_t line_number,
+                                         char *out,
+                                         size_t out_size) {
+  if (!out || out_size == 0 || line_number == 0) {
+    return 0;
+  }
+  const char *path = relative_path && relative_path[0] != '\0'
+                         ? relative_path
+                         : ".env";
+  int written = snprintf(
+      out,
+      out_size,
+      "%s:%lu: line exceeds the %d-byte read buffer; value was bounded and its tail skipped",
+      path,
+      (unsigned long)line_number,
+      F2E_MAX_LINE - 1);
+  return written >= 0 && (size_t)written < out_size;
+}
+
+static void f2e_report_dotenv_truncation(F2EJsonList *errors,
+                                         const char *relative_path,
+                                         size_t line_number) {
+  if (!errors || !errors->initialized) {
+    return;
+  }
+  char message[512];
+  if (f2e_dotenv_truncation_message(relative_path,
+                                    line_number,
+                                    message,
+                                    sizeof(message))) {
+    f2e_json_list_append(errors, message);
+  }
+}
+
+/* Reads one .env file into `dotenv`. Returns 0 when it is not readable. */
+static int f2e_dotenv_load_one(F2EDotEnv *dotenv,
+                               const F2EConfig *config,
+                               const char *relative_path,
+                               F2EJsonList *errors) {
+  if (config && config->dotenv_files_set &&
+      f2e_dotenv_path_containment(relative_path) != 1) {
+    return 0;
+  }
+  char *path = f2e_cwd_path(relative_path);
   if (!path) {
     return 0;
   }
@@ -3756,6 +4724,7 @@ static int f2e_dotenv_load(F2EDotEnv *dotenv, const F2EConfig *config) {
   char line[F2E_MAX_LINE];
   int first_line = 1;
   int continuing = 0;
+  size_t line_number = 0;
   while (fgets(line, sizeof(line), file)) {
     /* A line longer than the read buffer arrives in several chunks. Only the
        first is a line; the rest are the tail of its value and must not be read
@@ -3767,7 +4736,11 @@ static int f2e_dotenv_load(F2EDotEnv *dotenv, const F2EConfig *config) {
       continuing = !completed;
       continue;
     }
+    line_number++;
     continuing = !completed;
+    if (!completed) {
+      f2e_report_dotenv_truncation(errors, relative_path, line_number);
+    }
 
     char *raw = line;
     if (first_line) {
@@ -3806,6 +4779,30 @@ static int f2e_dotenv_load(F2EDotEnv *dotenv, const F2EConfig *config) {
 }
 
 /*
+ * Reads every configured .env file into `dotenv`. Returns 0 when none of them
+ * were readable, which keeps the "no .env present" path exactly as it was.
+ *
+ * Files are read in declaration order and `f2e_dotenv_store` overwrites, so a
+ * later file wins for a key both define — the order the list is written in is
+ * the order a reader expects it to apply.
+ */
+static int f2e_dotenv_load(F2EDotEnv *dotenv,
+                          const F2EConfig *config,
+                          F2EJsonList *errors) {
+  memset(dotenv, 0, sizeof(*dotenv));
+
+  size_t count = f2e_dotenv_file_count(config);
+  int loaded_any = 0;
+  for (size_t i = 0; i < count; i++) {
+    const char *path = f2e_dotenv_file_at(config, i);
+    if (path && f2e_dotenv_load_one(dotenv, config, path, errors)) {
+      loaded_any = 1;
+    }
+  }
+  return loaded_any;
+}
+
+/*
  * FLAGS2ENV_DOTENV=0 turns loading off for one process without editing TOML.
  * It can only switch loading off, never on: [env] load = false is how a daemon
  * refuses to take policy from an attacker-controlled working directory, so an
@@ -3819,7 +4816,8 @@ static int f2e_dotenv_is_enabled(const F2EConfig *config) {
   return config->dotenv_enabled;
 }
 
-static F2EDotEnv *f2e_dotenv_open(const F2EConfig *config) {
+static F2EDotEnv *f2e_dotenv_open(const F2EConfig *config,
+                                 F2EJsonList *errors) {
   if (!f2e_dotenv_is_enabled(config)) {
     return NULL;
   }
@@ -3827,7 +4825,7 @@ static F2EDotEnv *f2e_dotenv_open(const F2EConfig *config) {
   if (!dotenv) {
     return NULL;
   }
-  if (!f2e_dotenv_load(dotenv, config)) {
+  if (!f2e_dotenv_load(dotenv, config, errors)) {
     free(dotenv);
     return NULL;
   }
@@ -4223,6 +5221,34 @@ static int f2e_completion_scope_flag_words(const F2EConfig *config,
   return 1;
 }
 
+/* The scope's short-flag characters, split by whether they take a value. The
+   generated scripts need the raw characters, not the `-x` words, so they can
+   walk a combined token such as `-xvf` one character at a time. */
+static int f2e_completion_scope_short_chars(const F2EConfig *config,
+                                            int scope,
+                                            F2EBuffer *bool_chars,
+                                            F2EBuffer *value_chars) {
+  size_t indexes[F2E_MAX_FLAGS];
+  size_t count = f2e_help_collect_scope_flags(config, scope, indexes);
+  for (size_t k = 0; k < count; k++) {
+    const F2EFlag *flag = &config->flags[indexes[k]];
+    if (flag->env[0] == '\0' || flag->short_name == '\0') {
+      continue;
+    }
+    if (!isalnum((unsigned char)flag->short_name)) {
+      return 0;
+    }
+    if (f2e_find_flag_by_short((F2EConfig *)config, scope, flag->short_name) != flag) {
+      continue;
+    }
+    F2EBuffer *target = flag->type == F2E_TYPE_BOOL ? bool_chars : value_chars;
+    if (!f2e_buffer_append_char(target, flag->short_name)) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
 static int f2e_completion_scope_child_commands(const F2EConfig *config, int scope, F2EBuffer *words) {
   for (size_t i = 0; i < config->command_count; i++) {
     const F2ECommand *command = &config->commands[i];
@@ -4306,6 +5332,38 @@ static int f2e_completion_emit_scope_helpers(const F2EConfig *config, F2EBuffer 
     }
   }
 
+  for (size_t which = 0; which < 2; which++) {
+    if (!f2e_buffer_append(script, function_name) ||
+        !f2e_buffer_append(script, which == 0 ? "_bool_shorts" : "_value_shorts") ||
+        !f2e_buffer_append(script, "() {\n  case \"$1\" in\n")) {
+      return 0;
+    }
+    for (size_t s = 0; s < scope_count; s++) {
+      char key[F2E_MAX_VALUE];
+      if (!f2e_completion_scope_key(config, scopes[s], key, sizeof(key))) {
+        return 0;
+      }
+      F2EBuffer bool_chars = {0};
+      F2EBuffer value_chars = {0};
+      if (!f2e_buffer_init(&bool_chars) || !f2e_buffer_init(&value_chars)) {
+        free(bool_chars.data);
+        free(value_chars.data);
+        return 0;
+      }
+      int collected = f2e_completion_scope_short_chars(config, scopes[s], &bool_chars, &value_chars);
+      const F2EBuffer *chosen = which == 0 ? &bool_chars : &value_chars;
+      int ok = collected && f2e_completion_emit_case_entry(script, key, chosen->data);
+      free(bool_chars.data);
+      free(value_chars.data);
+      if (!ok) {
+        return 0;
+      }
+    }
+    if (!f2e_buffer_append(script, "    *) printf '%s' '' ;;\n  esac\n}\n")) {
+      return 0;
+    }
+  }
+
   if (!f2e_buffer_append(script, function_name) ||
       !f2e_buffer_append(script, "_cmds() {\n  case \"$1\" in\n")) {
     return 0;
@@ -4354,21 +5412,67 @@ static int f2e_completion_emit_scope_helpers(const F2EConfig *config, F2EBuffer 
       }
     }
   }
+  /* Reduce a combined single-dash token to the one option that can own the
+     NEXT word, so `-nl value` is read the way the parser reads it instead of
+     letting `value` look like a subcommand. Leading boolean characters are
+     skipped; a value-taking character claims the next word only when the
+     token ends there (`-nl` yes, `-nlx` no, its value is already inline); an
+     undeclared character means the token is not a bundle at all and owns
+     nothing. An all-boolean token ends on its last character, which may still
+     take a separated `true`/`false` exactly as a lone `-n` does. */
   if (!f2e_buffer_append(script, "    *) printf '%s' '' ;;\n  esac\n}\n") ||
       !f2e_buffer_append(script, function_name) ||
+      !f2e_buffer_append(script, "_effective_opt() {\n"
+                                 "  local rest c bools values\n"
+                                 "  case \"$2\" in\n"
+                                 "    --*) printf '%s' \"$2\" ; return ;;\n"
+                                 "    -?) printf '%s' \"$2\" ; return ;;\n"
+                                 "    -*) ;;\n"
+                                 "    *) printf '%s' \"$2\" ; return ;;\n"
+                                 "  esac\n"
+                                 "  bools=\"$(") ||
+      !f2e_buffer_append(script, function_name) ||
+      !f2e_buffer_append(script, "_bool_shorts \"$1\")\"\n"
+                                 "  values=\"$(") ||
+      !f2e_buffer_append(script, function_name) ||
+      !f2e_buffer_append(script, "_value_shorts \"$1\")\"\n"
+                                 "  rest=\"${2#-}\"\n"
+                                 "  c=''\n"
+                                 "  while [ -n \"$rest\" ]; do\n"
+                                 "    c=\"${rest%\"${rest#?}\"}\"\n"
+                                 "    rest=\"${rest#?}\"\n"
+                                 "    case \"$values\" in\n"
+                                 "      *\"$c\"*)\n"
+                                 "        if [ -z \"$rest\" ]; then printf '%s' \"-$c\" ; fi\n"
+                                 "        return ;;\n"
+                                 "    esac\n"
+                                 "    case \"$bools\" in\n"
+                                 "      *\"$c\"*) ;;\n"
+                                 "      *) return ;;\n"
+                                 "    esac\n"
+                                 "  done\n"
+                                 "  printf '%s' \"-$c\"\n"
+                                 "}\n") ||
+      !f2e_buffer_append(script, function_name) ||
       !f2e_buffer_append(script, "_consumes_value() {\n"
-                                 "  local value_opts bool_value_opts\n"
+                                 "  local value_opts bool_value_opts opt\n"
+                                 "  opt=\"$(") ||
+      !f2e_buffer_append(script, function_name) ||
+      !f2e_buffer_append(script, "_effective_opt \"$1\" \"$2\")\"\n"
+                                 "  if [ -z \"$opt\" ]; then\n"
+                                 "    return 1\n"
+                                 "  fi\n"
                                  "  value_opts=\"$(") ||
       !f2e_buffer_append(script, function_name) ||
       !f2e_buffer_append(script, "_value_opts \"$1\")\"\n"
                                  "  case \" $value_opts \" in\n"
-                                 "    *\" $2 \"*) return 0 ;;\n"
+                                 "    *\" $opt \"*) return 0 ;;\n"
                                  "  esac\n"
                                  "  bool_value_opts=\"$(") ||
       !f2e_buffer_append(script, function_name) ||
       !f2e_buffer_append(script, "_bool_value_opts \"$1\")\"\n"
                                  "  case \" $bool_value_opts \" in\n"
-                                 "    *\" $2 \"*)\n"
+                                 "    *\" $opt \"*)\n"
                                  "      case \" ") ||
       !f2e_buffer_append(script, bool_values ? bool_values : "") ||
       !f2e_buffer_append(script, " \" in\n"
@@ -6831,15 +7935,17 @@ static void f2e_scan_argv(F2EConfig *config,
       if (f2e_token_sets_allow_unknown(token, &parsed_allow_unknown)) {
         allow_unknown = parsed_allow_unknown;
         allow_unknown_forced = 1;
-      } else if (!allow_unknown && unknown_options) {
-        f2e_json_list_append(unknown_options, token);
+      } else if (!allow_unknown) {
+        f2e_report_unusable_token(config, scope, token, unknown_options, errors);
       }
       continue;
     }
     if (token[1] == '-') {
       f2e_apply_long_arg(config, scope, pairs, pair_count, token, &i, argc, argv, errors);
-    } else {
-      f2e_apply_short_arg(config, scope, pairs, pair_count, token, &i, argc, argv, errors);
+    } else if (!f2e_apply_short_arg(config, scope, pairs, pair_count, token, &i, argc, argv, errors) &&
+               !allow_unknown) {
+      /* Bundle-shaped token whose characters do not spell a usable option. */
+      f2e_report_unusable_token(config, scope, token, unknown_options, errors);
     }
   }
 }
@@ -6943,7 +8049,7 @@ char *f2e_parse_from_file(const char *config_path, int argc, const char *const a
                   NULL);
   }
 
-  F2EDotEnv *dotenv = f2e_dotenv_open(config);
+  F2EDotEnv *dotenv = f2e_dotenv_open(config, track_errors ? &errors : NULL);
   f2e_apply_value_sources(config,
                           pairs,
                           F2E_MAX_PAIRS,
@@ -7129,7 +8235,7 @@ char *f2e_parse_structured_from_file(const char *config_path, int argc, const ch
                 lenient,
                 NULL);
 
-  F2EDotEnv *dotenv = f2e_dotenv_open(config);
+  F2EDotEnv *dotenv = f2e_dotenv_open(config, lists_ok ? &errors : NULL);
   F2EBuffer order_report = {0};
   size_t order_report_count = 0;
   int order_report_ok = f2e_buffer_init(&order_report);
@@ -7949,8 +9055,6 @@ static char *f2e_coerce_report_from_config(const F2EConfig *config, const char *
                  !f2e_buffer_append_char(&output, ':') ||
                  !f2e_buffer_append_json_string(&output, input->text)) {
         errors.failed = 1;
-      } else {
-        wrote = 1;
       }
     }
   }
@@ -8024,7 +9128,6 @@ static void f2e_free_json_items(char **items, int count);
 static int f2e_parse_json_argv_items(const char *argv_json, char ***items, int *count) {
   const char *cursor = f2e_trim_left((char *)argv_json);
   int cap = 0;
-  int expecting_value = 1;
   int saw_value = 0;
   *items = NULL;
   *count = 0;
@@ -8037,7 +9140,7 @@ static int f2e_parse_json_argv_items(const char *argv_json, char ***items, int *
   while (*cursor) {
     cursor = f2e_trim_left((char *)cursor);
     if (*cursor == ']') {
-      return !saw_value || !expecting_value;
+      return !saw_value;
     }
 
     char value[F2E_MAX_VALUE];
@@ -8048,12 +9151,10 @@ static int f2e_parse_json_argv_items(const char *argv_json, char ***items, int *
       return 0;
     }
     saw_value = 1;
-    expecting_value = 0;
 
     cursor = f2e_trim_left((char *)cursor);
     if (*cursor == ',') {
       cursor++;
-      expecting_value = 1;
       continue;
     }
     if (*cursor == ']') {
@@ -8363,4 +9464,370 @@ char *f2e_parse_json_argv(const char *argv_json) {
 
 void f2e_free(char *value) {
   free(value);
+}
+
+/* ==========================================================================
+ * doctor — diagnose the .env files a config reads
+ *
+ * `audit` checks .cli-flags.toml and `audit env` compares one .env file
+ * against it. Neither answers the question an operator actually has when a
+ * value does not arrive: "is my .env being read, and does it say what I think
+ * it says?"
+ *
+ * So doctor re-reads every file in `[env] files` (default `./.env`) with line
+ * numbers and no filtering, and reports two classes of problem:
+ *
+ *   malformed  a line the loader cannot use, and silently skips today
+ *   ambiguous  a line whose effect is not what the file appears to say
+ *
+ * The second class is the interesting one. A key assigned twice, a key set in
+ * two files, or a key no flag declares are all readable-looking lines that do
+ * nothing, or do something other than they look like.
+ *
+ * Values are never quoted back. A .env is where secrets live, and doctor's
+ * output is exactly the kind of thing that gets pasted into an issue.
+ * ========================================================================== */
+
+typedef struct {
+  char key[F2E_MAX_ENV];
+  char file[F2E_MAX_ENV_FILE_PATH];
+  int line;
+} F2EDoctorSeen;
+
+typedef struct {
+  F2EDoctorSeen entries[F2E_MAX_ENV_FILE_KEYS];
+  size_t count;
+} F2EDoctorSeenSet;
+
+static int f2e_doctor_is_ignored(const F2EConfig *config, const char *key) {
+  for (size_t i = 0; i < config->env_audit_ignored_count; i++) {
+    if (f2e_streq(config->env_audit_ignored_keys[i], key)) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+/*
+ * Is the value's quoting closed?
+ *
+ * The loader's unquoting treats an unterminated quote as an ordinary
+ * character, so `KEY="oops` silently yields a value with a leading quote. That
+ * is precisely the sort of line a reader would swear is fine.
+ */
+static int f2e_doctor_quotes_are_closed(const char *value) {
+  const char *cursor = f2e_trim_left((char *)value);
+  char quote = *cursor;
+  if (quote != '"' && quote != '\'') {
+    return 1;
+  }
+  cursor++;
+  while (*cursor) {
+    if (quote == '"' && *cursor == '\\' && cursor[1]) {
+      cursor += 2;
+      continue;
+    }
+    if (*cursor == quote) {
+      return 1;
+    }
+    cursor++;
+  }
+  return 0;
+}
+
+/* Reports POSIX permissions that let other users read a secrets file. */
+static void f2e_doctor_check_permissions(F2EAudit *audit, const char *path,
+                                         const char *display) {
+#if defined(__unix__) || defined(__APPLE__)
+  struct stat info;
+  if (stat(path, &info) != 0) {
+    return;
+  }
+  if (info.st_mode & (S_IRGRP | S_IROTH)) {
+    f2e_audit_add(audit, 0,
+                  "%s is readable by group or other (mode %03o); a .env usually holds secrets",
+                  display, (unsigned)(info.st_mode & 0777));
+  }
+#else
+  (void)audit;
+  (void)path;
+  (void)display;
+#endif
+}
+
+/* Scans one .env file, recording findings against `audit`. */
+static void f2e_doctor_scan_file(F2EAudit *audit, const F2EConfig *config,
+                                 const char *relative_path, F2EDoctorSeenSet *seen,
+                                 int declared_explicitly) {
+  if (declared_explicitly && f2e_dotenv_path_containment(relative_path) == 0) {
+    f2e_audit_add(audit, 1,
+                  "%s resolves outside the working directory and is not read",
+                  relative_path);
+    return;
+  }
+  char *path = f2e_cwd_path(relative_path);
+  if (!path) {
+    return;
+  }
+
+  FILE *file = f2e_dotenv_fopen(path);
+  if (!file) {
+    /* A missing default ./.env is the normal case and says nothing. A file the
+       config explicitly named is different: someone expects it to be read. */
+    if (declared_explicitly) {
+      f2e_audit_add(audit, 0,
+                    "%s is listed in env.files but was not readable "
+                    "(missing, a directory, or a symlink to a non-regular file)",
+                    relative_path);
+    }
+    free(path);
+    return;
+  }
+
+  f2e_doctor_check_permissions(audit, path, relative_path);
+  free(path);
+
+  char line[F2E_MAX_LINE];
+  int line_number = 0;
+  int first_line = 1;
+  int continuing = 0;
+
+  while (fgets(line, sizeof(line), file)) {
+    size_t chunk = strlen(line);
+    int completed = memchr(line, '\n', chunk) != NULL || chunk < sizeof(line) - 1;
+
+    if (continuing) {
+      /* The tail of an over-long line. The loader drops it, so the value is
+         already truncated; the error was reported when the line started. */
+      continuing = !completed;
+      continue;
+    }
+    continuing = !completed;
+    line_number++;
+
+    if (!completed) {
+      f2e_audit_add(audit, 1,
+                    "%s:%d: line is longer than %d bytes and its value is truncated",
+                    relative_path, line_number, (int)sizeof(line) - 1);
+    }
+
+    char *raw = line;
+    if (first_line) {
+      first_line = 0;
+      if ((unsigned char)raw[0] == 0xEF && (unsigned char)raw[1] == 0xBB &&
+          (unsigned char)raw[2] == 0xBF) {
+        raw += 3;
+      }
+    } else if ((unsigned char)raw[0] == 0xEF && (unsigned char)raw[1] == 0xBB &&
+               (unsigned char)raw[2] == 0xBF) {
+      f2e_audit_add(audit, 1,
+                    "%s:%d: a UTF-8 byte-order mark appears mid-file and makes this key unreadable",
+                    relative_path, line_number);
+      raw += 3;
+    }
+
+    char *trimmed = f2e_trim(raw);
+    if (trimmed[0] == '\0' || trimmed[0] == '#') {
+      continue;
+    }
+
+    if (strncmp(trimmed, "export", 6) == 0 &&
+        (trimmed[6] == '\0' || isspace((unsigned char)trimmed[6]))) {
+      /* A bare `export` is its own mistake, and reporting it as "no =" would
+         send the reader looking for a missing value rather than a missing key.
+         Note the loader only strips `export` when whitespace follows, so a
+         bare one is skipped as an unparseable line either way. */
+      trimmed = f2e_trim_left(trimmed + 6);
+      if (trimmed[0] == '\0') {
+        f2e_audit_add(audit, 1, "%s:%d: \"export\" with nothing after it",
+                      relative_path, line_number);
+        continue;
+      }
+    }
+
+    char *eq = strchr(trimmed, '=');
+    if (!eq) {
+      f2e_audit_add(audit, 1,
+                    "%s:%d: no \"=\", so this line is not an assignment and is skipped",
+                    relative_path, line_number);
+      continue;
+    }
+
+    *eq = '\0';
+    char *key = f2e_trim(trimmed);
+    char *value = f2e_trim(eq + 1);
+
+    if (key[0] == '\0') {
+      f2e_audit_add(audit, 1, "%s:%d: assignment with an empty name",
+                    relative_path, line_number);
+      continue;
+    }
+    if (!f2e_env_key_is_valid(key)) {
+      /* The key is named, never the value: the name is the diagnosis. */
+      f2e_audit_add(audit, 1,
+                    "%s:%d: \"%s\" is not a valid environment variable name, so it is skipped",
+                    relative_path, line_number, key);
+      continue;
+    }
+    if (!f2e_doctor_quotes_are_closed(value)) {
+      f2e_audit_add(audit, 1,
+                    "%s:%d: %s has an unterminated quote, so the quote becomes part of the value",
+                    relative_path, line_number, key);
+    }
+
+    /* Ambiguity: the same key assigned more than once, here or in an earlier
+       file. Either way the last one silently wins. */
+    F2EDoctorSeen *previous = NULL;
+    for (size_t i = 0; i < seen->count; i++) {
+      if (!f2e_streq(seen->entries[i].key, key)) {
+        continue;
+      }
+      previous = &seen->entries[i];
+      if (f2e_streq(previous->file, relative_path)) {
+        f2e_audit_add(audit, 0,
+                      "%s:%d: %s was already assigned at line %d; the later value wins",
+                      relative_path, line_number, key, previous->line);
+      } else {
+        f2e_audit_add(audit, 0,
+                      "%s:%d: %s is also set in %s:%d; %s wins because it is read later",
+                      relative_path, line_number, key, previous->file,
+                      previous->line, relative_path);
+      }
+      break;
+    }
+
+    if (!previous && seen->count < F2E_MAX_ENV_FILE_KEYS) {
+      previous = &seen->entries[seen->count++];
+      f2e_strlcpy(previous->key, key, sizeof(previous->key));
+    }
+    if (previous) {
+      f2e_strlcpy(previous->file, relative_path, sizeof(previous->file));
+      previous->line = line_number;
+    }
+
+    /* Ambiguity: a .env value for a flag that needs a terminal. requires_tty
+       is enforced for argv only -- a value in a file is ambient configuration,
+       not someone asking for a prompt right now -- so this line switches the
+       flag on with no terminal check at all. */
+    const F2EFlag *declaring = f2e_flag_declaring_env(config, key);
+    if (declaring && declaring->requires_tty != F2E_TTY_NONE) {
+      f2e_audit_add(audit, 0,
+                    "%s:%d: %s is a requires_tty flag; requires_tty is enforced for "
+                    "command-line values only, so this file value is applied without "
+                    "a terminal check",
+                    relative_path, line_number, key);
+    }
+
+    /* Ambiguity: a key nothing declares. The file says it is configuration;
+       the parser will never look at it. */
+    if (!declaring && !f2e_doctor_is_ignored(config, key)) {
+      f2e_audit_add(audit, 0,
+                    "%s:%d: %s is not declared by any [flags.*] env and is not in env.ignore, "
+                    "so it is read by nothing",
+                    relative_path, line_number, key);
+    }
+  }
+
+  fclose(file);
+}
+
+static char *f2e_doctor_from_file_impl(const char *config_path, int *status_out) {
+  F2EAudit audit;
+  if (!f2e_audit_init(&audit)) {
+    if (status_out) {
+      *status_out = 1;
+    }
+    return f2e_empty_json_object();
+  }
+
+  F2EConfig *config = (F2EConfig *)malloc(sizeof(F2EConfig));
+  if (!config) {
+    f2e_audit_add(&audit, 1, "doctor allocation failed");
+    return f2e_audit_report(&audit, status_out);
+  }
+
+  if (!config_path || config_path[0] == '\0') {
+    f2e_audit_add(&audit, 1, "config path is empty");
+    free(config);
+    return f2e_audit_report(&audit, status_out);
+  }
+  if (!f2e_load_config(config_path, config)) {
+    f2e_audit_add(&audit, 1, "could not read config \"%s\"", config_path);
+    free(config);
+    return f2e_audit_report(&audit, status_out);
+  }
+
+  if (config->invalid_dotenv_files) {
+    f2e_audit_add(&audit, 1,
+                  "env.files is not a list of paths inside the working directory, "
+                  "so no .env file is read");
+    free(config);
+    return f2e_audit_report(&audit, status_out);
+  }
+
+  if (!config->dotenv_enabled) {
+    /* Not a finding: the config said so. Saying it out loud is the point,
+       because "my .env is ignored" is the symptom that brings people here. */
+    f2e_audit_add(&audit, 0,
+                  "env.load is false, so no .env file is read at all");
+    free(config);
+    return f2e_audit_report(&audit, status_out);
+  }
+  if (config->dotenv_files_set && config->dotenv_file_count == 0) {
+    f2e_audit_add(&audit, 0,
+                  "env.files is empty, so no .env file is read at all");
+    free(config);
+    return f2e_audit_report(&audit, status_out);
+  }
+
+  F2EDoctorSeenSet *seen = (F2EDoctorSeenSet *)malloc(sizeof(F2EDoctorSeenSet));
+  if (!seen) {
+    f2e_audit_add(&audit, 1, "doctor allocation failed");
+    free(config);
+    return f2e_audit_report(&audit, status_out);
+  }
+  seen->count = 0;
+
+  size_t count = f2e_dotenv_file_count(config);
+  for (size_t i = 0; i < count; i++) {
+    const char *path = f2e_dotenv_file_at(config, i);
+    if (path) {
+      f2e_doctor_scan_file(&audit, config, path, seen, config->dotenv_files_set);
+    }
+  }
+
+  free(seen);
+  free(config);
+  return f2e_audit_report(&audit, status_out);
+}
+
+char *f2e_doctor_from_file(const char *config_path) {
+  return f2e_doctor_from_file_impl(config_path, NULL);
+}
+
+char *f2e_doctor(void) {
+  char *path = f2e_default_config_path();
+  if (!path) {
+    return f2e_audit_error_report("no usable .cli-flags.toml found before HOME", NULL);
+  }
+  char *result = f2e_doctor_from_file(path);
+  free(path);
+  return result;
+}
+
+int f2e_doctor_status_from_file(const char *config_path) {
+  int status = 1;
+  char *report = f2e_doctor_from_file_impl(config_path, &status);
+  free(report);
+  return status;
+}
+
+int f2e_doctor_status(void) {
+  char *path = f2e_default_config_path();
+  if (!path) {
+    return 1;
+  }
+  int status = f2e_doctor_status_from_file(path);
+  free(path);
+  return status;
 }

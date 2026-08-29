@@ -30,6 +30,10 @@ on:
       - "package.json"
       - "packaging/**"
       - "scripts/**"
+  # The compatibility window is a dated promise, so it needs a time-based
+  # check: on path triggers alone the cutoff can pass unnoticed between commits.
+  schedule:
+    - cron: "17 6 * * *"
   workflow_dispatch:
     inputs:
       check_remotes:

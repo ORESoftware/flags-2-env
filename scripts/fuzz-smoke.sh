@@ -43,22 +43,26 @@ F2E_FUZZ_JSON = [env_file, flags]
 [flags.str]
 env = "F2E_FUZZ_STR"
 aliases = ["str"]
+short = "s"
 type = "string"
 
 [flags.int]
 env = "F2E_FUZZ_INT"
 aliases = ["int"]
+short = "i"
 type = "integer"
 
 [flags.bool]
 env = "F2E_FUZZ_BOOL"
 aliases = ["bool"]
+short = "b"
 type = "bool"
 dotenv_override = true
 
 [flags.json]
 env = "F2E_FUZZ_JSON"
 aliases = ["json"]
+short = "j"
 type = "json"
 TOML
 
@@ -79,11 +83,25 @@ fi
 
 "$FUZZ_CC" "$@"
 
+# Seed corpus and dictionary. Without them libFuzzer starts from nothing and
+# would have to synthesize a multi-character "-xy" token by mutation alone to
+# reach the combined-short-flag path - which it will not do inside a CI-sized
+# budget, leaving that code effectively unfuzzed. New units are written to a
+# scratch directory so the checked-in seeds stay read-only.
+FUZZ_SEEDS="$ROOT_DIR/tests/fuzz-corpus"
+FUZZ_DICT="$ROOT_DIR/tests/fuzz-parser.dict"
+FUZZ_CORPUS="$WORK_DIR/corpus"
+mkdir -p "$FUZZ_CORPUS"
+
 set -- \
   -max_len=8192 \
   -timeout=10 \
   -verbosity=0 \
   -print_final_stats=1
+
+if [ -f "$FUZZ_DICT" ]; then
+  set -- "$@" "-dict=$FUZZ_DICT"
+fi
 
 if [ "$FUZZ_RUNS" -gt 0 ]; then
   set -- "$@" "-runs=$FUZZ_RUNS"
@@ -93,4 +111,4 @@ fi
 
 ASAN_OPTIONS="${ASAN_OPTIONS:-$DEFAULT_ASAN_OPTIONS}" \
 UBSAN_OPTIONS="${UBSAN_OPTIONS:-print_stacktrace=1:halt_on_error=1}" \
-  "$WORK_DIR/fuzz-parser" "$@"
+  "$WORK_DIR/fuzz-parser" "$@" "$FUZZ_CORPUS" "$FUZZ_SEEDS"

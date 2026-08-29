@@ -23,7 +23,11 @@ export interface CommandResolution {
   label: string;
 }
 
+export type Flags2EnvBrowserState = "ready" | "calling" | "failed";
+
 export interface Flags2EnvBrowserClient {
+  readonly state: Flags2EnvBrowserState;
+  readonly failed: boolean;
   setConfig(configText: string): void;
   parse(argv: string[]): Record<string, string>;
   parseStructured(argv: string[]): StructuredParse;

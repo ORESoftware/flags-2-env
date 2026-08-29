@@ -6,7 +6,7 @@ The wrapper writes `.cli-flags.toml` to Emscripten's in-memory filesystem and ca
 
 ## Build
 
-Install Emscripten, then run:
+Use the Emscripten version declared in `toolchain.env`, then run:
 
 ```sh
 bash clients/browser/build.sh
@@ -15,7 +15,25 @@ python3 -m http.server 8000
 
 Open `http://127.0.0.1:8000/clients/browser/demo/`.
 
-The generated `clients/browser/dist/` directory is intentionally ignored. Release automation can build it from the reviewed C source instead of committing compiler output. The build copies the main-thread and worker wrappers plus their TypeScript declarations beside the generated module.
+For a reproducible build without installing Emscripten on the host, source
+`toolchain.env` and run its immutable container image:
+
+```sh
+source clients/browser/toolchain.env
+docker run --rm \
+  --user "$(id -u):$(id -g)" \
+  --env HOME=/tmp \
+  --volume "$PWD:/src" \
+  --workdir /src \
+  "$F2E_EMSCRIPTEN_IMAGE" \
+  bash clients/browser/build.sh
+```
+
+`build.sh` rejects a different compiler version by default. Set
+`F2E_ALLOW_UNPINNED_EMSCRIPTEN=1` only while qualifying a proposed upgrade;
+release and CI builds never set that escape hatch.
+
+The generated `clients/browser/dist/` directory is intentionally ignored. Release automation can build it from the reviewed C source instead of committing compiler output. The build copies the main-thread and worker wrappers, their shared lifecycle reducer, and their TypeScript declarations beside the generated module.
 
 ## Installable browser package
 
@@ -39,7 +57,7 @@ import { createFlags2Env } from "@oresoftware/f2e-browser";
 import { createFlags2EnvWorker } from "@oresoftware/f2e-browser/worker";
 ```
 
-The tarball contains only `flags2env.mjs`, `flags2env.wasm`, the main-thread and worker wrappers, TypeScript declarations, package metadata, the license, and this README. The package builder rejects any extra file before `npm pack` and audits the final npm file list, package name/version, exports, integrity digest, and absence of lifecycle scripts or dependencies.
+The tarball contains only `flags2env.mjs`, `flags2env.wasm`, the main-thread and worker wrappers, `lifecycle.mjs`, TypeScript declarations, package metadata, the license, and this README. The package builder rejects any extra file before `npm pack` and audits the final npm file list, package name/version, exports, integrity digest, and absence of npm lifecycle scripts or dependencies.
 
 ## Main-thread API
 
@@ -47,6 +65,7 @@ The tarball contains only `flags2env.mjs`, `flags2env.wasm`, the main-thread and
 import { createFlags2Env } from "./dist/lib.mjs";
 
 const flags2env = await createFlags2Env({ configText });
+console.log(flags2env.state); // "ready"
 flags2env.parse(["tool", "serve", "--port", "8080"]);
 flags2env.parseStructured(["tool", "serve", "worker", "--name", "alpha"]);
 flags2env.resolveCommands(["tool", "serve", "worker"]);
@@ -56,6 +75,8 @@ flags2env.helpTableForArgv("tool", ["tool", "serve", "--help"], 100);
 ```
 
 Main-thread calls are synchronous once the module has initialized. Use this form for small, infrequent parses where blocking the UI thread is acceptable.
+
+`state` is `ready`, `calling`, or `failed`; `failed` is the matching boolean convenience property. The transition machine owns reentrancy, so a nested call is rejected while the outer call returns to `ready` normally.
 
 ## Web Worker API
 
@@ -76,11 +97,14 @@ await flags2env.parseStructured(["tool", "serve", "worker", "--name", "alpha"]);
 await flags2env.setConfig(nextConfigText);
 await flags2env.drain();
 await flags2env.close();
+console.log(flags2env.state); // "closed"
 ```
 
 Each worker owns a separate WebAssembly instance and MEMFS configuration. Use separate workers for independent configurations or parallel parsing.
 
 `maxPendingRequests` bounds accepted work before another message is posted. Requests beyond that bound reject with `BusyError`; callers can inspect `pendingRequests` to apply their own queue or shed load. `drain()` waits only for already accepted requests. `close()` rejects new work, drains accepted work, then terminates the worker. A bounded close timeout terminates the worker and rejects with `TimeoutError` if accepted work cannot finish. Existing `terminate()` behavior remains immediate and idempotent.
+
+`state` is `ready`, `draining`, `closed`, or `failed`. `closed` remains true for both terminal phases and `closing` remains true after closure begins for backward compatibility, while `failed` distinguishes a worker fault or close timeout from graceful close and intentional termination. Pending work is part of the machine state and is checked against the live request registry after every transition.
 
 A creation-level `AbortSignal` closes the entire worker lifecycle. Aborting rejects pending work with `AbortError`, terminates the worker, and causes subsequent requests to fail as closed. The signal is checked before creating a worker, so an already-aborted signal does not allocate a worker or WebAssembly instance.
 
@@ -97,6 +121,7 @@ A custom `workerUrl` may be supplied when bundlers or Content Security Policy re
 - Pending worker requests are bounded to a configurable maximum of 4,096 and default to 128.
 - Worker errors expose only a bounded name/message pair; stacks and internal filesystem paths are not returned.
 - Main-thread calls are fail-closed and non-reentrant. Worker clients serialize work through one isolated WebAssembly instance.
+- One total transition reducer owns every browser, worker-client, worker-host, and demo lifecycle phase; unexpected internal events enter `failed`.
 - Graceful close, immediate termination, AbortSignal shutdown, and timeout paths clear accepted-request timers and reject every pending promise.
 - Returned pointers are never exposed to application code and are always freed.
 - No SharedArrayBuffer, cross-origin isolation headers, or remote service is required.
@@ -104,6 +129,6 @@ A custom `workerUrl` may be supplied when bundlers or Content Security Policy re
 
 ## Test
 
-The core browser workflow first runs deterministic fake-worker unit tests for overload, drain, close, timeout, abort, and idempotent termination. It then builds the module and runs the main-thread, worker, and lifecycle contracts in Chromium, Firefox, and WebKit through Playwright.
+The formal workflow imports the runtime reducer for exhaustive finite-state exploration and proves its symbolic invariants with Z3. The core browser workflow then runs deterministic fake-worker unit tests for overload, drain, close, timeout, abort, stale replies, worker faults, and idempotent termination. It builds the module and runs the main-thread, worker, and lifecycle contracts in Chromium, Firefox, and WebKit through Playwright.
 
 The browser-package workflow runs the package builder and `npm pack` contract on Linux, macOS, and Windows. It then extracts the actual tarball and imports only its packaged main-thread and worker paths in Chromium, Firefox, and WebKit. The packed test rejects source-tree fallback, extra package files, native install hooks, dependencies, external requests, console/page errors, broken `.wasm` relative loading, incomplete exports, and worker-relative URL regressions.
