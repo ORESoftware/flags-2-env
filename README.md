@@ -1680,9 +1680,13 @@ What `flags2env audit` checks about bundles:
   used, so `short = "ab"` quietly ships a CLI whose `-ab` is a bundle rather
   than the two-letter flag that was written. This is an error, not a warning.
 
-Generated shell completion decomposes bundles the same way the parser does, so
-a bundled value flag's separated value is offered as a value rather than
-matched against subcommand names.
+Generated shell completion decomposes bundles the same way the parser does: a
+bundled value flag's separated value is offered as a value rather than matched
+against subcommand names, and a token that already stacks two or more shorts
+completes to its continuations, so `-dv<TAB>` offers `-dvc`, `-dvp`, `-dvm`.
+Continuations stop at the first value-taking short, because everything after
+it is that flag's value, and they come from the active command scope like
+every other suggestion. A lone `-d` still completes to itself.
 
 ### Command aliases are canonicalized
 

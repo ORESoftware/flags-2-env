@@ -5288,6 +5288,70 @@ static int f2e_completion_emit_case_entry(F2EBuffer *script, const char *pattern
  *   <fn>_consumes_value <scope> <previous> <word>
  *                                whether word is an option value, not a command
  */
+/*
+ * Emits <fn>_bundle_words <bool-shorts> <value-shorts> <current-word>, which
+ * prints the continuations of an open all-boolean bundle: given "-dv" it
+ * offers "-dvp", "-dvc", "-dvm". Without it a half-typed bundle completed to
+ * nothing at all - bash fell through to filename completion on the literal
+ * token and zsh went silently empty - so the one feature whose whole point is
+ * that fingers already know it was the one feature completion could not teach.
+ *
+ * Deliberately silent for a token with a single character after the dash: "-d"
+ * still completes to itself, exactly as before, rather than fanning out into
+ * every pair it could start.
+ */
+/* The subcommand-aware scripts read their short characters from per-scope
+   case statements; a flat config has one scope, so the same two tables are
+   emitted as plain variables. */
+static int f2e_completion_emit_flat_short_chars(const F2EConfig *config, F2EBuffer *script) {
+  F2EBuffer bool_chars = {0};
+  F2EBuffer value_chars = {0};
+  if (!f2e_buffer_init(&bool_chars) || !f2e_buffer_init(&value_chars)) {
+    free(bool_chars.data);
+    free(value_chars.data);
+    return 0;
+  }
+  int ok = f2e_completion_scope_short_chars(config, F2E_SCOPE_ROOT, &bool_chars, &value_chars) &&
+           f2e_buffer_append(script, "\n  bool_shorts=") &&
+           f2e_buffer_append_shell_single_quoted(script, bool_chars.data) &&
+           f2e_buffer_append(script, "\n  value_shorts=") &&
+           f2e_buffer_append_shell_single_quoted(script, value_chars.data);
+  free(bool_chars.data);
+  free(value_chars.data);
+  return ok;
+}
+
+static int f2e_completion_emit_bundle_words(F2EBuffer *script, const char *function_name) {
+  return f2e_buffer_append(script, function_name) &&
+         f2e_buffer_append(script, "_bundle_words() {\n"
+                                   "  local rest c out\n"
+                                   "  case \"$3\" in\n"
+                                   "    -[!-]?*) ;;\n"
+                                   "    *) return ;;\n"
+                                   "  esac\n"
+                                   "  rest=\"${3#-}\"\n"
+                                   "  while [ -n \"$rest\" ]; do\n"
+                                   "    c=\"${rest%\"${rest#?}\"}\"\n"
+                                   "    rest=\"${rest#?}\"\n"
+                                   "    case \"$1\" in\n"
+                                   "      *\"$c\"*) ;;\n"
+                                   "      *) return ;;\n"
+                                   "    esac\n"
+                                   "  done\n"
+                                   "  out=''\n"
+                                   "  rest=\"$1$2\"\n"
+                                   "  while [ -n \"$rest\" ]; do\n"
+                                   "    c=\"${rest%\"${rest#?}\"}\"\n"
+                                   "    rest=\"${rest#?}\"\n"
+                                   "    case \"$3\" in\n"
+                                   "      *\"$c\"*) continue ;;\n"
+                                   "    esac\n"
+                                   "    out=\"$out $3$c\"\n"
+                                   "  done\n"
+                                   "  printf '%s' \"$out\"\n"
+                                   "}\n");
+}
+
 static int f2e_completion_emit_scope_helpers(const F2EConfig *config, F2EBuffer *script, const char *function_name, const char *bool_values) {
   int scopes[F2E_MAX_COMMANDS + 1];
   size_t scope_count = 0;
@@ -5524,9 +5588,10 @@ static char *f2e_completion_script_bash_commands(const F2EConfig *config, const 
 
   int ok = f2e_buffer_append(&script, "# flags2env bash completion (subcommand-aware)\n") &&
            f2e_completion_emit_scope_helpers(config, &script, function_name, bool_values.data) &&
+           f2e_completion_emit_bundle_words(&script, function_name) &&
            f2e_buffer_append(&script, function_name) &&
            f2e_buffer_append(&script, "() {\n"
-                                      "  local cur prev opt opts value_opts bool_value_opts bool_values cmds scope child w i matched stopped\n"
+                                      "  local cur prev opt opts value_opts bool_value_opts bool_values bundle cmds scope child w i matched stopped\n"
                                       "  COMPREPLY=()\n"
                                       "  cur=\"${COMP_WORDS[COMP_CWORD]}\"\n"
                                       "  prev=\"${COMP_WORDS[COMP_CWORD-1]}\"\n"
@@ -5584,8 +5649,15 @@ static char *f2e_completion_script_bash_commands(const F2EConfig *config, const 
                                       "      return 0\n"
                                       "    fi\n"
                                       "  done\n"
+                                      "  bundle=\"$(") &&
+           f2e_buffer_append(&script, function_name) &&
+           f2e_buffer_append(&script, "_bundle_words \"$(") &&
+           f2e_buffer_append(&script, function_name) &&
+           f2e_buffer_append(&script, "_bool_shorts \"$scope\")\" \"$(") &&
+           f2e_buffer_append(&script, function_name) &&
+           f2e_buffer_append(&script, "_value_shorts \"$scope\")\" \"$cur\")\"\n"
                                       "  case \"$cur\" in\n"
-                                      "    -*) COMPREPLY=( $(compgen -W \"$opts\" -- \"$cur\") ) ;;\n"
+                                      "    -*) COMPREPLY=( $(compgen -W \"$opts $bundle\" -- \"$cur\") ) ;;\n"
                                       "    *)\n"
                                       "      if [ -n \"$cmds\" ]; then\n"
                                       "        COMPREPLY=( $(compgen -W \"$cmds\" -- \"$cur\") )\n"
@@ -5648,9 +5720,10 @@ static char *f2e_completion_script_bash(const F2EConfig *config, const char *com
   f2e_completion_function_name(command, function_name, sizeof(function_name));
 
   if (!f2e_buffer_append(&script, "# flags2env bash completion\n") ||
+      !f2e_completion_emit_bundle_words(&script, function_name) ||
       !f2e_buffer_append(&script, function_name) ||
       !f2e_buffer_append(&script, "() {\n"
-                                  "  local cur prev opt opts value_opts bool_value_opts bool_values cmds\n"
+                                  "  local cur prev opt opts value_opts bool_value_opts bool_values bool_shorts value_shorts bundle cmds\n"
                                   "  COMPREPLY=()\n"
                                   "  cur=\"${COMP_WORDS[COMP_CWORD]}\"\n"
                                   "  prev=\"${COMP_WORDS[COMP_CWORD-1]}\"\n"
@@ -5662,6 +5735,7 @@ static char *f2e_completion_script_bash(const F2EConfig *config, const char *com
       !f2e_buffer_append_shell_single_quoted(&script, bool_value_options.data) ||
       !f2e_buffer_append(&script, "\n  bool_values=") ||
       !f2e_buffer_append_shell_single_quoted(&script, bool_values.data) ||
+      !f2e_completion_emit_flat_short_chars(config, &script) ||
       !f2e_buffer_append(&script, "\n  cmds=") ||
       !f2e_buffer_append_shell_single_quoted(&script, command_words.data) ||
       !f2e_buffer_append(&script, "\n"
@@ -5676,8 +5750,11 @@ static char *f2e_completion_script_bash(const F2EConfig *config, const char *com
                                   "      return 0\n"
                                   "    fi\n"
                                   "  done\n"
+                                  "  bundle=\"$(") ||
+      !f2e_buffer_append(&script, function_name) ||
+      !f2e_buffer_append(&script, "_bundle_words \"$bool_shorts\" \"$value_shorts\" \"$cur\")\"\n"
                                   "  case \"$cur\" in\n"
-                                  "    -*) COMPREPLY=( $(compgen -W \"$opts\" -- \"$cur\") ) ;;\n"
+                                  "    -*) COMPREPLY=( $(compgen -W \"$opts $bundle\" -- \"$cur\") ) ;;\n"
                                   "    *)\n"
                                   "      if [ -n \"$cmds\" ]; then\n"
                                   "        COMPREPLY=( $(compgen -W \"$cmds\" -- \"$cur\") )\n"
@@ -5788,9 +5865,10 @@ static char *f2e_completion_script_zsh_commands(const F2EConfig *config, const c
            f2e_buffer_append(&script, command) &&
            f2e_buffer_append(&script, "\n# flags2env zsh completion (subcommand-aware)\n") &&
            f2e_completion_emit_scope_helpers(config, &script, function_name, bool_values.data) &&
+           f2e_completion_emit_bundle_words(&script, function_name) &&
            f2e_buffer_append(&script, function_name) &&
            f2e_buffer_append(&script, "() {\n"
-                                      "  local cur prev opt opts value_opts bool_value_opts bool_values cmds scope child w i matched stopped\n"
+                                      "  local cur prev opt opts value_opts bool_value_opts bool_values bundle cmds scope child w i matched stopped\n"
                                       "  cur=\"${words[CURRENT]}\"\n"
                                       "  prev=\"${words[CURRENT-1]}\"\n"
                                       "  scope=''\n"
@@ -5849,8 +5927,15 @@ static char *f2e_completion_script_zsh_commands(const F2EConfig *config, const c
                                       "      return\n"
                                       "    fi\n"
                                       "  done\n"
+                                      "  bundle=\"$(") &&
+           f2e_buffer_append(&script, function_name) &&
+           f2e_buffer_append(&script, "_bundle_words \"$(") &&
+           f2e_buffer_append(&script, function_name) &&
+           f2e_buffer_append(&script, "_bool_shorts \"$scope\")\" \"$(") &&
+           f2e_buffer_append(&script, function_name) &&
+           f2e_buffer_append(&script, "_value_shorts \"$scope\")\" \"$cur\")\"\n"
                                       "  case \"$cur\" in\n"
-                                      "    -*) compadd -- ${=opts} ;;\n"
+                                      "    -*) compadd -- ${=opts} ${=bundle} ;;\n"
                                       "    *)\n"
                                       "      if [ -n \"$cmds\" ]; then\n"
                                       "        compadd -- ${=cmds}\n"

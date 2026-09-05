@@ -164,10 +164,41 @@ reply="$(run_complete _flags2env_complete_tool tool --dry-run workspace '' | tr 
 expect_contains 'invalid bool value remains a command alias' "$reply" 'remote'
 expect_contains 'invalid bool value remains a command alias' "$reply" 'remotes'
 
+# A half-typed bundle used to complete to nothing at all, so the one feature
+# whose whole point is that fingers already know it was the one feature
+# completion could not teach. Continuations come from the active scope.
+reply="$(run_complete _flags2env_complete_gitish gitish commit -av | tr '\n' ' ')"
+expect_contains 'bundle continues with a scoped value short' "$reply" '-avm'
+expect_not_contains 'bundle never repeats a character it already has' "$reply" '-ava'
+expect_not_contains 'bundle never repeats a character it already has' "$reply" '-avv'
+# A value-taking short closes the bundle: everything after it is its value.
+reply="$(run_complete _flags2env_complete_gitish gitish commit -am | tr '\n' ' ')"
+expect_not_contains 'a closed bundle offers no continuation' "$reply" '-amv'
+# Scope still governs: a short belonging only to a sibling command is not
+# offered, exactly as its long spelling is not.
+reply="$(run_complete _flags2env_complete_gitish gitish commit -av | tr '\n' ' ')"
+expect_not_contains 'sibling-command short does not leak into the bundle' "$reply" '-avf'
+
 # flat configs (no commands) keep working through the same entry point
 load_completion app "$ROOT_DIR/tests/fixtures/.cli-flags.toml"
 reply="$(run_complete _flags2env_complete_app app '--' | tr '\n' ' ')"
 expect_contains 'flat options' "$reply" '--port'
 expect_contains 'flat options' "$reply" '--debug'
+
+# The same continuations on a flat config...
+reply="$(run_complete _flags2env_complete_app app -dv | tr '\n' ' ')"
+expect_contains 'flat bundle continues with a bool short' "$reply" '-dvc'
+expect_contains 'flat bundle continues with a value short' "$reply" '-dvp'
+expect_not_contains 'flat bundle never repeats a character' "$reply" '-dvd'
+expect_not_contains 'flat bundle offers no undeclared character' "$reply" '-dvz'
+# ...and nothing once a value-taking short has closed it.
+reply="$(run_complete _flags2env_complete_app app -dvp | tr '\n' ' ')"
+expect_not_contains 'closed flat bundle offers no continuation' "$reply" '-dvpc'
+# A lone short is left exactly as it was: one match, which readline completes
+# outright. Fanning it out into every pair it could start would be a
+# regression dressed up as a feature.
+reply="$(run_complete _flags2env_complete_app app -d | tr '\n' ' ')"
+expect_contains 'lone short still completes to itself' "$reply" '-d'
+expect_not_contains 'lone short does not fan out' "$reply" '-dv'
 
 printf 'bash completion tests passed\n'
