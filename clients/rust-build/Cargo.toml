@@ -1,0 +1,16 @@
+[package]
+name = "flags2env-build"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Cargo build-time type generation using the canonical flags-2-env parser"
+repository = "https://github.com/flags-2-env/flags-2-env"
+
+[dependencies]
+flags2env = { path = "../rust" }
+
+[dev-dependencies]
+serde_json = "1"
+tempfile = "3"
+
+[workspace]

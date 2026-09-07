@@ -1,0 +1,9 @@
+[env]
+files = []
+[parse]
+allow_unknown = false
+[flags.json]
+env = "JSON_ENABLED"
+aliases = ["json"]
+type = "bool"
+default = true
