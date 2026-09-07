@@ -1,0 +1,46 @@
+name: rust-build-contract
+on:
+  pull_request:
+    paths:
+      - 'clients/rust-build/**'
+      - 'clients/rust/**'
+      - 'examples/rust-typed/**'
+      - '.github/workflows/rust-build-contract.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'clients/rust-build/**'
+      - 'clients/rust/**'
+      - 'examples/rust-typed/**'
+      - '.github/workflows/rust-build-contract.yml'
+permissions:
+  contents: read
+jobs:
+  typed-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Select Rust toolchain
+        run: rustup toolchain install 1.88.0 --profile minimal && rustup default 1.88.0
+      - name: Test native generation and negation contracts
+        run: cargo test --manifest-path clients/rust-build/Cargo.toml
+      - name: Compile and run typed consumer
+        run: |
+          cargo run --manifest-path examples/rust-typed/Cargo.toml -- --no-json
+      - name: Removed declaration must fail compilation
+        shell: bash
+        run: |
+          set -euo pipefail
+          file=examples/rust-typed/.cli-flags.toml
+          backup="$(mktemp)"
+          cp "$file" "$backup"
+          trap 'cp "$backup" "$file"; rm -f "$backup"' EXIT
+          sed -i 's/JSON_ENABLED/RENAMED_JSON/' "$file"
+          if cargo check --manifest-path examples/rust-typed/Cargo.toml > /tmp/typed-negative.log 2>&1; then
+            echo 'ERROR: consumer compiled after removing its referenced field' >&2
+            exit 1
+          fi
+          grep -E 'no field.*JSON_ENABLED|unknown field.*JSON_ENABLED' /tmp/typed-negative.log
