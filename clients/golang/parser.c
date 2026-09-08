@@ -2862,6 +2862,41 @@ static void f2e_set_bare_bool(F2EFlag *flag, F2EPair *pairs, size_t pair_count,
   f2e_set_pair(pairs, pair_count, flag->env, "true");
 }
 
+/* Negation is resolved in the active command scope, after exact aliases.
+   Bang forms are shorthand only for declared booleans. They never toggle a
+   previous value, consume a following value, or reinterpret positionals. */
+static F2EFlag *f2e_find_negated_bool(F2EConfig *config, int scope,
+                                      const char *name, int *bang_form) {
+  const char *start = name;
+  size_t length = strlen(name);
+  *bang_form = 0;
+  if (strncmp(name, "no-", 3) == 0) {
+    start += 3;
+    length -= 3;
+  } else if (length > 1 && name[0] == '!') {
+    start++;
+    length--;
+    *bang_form = 1;
+  } else if (length > 1 && name[length - 1] == '!') {
+    length--;
+    *bang_form = 1;
+  } else {
+    return NULL;
+  }
+  if (length == 0 || length >= F2E_MAX_NAME) {
+    return NULL;
+  }
+  char alias[F2E_MAX_NAME];
+  memcpy(alias, start, length);
+  alias[length] = '\0';
+  /* Reject doubled/mixed bangs rather than assigning an invented meaning. */
+  if (strchr(alias, '!') != NULL) {
+    return NULL;
+  }
+  F2EFlag *flag = f2e_find_flag_by_alias(config, scope, alias);
+  return flag && flag->type == F2E_TYPE_BOOL ? flag : NULL;
+}
+
 static int f2e_token_looks_like_known_option(F2EConfig *config, int scope, const char *token) {
   if (!token || token[0] != '-' || token[1] == '\0') {
     return 0;
@@ -2869,11 +2904,13 @@ static int f2e_token_looks_like_known_option(F2EConfig *config, int scope, const
   if (token[1] == '-') {
     const char *name = token + 2;
     char copy[F2E_MAX_NAME];
-    f2e_strlcpy(copy, name, sizeof(copy));
-    char *eq = strchr(copy, '=');
-    if (eq) {
-      *eq = '\0';
+    const char *eq = strchr(name, '=');
+    size_t length = eq ? (size_t)(eq - name) : strlen(name);
+    if (length == 0 || length >= sizeof(copy)) {
+      return 0;
     }
+    memcpy(copy, name, length);
+    copy[length] = '\0';
     if (f2e_find_flag_by_alias(config, scope, copy)) {
       return 1;
     }
@@ -2886,11 +2923,8 @@ static int f2e_token_looks_like_known_option(F2EConfig *config, int scope, const
         return 1;
       }
     }
-    if (strncmp(copy, "no-", 3) == 0) {
-      F2EFlag *flag = f2e_find_flag_by_alias(config, scope, copy + 3);
-      return flag && flag->type == F2E_TYPE_BOOL;
-    }
-    return 0;
+    int bang_form = 0;
+    return f2e_find_negated_bool(config, scope, copy, &bang_form) != NULL;
   }
   if (f2e_find_flag_by_short(config, scope, token[1])) {
     return 1;
@@ -3261,24 +3295,29 @@ static void f2e_apply_long_arg(F2EConfig *config, int scope, F2EPair *pairs, siz
   if (eq) {
     size_t name_length = (size_t)(eq - raw);
     if (name_length >= sizeof(name)) {
-      name_length = sizeof(name) - 1;
+      return;
     }
     memcpy(name, raw, name_length);
     name[name_length] = '\0';
     f2e_strlcpy(inline_value, eq + 1, sizeof(inline_value));
     has_inline_value = 1;
   } else {
+    if (strlen(raw) >= sizeof(name)) {
+      return;
+    }
     f2e_strlcpy(name, raw, sizeof(name));
   }
 
   F2EFlag *flag = f2e_find_flag_by_alias(config, scope, name);
-  if (!flag && strncmp(name, "no-", 3) == 0) {
-    flag = f2e_find_flag_by_alias(config, scope, name + 3);
-    if (flag && flag->type == F2E_TYPE_BOOL) {
-      negated = 1;
-    } else {
-      return;
-    }
+  int bang_form = 0;
+  if (!flag) {
+    flag = f2e_find_negated_bool(config, scope, name, &bang_form);
+    negated = flag != NULL;
+  }
+  if (flag && bang_form && has_inline_value) {
+    f2e_json_list_append(errors,
+        "bang-negated boolean flags do not accept an attached value; use --flag=false");
+    return;
   }
   if (!flag || flag->env[0] == '\0') {
     return;
