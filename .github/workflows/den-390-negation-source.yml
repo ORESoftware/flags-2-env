@@ -1,0 +1,61 @@
+name: DEN-390 exact-source negation build
+on:
+  push:
+    branches: [DEN-390-negation-build-20260907]
+permissions:
+  contents: read
+concurrency:
+  group: den-390-negation-source-build
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.repository == 'flags-2-env/flags-2-env' && github.ref == 'refs/heads/DEN-390-negation-build-20260907'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the explicitly selected implementation carrier
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Build the immutable source snapshot with the reviewed patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin beadecdcfc3dab269bcb7bb9efaa6aae7ae391e4
+          git worktree add --detach "$RUNNER_TEMP/negation-product" beadecdcfc3dab269bcb7bb9efaa6aae7ae391e4
+          node maintenance/DEN-390/apply.mjs "$RUNNER_TEMP/negation-product"
+          cd "$RUNNER_TEMP/negation-product"
+          make all
+          node --test tests/negation.test.mjs
+          make test
+          git diff --check
+      - name: Publish only the four tested product files to a fresh review branch
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/negation-product"
+          branch=DEN-390-boolean-negation-20260907
+          status=0
+          git ls-remote --exit-code --heads origin "refs/heads/$branch" >/dev/null || status=$?
+          test "$status" -eq 2
+          git add -- src/parser.c Makefile tests/negation.test.mjs docs/boolean-negation.md
+          test "$(git diff --cached --name-only | wc -l)" -eq 4
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'DEN-390: support boolean bang negation in the shared parser'
+          askpass="$RUNNER_TEMP/den-390-askpass.sh"
+          cat > "$askpass" <<'SH'
+          #!/bin/sh
+          case "$1" in
+            *Username*) printf '%s\n' x-access-token ;;
+            *Password*) printf '%s\n' "$GITHUB_TOKEN" ;;
+            *) exit 1 ;;
+          esac
+          SH
+          chmod 700 "$askpass"
+          GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 git push origin "HEAD:refs/heads/$branch"
+          printf 'Tested product head: %s\n' "$(git rev-parse HEAD)"
+          git diff HEAD^ HEAD --stat
