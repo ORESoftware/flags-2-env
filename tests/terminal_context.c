@@ -34,6 +34,7 @@ int main(void) {
       set_test_env("F2E_FORCE_CI", "0") != 0 ||
       set_test_env("F2E_FORCE_COLOR", "1") != 0 ||
       set_test_env("F2E_FORCE_UNICODE", "1") != 0 ||
+      set_test_env("TERM", "xterm-256color") != 0 ||
       set_test_env("COLUMNS", "132") != 0) {
     return 1;
   }

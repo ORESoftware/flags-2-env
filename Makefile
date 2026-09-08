@@ -30,6 +30,7 @@ API_HARDENING := $(BUILD_DIR)/api-hardening
 ALLOCATION_FAILURE := $(BUILD_DIR)/allocation-failure
 TERMINAL_CONTEXT_TEST := $(BUILD_DIR)/terminal-context-test
 DOTENV_API_TEST := $(BUILD_DIR)/dotenv-api-test
+HELP_UNICODE_TEST := $(BUILD_DIR)/help-unicode
 PARSER_OBJ := $(BUILD_DIR)/parser.o
 CONTEXT_OBJ := $(BUILD_DIR)/terminal_context.o
 LIB_OBJECTS := $(PARSER_OBJ) $(CONTEXT_OBJ)
@@ -64,13 +65,14 @@ cli: $(CLI)
 $(CLI): $(SRC) $(CONTEXT_SRC) $(CLI_SRC) $(HEADER) $(CONTEXT_HEADER) FORCE | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(SRC) $(CONTEXT_SRC) $(CLI_SRC) -o $@
 
-test: borrow-check readme-test parity-test $(PROCESS_SMOKE) $(API_HARDENING) $(ALLOCATION_FAILURE) $(TERMINAL_CONTEXT_TEST) $(DOTENV_API_TEST)
+test: borrow-check readme-test parity-test $(PROCESS_SMOKE) $(API_HARDENING) $(ALLOCATION_FAILURE) $(TERMINAL_CONTEXT_TEST) $(DOTENV_API_TEST) $(HELP_UNICODE_TEST)
 	./tests/run.sh
 	node --test tests/negation.test.mjs
 	$(API_HARDENING)
 	$(ALLOCATION_FAILURE) tests/subcommands-deep/.cli-flags.toml
 	$(TERMINAL_CONTEXT_TEST)
 	$(DOTENV_API_TEST)
+	$(HELP_UNICODE_TEST)
 	$(PROCESS_SMOKE) --port 7777 -d
 
 codegen-docker-test:
@@ -108,6 +110,9 @@ $(TERMINAL_CONTEXT_TEST): $(CONTEXT_SRC) $(CONTEXT_HEADER) $(HEADER) tests/termi
 
 $(DOTENV_API_TEST): $(SRC) tests/dotenv_api.c $(HEADER) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -Isrc $(SRC) tests/dotenv_api.c -o $@
+
+$(HELP_UNICODE_TEST): $(SRC) tests/help_unicode.c $(HEADER) tests/help-unicode/.cli-flags.toml | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -Isrc $(SRC) tests/help_unicode.c -o $@
 
 clean:
 	rm -rf $(BUILD_DIR)

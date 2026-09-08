@@ -6939,6 +6939,152 @@ static size_t f2e_size_max(size_t a, size_t b) {
   return a > b ? a : b;
 }
 
+/*
+ * Decode one UTF-8 scalar without consulting the process locale. Help output
+ * has to stay deterministic in minimal containers where LC_CTYPE is commonly
+ * unset. Invalid input advances one byte and is rendered as one replacement
+ * cell by the width routines rather than splitting or looping forever.
+ */
+static size_t f2e_help_utf8_decode(const unsigned char *value, size_t available, uint32_t *codepoint) {
+  if (!value || available == 0 || !codepoint) {
+    return 0;
+  }
+
+  unsigned char first = value[0];
+  if (first < 0x80) {
+    *codepoint = first;
+    return 1;
+  }
+
+  size_t count = 0;
+  uint32_t decoded = 0;
+  uint32_t minimum = 0;
+  if (first >= 0xc2 && first <= 0xdf) {
+    count = 2;
+    decoded = (uint32_t)(first & 0x1f);
+    minimum = 0x80;
+  } else if (first >= 0xe0 && first <= 0xef) {
+    count = 3;
+    decoded = (uint32_t)(first & 0x0f);
+    minimum = 0x800;
+  } else if (first >= 0xf0 && first <= 0xf4) {
+    count = 4;
+    decoded = (uint32_t)(first & 0x07);
+    minimum = 0x10000;
+  } else {
+    *codepoint = 0xfffd;
+    return 1;
+  }
+
+  if (count > available) {
+    *codepoint = 0xfffd;
+    return 1;
+  }
+  for (size_t i = 1; i < count; i++) {
+    if ((value[i] & 0xc0) != 0x80) {
+      *codepoint = 0xfffd;
+      return 1;
+    }
+    decoded = (decoded << 6) | (uint32_t)(value[i] & 0x3f);
+  }
+  if (decoded < minimum || decoded > 0x10ffff ||
+      (decoded >= 0xd800 && decoded <= 0xdfff)) {
+    *codepoint = 0xfffd;
+    return 1;
+  }
+  *codepoint = decoded;
+  return count;
+}
+
+static int f2e_help_codepoint_is_zero_width(uint32_t codepoint) {
+  return (codepoint >= 0x0300 && codepoint <= 0x036f) ||
+         (codepoint >= 0x0483 && codepoint <= 0x0489) ||
+         (codepoint >= 0x0591 && codepoint <= 0x05bd) || codepoint == 0x05bf ||
+         (codepoint >= 0x05c1 && codepoint <= 0x05c2) ||
+         (codepoint >= 0x0610 && codepoint <= 0x061a) ||
+         (codepoint >= 0x064b && codepoint <= 0x065f) || codepoint == 0x0670 ||
+         (codepoint >= 0x06d6 && codepoint <= 0x06ed) ||
+         (codepoint >= 0x1ab0 && codepoint <= 0x1aff) ||
+         (codepoint >= 0x1dc0 && codepoint <= 0x1dff) || codepoint == 0x200b ||
+         codepoint == 0x200c || codepoint == 0x200d ||
+         (codepoint >= 0x20d0 && codepoint <= 0x20ff) ||
+         (codepoint >= 0xfe00 && codepoint <= 0xfe0f) ||
+         (codepoint >= 0xfe20 && codepoint <= 0xfe2f) ||
+         (codepoint >= 0xe0100 && codepoint <= 0xe01ef);
+}
+
+static int f2e_help_codepoint_is_wide(uint32_t codepoint) {
+  return codepoint >= 0x1100 &&
+         (codepoint <= 0x115f || codepoint == 0x2329 || codepoint == 0x232a ||
+          (codepoint >= 0x2e80 && codepoint <= 0xa4cf && codepoint != 0x303f) ||
+          (codepoint >= 0xac00 && codepoint <= 0xd7a3) ||
+          (codepoint >= 0xf900 && codepoint <= 0xfaff) ||
+          (codepoint >= 0xfe10 && codepoint <= 0xfe19) ||
+          (codepoint >= 0xfe30 && codepoint <= 0xfe6f) ||
+          (codepoint >= 0xff00 && codepoint <= 0xff60) ||
+          (codepoint >= 0xffe0 && codepoint <= 0xffe6) ||
+          (codepoint >= 0x1f300 && codepoint <= 0x1faff) ||
+          (codepoint >= 0x20000 && codepoint <= 0x3fffd));
+}
+
+static size_t f2e_help_codepoint_width(uint32_t codepoint) {
+  if (codepoint == 0 || codepoint == '\n' || codepoint == '\r') {
+    return 0;
+  }
+  if (f2e_help_codepoint_is_zero_width(codepoint)) {
+    return 0;
+  }
+  return f2e_help_codepoint_is_wide(codepoint) ? 2u : 1u;
+}
+
+static size_t f2e_help_display_width_n(const char *value, size_t byte_len) {
+  size_t offset = 0;
+  size_t columns = 0;
+  while (value && offset < byte_len) {
+    uint32_t codepoint = 0;
+    size_t consumed = f2e_help_utf8_decode((const unsigned char *)value + offset,
+                                           byte_len - offset,
+                                           &codepoint);
+    if (consumed == 0) {
+      break;
+    }
+    columns += f2e_help_codepoint_width(codepoint);
+    offset += consumed;
+  }
+  return columns;
+}
+
+static size_t f2e_help_display_width(const char *value) {
+  return value ? f2e_help_display_width_n(value, strlen(value)) : 0;
+}
+
+static size_t f2e_help_prefix_bytes(const char *value,
+                                    size_t byte_len,
+                                    size_t max_columns,
+                                    size_t *used_columns) {
+  size_t offset = 0;
+  size_t columns = 0;
+  while (value && offset < byte_len) {
+    uint32_t codepoint = 0;
+    size_t consumed = f2e_help_utf8_decode((const unsigned char *)value + offset,
+                                           byte_len - offset,
+                                           &codepoint);
+    if (consumed == 0) {
+      break;
+    }
+    size_t cell_width = f2e_help_codepoint_width(codepoint);
+    if (cell_width > 0 && columns + cell_width > max_columns) {
+      break;
+    }
+    columns += cell_width;
+    offset += consumed;
+  }
+  if (used_columns) {
+    *used_columns = columns;
+  }
+  return offset;
+}
+
 static int f2e_help_terminal_columns(void) {
   const char *env_columns = getenv("COLUMNS");
   if (env_columns && env_columns[0] != '\0') {
@@ -6990,14 +7136,15 @@ static int f2e_help_append_repeat(F2EBuffer *buffer, char ch, size_t count) {
 }
 
 static int f2e_help_append_padded(F2EBuffer *buffer, const char *value, size_t width) {
-  size_t len = value ? strlen(value) : 0;
-  size_t used = f2e_size_min(len, width);
-  if (used > 0) {
-    if (!f2e_buffer_reserve(buffer, used)) {
+  size_t byte_len = value ? strlen(value) : 0;
+  size_t used = 0;
+  size_t copied = f2e_help_prefix_bytes(value, byte_len, width, &used);
+  if (copied > 0) {
+    if (!f2e_buffer_reserve(buffer, copied)) {
       return 0;
     }
-    memcpy(buffer->data + buffer->len, value, used);
-    buffer->len += used;
+    memcpy(buffer->data + buffer->len, value, copied);
+    buffer->len += copied;
     buffer->data[buffer->len] = '\0';
   }
   return f2e_help_append_repeat(buffer, ' ', width - used);
@@ -7076,10 +7223,15 @@ static int f2e_help_wrap_lines(const char *value, size_t width, F2EHelpLines *ou
       available++;
     }
 
-    size_t take = f2e_size_min(available, width);
-    if (available > width) {
+    size_t used_columns = 0;
+    size_t take = f2e_help_prefix_bytes(cursor, available, width, &used_columns);
+    if (take == 0 && available > 0) {
+      uint32_t ignored = 0;
+      take = f2e_help_utf8_decode((const unsigned char *)cursor, available, &ignored);
+    }
+    if (take < available) {
       size_t break_at = 0;
-      for (size_t i = 1; i < width; i++) {
+      for (size_t i = 1; i < take; i++) {
         if (isspace((unsigned char)cursor[i])) {
           break_at = i;
         }
@@ -7586,7 +7738,7 @@ static size_t f2e_help_commands_name_width(const F2EConfig *config, int help_sco
     }
     char *names = f2e_help_command_row_name(config, (int)i, help_scope);
     if (names) {
-      width = f2e_size_max(width, strlen(names));
+      width = f2e_size_max(width, f2e_help_display_width(names));
       free(names);
     }
     width = f2e_size_max(width, f2e_help_commands_name_width(config, help_scope, (int)i, depth + 1));

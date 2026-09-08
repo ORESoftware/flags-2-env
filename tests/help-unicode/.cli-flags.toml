@@ -1,0 +1,16 @@
+[help]
+url = "https://example.com/café/東京/🧭"
+
+[flags.profile]
+env = "PROFILE"
+aliases = ["profile"]
+short = "p"
+type = "string"
+help = "Choose a café profile for 東京, an é accent, or the 🧭 compass route."
+
+[flags.unicode]
+env = "UNICODE"
+aliases = ["unicode"]
+type = "bool"
+default = "true"
+help = "Keep UTF-8 scalar boundaries intact while wrapping narrow help tables."
