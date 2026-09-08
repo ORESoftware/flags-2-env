@@ -145,7 +145,14 @@ test('child command booleans can be negated in their active scope', () => {
   }
 });
 test('overlong option names cannot be truncated into an accepted flag', () => {
-  const token = `--${'j'.repeat(1024)}!`;
-  const result = parse([token]);
-  assert.ok(list(result, 'NEG_UNKNOWN').length > 0); assert.equal(result.NEG_JSON, 'true');
+  // F2E_MAX_NAME is 96; remain below F2E_MAX_VALUE so this specifically
+  // exercises name admission rather than diagnostic-list byte capacity.
+  const alias = 'j'.repeat(95);
+  const extra = `\n[flags.boundary]\nenv = "NEG_BOUNDARY"\naliases = ["${alias}"]\ntype = "bool"\ndefault = "false"\n`;
+  for (const token of [`--${alias}x`, `--${alias}x=true`, `--${'j'.repeat(128)}!`]) {
+    const result = parse([token], extra);
+    assert.ok(list(result, 'NEG_UNKNOWN').includes(token));
+    assert.equal(result.NEG_JSON, 'true');
+    assert.equal(result.NEG_BOUNDARY, 'false');
+  }
 });
