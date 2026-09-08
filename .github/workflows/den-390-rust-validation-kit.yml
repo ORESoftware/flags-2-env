@@ -1,0 +1,30 @@
+name: DEN-390 offline Rust validation kit
+on:
+  push:
+    branches: [DEN-390-rust-validation-kit-20260907]
+permissions:
+  contents: read
+jobs:
+  kit:
+    if: github.repository == 'flags-2-env/flags-2-env' && github.ref == 'refs/heads/DEN-390-rust-validation-kit-20260907'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Install the pinned public Rust toolchain only
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.95.0 --profile minimal --component rustfmt --component clippy
+          root="$(rustup run 1.95.0 rustc --print sysroot)"
+          mkdir -p "$RUNNER_TEMP/rust-kit"
+          tar -C "$root" -cf - bin lib | gzip -1 > "$RUNNER_TEMP/rust-kit/rust-1.95.0-linux-x86_64.tar.gz"
+          rustup run 1.95.0 rustc --version --verbose > "$RUNNER_TEMP/rust-kit/provenance.txt"
+          sha256sum "$RUNNER_TEMP/rust-kit/rust-1.95.0-linux-x86_64.tar.gz" >> "$RUNNER_TEMP/rust-kit/provenance.txt"
+      - name: Export toolchain without repository source or credentials
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: rust-validation-kit-1.95.0
+          path: ${{ runner.temp }}/rust-kit/
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
