@@ -1,0 +1,57 @@
+name: DEN-617 offline public validation dependencies
+on:
+  push:
+    branches: [DEN-390-rust-validation-kit-20260907]
+    paths: [.github/workflows/den-617-offline-validation-deps.yml]
+permissions:
+  contents: read
+jobs:
+  kit:
+    if: github.repository == 'flags-2-env/flags-2-env' && github.ref == 'refs/heads/DEN-390-rust-validation-kit-20260907'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Acquire pinned public Dart SDK with its official checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/public-kit"
+          cd "$RUNNER_TEMP/public-kit"
+          base=https://storage.googleapis.com/dart-archive/channels/stable/release/3.8.1/sdk
+          curl --fail --silent --show-error --location "$base/dartsdk-linux-x64-release.zip" -o dartsdk-linux-x64-release.zip
+          curl --fail --silent --show-error --location "$base/dartsdk-linux-x64-release.zip.sha256sum" -o dart.sha256sum
+          sha256sum --check dart.sha256sum
+      - name: Vendor only public crates.io test dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/public-registry/src"
+          cd "$RUNNER_TEMP/public-registry"
+          printf 'fn main() {}\n' > src/main.rs
+          cat > Cargo.toml <<'TOML'
+          [package]
+          name = "offline-public-test-dependencies"
+          version = "0.0.0"
+          edition = "2024"
+          [dependencies]
+          serde = { version = "1", features = ["derive"] }
+          serde_json = "=1.0.151"
+          thiserror = "2"
+          tokio = { version = "1", features = ["io-util", "macros", "process", "rt-multi-thread", "time"] }
+          tempfile = "3"
+          toml = "0.8"
+          walkdir = "2"
+          TOML
+          cargo generate-lockfile
+          cargo vendor --locked vendor > vendor-config.toml
+          tar -czf "$RUNNER_TEMP/public-kit/registry-dependencies.tar.gz" Cargo.toml Cargo.lock vendor vendor-config.toml
+          cd "$RUNNER_TEMP/public-kit"
+          sha256sum dartsdk-linux-x64-release.zip registry-dependencies.tar.gz > SHA256SUMS
+      - name: Export only public SDK and crates, never product source or credentials
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: offline-public-validation-dependencies
+          path: ${{ runner.temp }}/public-kit/
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
