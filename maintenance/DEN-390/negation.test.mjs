@@ -49,7 +49,8 @@ function parse(args, extra = '', env = {}) {
     writeFileSync(join(cwd, '.cli-flags.toml'), config + extra);
     const result = spawnSync(cli, ['app', ...args], {
       cwd, encoding: 'utf8', timeout: 10000, maxBuffer: 1024 * 1024,
-      env: { PATH: process.env.PATH, HOME: cwd, FLAGS2ENV_DOTENV: '0', CI: '1',
+      // Discovery intentionally refuses $HOME/.cli-flags.toml.
+      env: { PATH: process.env.PATH, HOME: join(cwd, 'isolated-home'), FLAGS2ENV_DOTENV: '0', CI: '1',
         F2E_FORCE_STDIN_TTY: '0', F2E_FORCE_STDERR_TTY: '0', F2E_FORCE_CI: '1', ...env },
     });
     assert.ifError(result.error);
