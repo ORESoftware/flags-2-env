@@ -127,9 +127,9 @@ pub fn resolve_bindings(
 fn valid_field(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
-        && value.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-')
-        })
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
 }
 
 fn valid_env_key(value: &str) -> bool {
@@ -232,10 +232,7 @@ mod tests {
                 "AUTH_CALLBACK_URL".to_string(),
                 "https://app.example.test/callback".to_string(),
             ),
-            (
-                "UNRELATED_SECRET".to_string(),
-                "must-not-leak".to_string(),
-            ),
+            ("UNRELATED_SECRET".to_string(), "must-not-leak".to_string()),
         ]);
         let declarations = BTreeMap::from([
             ("auth.authority".to_string(), "SHARED_AUTH_URL".to_string()),
@@ -249,10 +246,7 @@ mod tests {
 
     #[test]
     fn domain_bindings_fail_closed_on_missing_empty_or_invalid_keys() {
-        let mut env = EnvMap::from([(
-            "GOOD_KEY".to_string(),
-            "value".to_string(),
-        )]);
+        let mut env = EnvMap::from([("GOOD_KEY".to_string(), "value".to_string())]);
         let declarations = BTreeMap::from([
             ("feature.one".to_string(), "GOOD_KEY".to_string()),
             ("feature.two".to_string(), "MISSING_KEY".to_string()),
