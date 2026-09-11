@@ -62,6 +62,30 @@ test('Gleam pipes require a terminal delivery step', () => {
   );
 });
 
+test('Gleam tail log expression can be handed to the caller', () => {
+  assert.deepEqual(
+    analyzeSource('fn emit() { logging.info("ready") }', 'gleam'),
+    [],
+  );
+});
+
+test('assigned Gleam events can be delivered through a pipeline', () => {
+  assert.deepEqual(
+    analyzeSource(
+      'fn emit() { let event = logging.info("queued")\n  event |> logging.send }',
+      'gleam',
+    ),
+    [],
+  );
+  assert.deepEqual(
+    analyzeSource(
+      'fn emit() { let event = logging.info("queued")\n  event |> send }',
+      'gleam',
+    ),
+    [],
+  );
+});
+
 test('documented suppressions are honored', () => {
   assert.deepEqual(
     analyzeSource(
