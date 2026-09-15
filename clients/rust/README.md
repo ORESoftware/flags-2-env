@@ -10,18 +10,37 @@ monorepo root.
 binary is self-contained and does not need `libflags2env.so`,
 `libflags2env.dylib`, or `flags2env.dll` in the runtime image.
 
+Treat the flags contract as reviewed executable policy, not ambient working-
+directory input. A source example can bind the path to its crate at compile
+time. Production installers should instead place the reviewed contract under an
+executable-owned prefix such as `/usr/local/share/<app>/.cli-flags.toml` and
+resolve that location from `std::env::current_exe()`. If an operator override is
+supported, require an absolute regular-file path. Do not accept a bare
+`.cli-flags.toml` from the process working directory in production.
+
 ```rust
 use flags2env::BundledFlags2Env;
 
+const CONTRACT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/.cli-flags.toml");
+
 fn apply_flags() -> Result<(), Box<dyn std::error::Error>> {
     let parser = BundledFlags2Env::new();
-    parser.audit_config(Some(".cli-flags.toml"))?;
+    parser
+        .audit_config(Some(CONTRACT))
+        .map_err(|_| "reviewed flags contract audit failed")?;
     let argv = std::env::args().collect::<Vec<_>>();
-    let parsed = parser.parse_structured(&argv, Some(".cli-flags.toml"))?;
-    if !parsed.unknown_options.is_empty() || !parsed.errors.is_empty() {
+    let parsed = parser
+        .parse_structured(&argv, Some(CONTRACT))
+        .map_err(|_| "flags parsing failed")?;
+    if !parsed.unknown_options.is_empty()
+        || !parsed.errors.is_empty()
+        || !parsed.extras.is_empty()
+    {
         return Err(format!(
-            "invalid CLI arguments: unknown={:?}, errors={:?}",
-            parsed.unknown_options, parsed.errors
+            "invalid CLI arguments: unknown={}, errors={}, positionals={}",
+            parsed.unknown_options.len(),
+            parsed.errors.len(),
+            parsed.extras.len()
         )
         .into());
     }
@@ -32,6 +51,10 @@ fn apply_flags() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
+
+Do not render parser error payloads, unknown option values, or positional
+contents directly into application logs. Summarize failures by count and, when
+needed, include only bounded/sanitized option names.
 
 ## Typed coercion and generated interfaces
 
@@ -52,17 +75,26 @@ use cli_config::CliConfig;
 use flags2env::BundledFlags2Env;
 use std::collections::HashMap;
 
+const CONTRACT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/.cli-flags.toml");
+
 fn load_config() -> Result<CliConfig, Box<dyn std::error::Error>> {
     let parser = BundledFlags2Env::new();
     let argv = std::env::args().collect::<Vec<_>>();
-    let parsed = parser.parse_structured(&argv, Some(".cli-flags.toml"))?;
-    if !parsed.unknown_options.is_empty() || !parsed.errors.is_empty() {
+    let parsed = parser
+        .parse_structured(&argv, Some(CONTRACT))
+        .map_err(|_| "flags parsing failed")?;
+    if !parsed.unknown_options.is_empty()
+        || !parsed.errors.is_empty()
+        || !parsed.extras.is_empty()
+    {
         return Err("invalid CLI arguments".into());
     }
 
     let mut values: HashMap<String, String> = std::env::vars().collect();
     values.extend(parsed.provided_flags);
-    Ok(parser.coerce(&values, Some(".cli-flags.toml"))?)
+    parser
+        .coerce(&values, Some(CONTRACT))
+        .map_err(|_| "typed flags configuration is invalid".into())
 }
 ```
 
@@ -70,12 +102,12 @@ fn load_config() -> Result<CliConfig, Box<dyn std::error::Error>> {
 result into `T`. It keeps declared env keys, applies active defaults, and
 converts the schema's integers, doubles, booleans, JSON values, arrays, and
 maps. Invalid values return `CoercionError::Validation`; use
-`validation_errors()` to inspect all conversion failures at once. A
-`CoercionError::Deserialize` means the requested Rust type does not agree with
-the generated schema. The same method is available on the dynamically loaded
-`Flags2Env` client. Use `provided_flags`, not the default-bearing `flags`, when
-merging over `std::env::vars()`; this preserves the precedence
-`CLI > environment > schema default`.
+`validation_errors()` only in trusted test/development tooling when the values
+are known non-secret. A `CoercionError::Deserialize` means the requested Rust
+type does not agree with the generated schema. The same method is available on
+the dynamically loaded `Flags2Env` client. Use `provided_flags`, not the
+default-bearing `flags`, when merging over `std::env::vars()`; this preserves
+the precedence `CLI > environment > schema default`.
 
 Secrets should remain environment-only and be listed under `[env].ignore` in
 `.cli-flags.toml`; do not declare secret-bearing flags or defaults.
