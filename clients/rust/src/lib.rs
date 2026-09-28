@@ -1,3 +1,5 @@
+#![allow(clippy::needless_return)]
+
 pub mod bundled;
 pub mod env_map;
 
@@ -23,6 +25,78 @@ type ParseDefaultFn = unsafe extern "C" fn(*const c_char) -> *mut c_char;
 type ParseProcessFn = unsafe extern "C" fn(*const c_char) -> *mut c_char;
 type ParseProcessDefaultFn = unsafe extern "C" fn() -> *mut c_char;
 type FreeFn = unsafe extern "C" fn(*mut c_char);
+
+/// Thread-safe failure returned by the parsing, command-resolution, audit and
+/// application APIs.
+///
+/// This is intentionally a concrete error type instead of `Box<dyn Error>` so
+/// callers can attach `anyhow::Context`, move failures across task/thread
+/// boundaries, and still use ordinary `?` conversion into legacy boxed-error
+/// return types.
+#[derive(Debug)]
+pub enum Flags2EnvError {
+    Json(serde_json::Error),
+    InputContainsNul(std::ffi::NulError),
+    DynamicLibrary(libloading::Error),
+    Message(String),
+}
+
+impl fmt::Display for Flags2EnvError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        return match self {
+            Self::Json(error) => write!(formatter, "flags2env JSON error: {error}"),
+            Self::InputContainsNul(error) => {
+                write!(
+                    formatter,
+                    "flags2env input contains an interior NUL byte: {error}"
+                )
+            }
+            Self::DynamicLibrary(error) => write!(formatter, "flags2env library error: {error}"),
+            Self::Message(message) => formatter.write_str(message),
+        };
+    }
+}
+
+impl std::error::Error for Flags2EnvError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        return match self {
+            Self::Json(error) => Some(error),
+            Self::InputContainsNul(error) => Some(error),
+            Self::DynamicLibrary(error) => Some(error),
+            Self::Message(_) => None,
+        };
+    }
+}
+
+impl From<serde_json::Error> for Flags2EnvError {
+    fn from(error: serde_json::Error) -> Self {
+        return Self::Json(error);
+    }
+}
+
+impl From<std::ffi::NulError> for Flags2EnvError {
+    fn from(error: std::ffi::NulError) -> Self {
+        return Self::InputContainsNul(error);
+    }
+}
+
+impl From<libloading::Error> for Flags2EnvError {
+    fn from(error: libloading::Error) -> Self {
+        return Self::DynamicLibrary(error);
+    }
+}
+
+impl From<&'static str> for Flags2EnvError {
+    fn from(message: &'static str) -> Self {
+        return Self::Message(message.to_string());
+    }
+}
+
+impl From<String> for Flags2EnvError {
+    fn from(message: String) -> Self {
+        return Self::Message(message);
+    }
+}
 
 /// Failure returned by [`Flags2Env::coerce`] and
 /// [`BundledFlags2Env::coerce`].
@@ -293,7 +367,7 @@ impl Flags2Env {
         &self,
         argv: &[String],
         config_path: Option<&str>,
-    ) -> Result<HashMap<String, String>, Box<dyn std::error::Error>> {
+    ) -> Result<HashMap<String, String>, Flags2EnvError> {
         let argv_json = CString::new(serde_json::to_string(argv)?)?;
 
         unsafe {
@@ -318,7 +392,7 @@ impl Flags2Env {
     pub fn parse_process(
         &self,
         config_path: Option<&str>,
-    ) -> Result<HashMap<String, String>, Box<dyn std::error::Error>> {
+    ) -> Result<HashMap<String, String>, Flags2EnvError> {
         unsafe {
             let free: Symbol<FreeFn> = self.library.get(b"f2e_free")?;
             let result = if let Some(config_path) = config_path {
@@ -379,7 +453,7 @@ impl Flags2Env {
         symbol_from_file: &[u8],
         argv: &[String],
         config_path: Option<&str>,
-    ) -> Result<Option<String>, Box<dyn std::error::Error>> {
+    ) -> Result<Option<String>, Flags2EnvError> {
         let argv_json = CString::new(serde_json::to_string(argv)?)?;
         unsafe {
             let free: Symbol<FreeFn> = self.library.get(b"f2e_free")?;
@@ -410,7 +484,7 @@ impl Flags2Env {
         &self,
         argv: &[String],
         config_path: Option<&str>,
-    ) -> Result<StructuredParse, Box<dyn std::error::Error>> {
+    ) -> Result<StructuredParse, Flags2EnvError> {
         let raw = self
             .call_json_argv(
                 b"f2e_parse_structured_json_argv",
@@ -446,7 +520,7 @@ impl Flags2Env {
         &self,
         argv: &[String],
         config_path: Option<&str>,
-    ) -> Result<ResolvedCommands, Box<dyn std::error::Error>> {
+    ) -> Result<ResolvedCommands, Flags2EnvError> {
         let raw = self
             .call_json_argv(
                 b"f2e_resolve_commands_json_argv",
@@ -470,7 +544,7 @@ impl Flags2Env {
         &self,
         env_map: &mut HashMap<String, String>,
         argv: &[String],
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Flags2EnvError> {
         env_map.extend(self.parse(argv, None)?);
         Ok(())
     }
@@ -478,7 +552,7 @@ impl Flags2Env {
     pub fn apply_process(
         &self,
         env_map: &mut HashMap<String, String>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Flags2EnvError> {
         env_map.extend(self.parse_process(None)?);
         Ok(())
     }
@@ -491,5 +565,18 @@ fn default_library_name() -> &'static str {
         "flags2env.dll"
     } else {
         "libflags2env.so"
+    }
+}
+
+#[cfg(test)]
+mod error_contract_tests {
+    use super::{CoercionError, Flags2EnvError};
+
+    fn assert_thread_safe_error<T: std::error::Error + Send + Sync + 'static>() {}
+
+    #[test]
+    fn public_errors_are_thread_safe() {
+        assert_thread_safe_error::<Flags2EnvError>();
+        assert_thread_safe_error::<CoercionError>();
     }
 }

@@ -6,7 +6,8 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use crate::{
-    coercion_input_json, decode_coercion_report, CoercionError, ResolvedCommands, StructuredParse,
+    coercion_input_json, decode_coercion_report, CoercionError, Flags2EnvError, ResolvedCommands,
+    StructuredParse,
 };
 
 unsafe extern "C" {
@@ -50,14 +51,14 @@ pub struct BundledFlags2Env;
 
 impl BundledFlags2Env {
     pub const fn new() -> Self {
-        Self
+        return Self;
     }
 
     pub fn parse(
         &self,
         argv: &[String],
         config_path: Option<&str>,
-    ) -> Result<HashMap<String, String>, Box<dyn std::error::Error>> {
+    ) -> Result<HashMap<String, String>, Flags2EnvError> {
         let raw = call_json_argv(
             argv,
             config_path,
@@ -65,13 +66,14 @@ impl BundledFlags2Env {
             f2e_parse_json_argv_from_file,
         )?
         .unwrap_or_else(|| "{}".to_string());
-        Ok(serde_json::from_str(&raw)?)
+
+        return Ok(serde_json::from_str(&raw)?);
     }
 
     pub fn parse_process(
         &self,
         config_path: Option<&str>,
-    ) -> Result<HashMap<String, String>, Box<dyn std::error::Error>> {
+    ) -> Result<HashMap<String, String>, Flags2EnvError> {
         let result = if let Some(config_path) = config_path {
             let config_path = CString::new(config_path)?;
             // SAFETY: the CString lives through the call and the C API returns
@@ -82,7 +84,8 @@ impl BundledFlags2Env {
             unsafe { f2e_parse_process() }
         };
         let raw = take_owned_string(result).unwrap_or_else(|| "{}".to_string());
-        Ok(serde_json::from_str(&raw)?)
+
+        return Ok(serde_json::from_str(&raw)?);
     }
 
     /// Coerce declared environment values according to `.cli-flags.toml` and
@@ -108,14 +111,15 @@ impl BundledFlags2Env {
             unsafe { f2e_coerce_json(values_json.as_ptr()) }
         };
         let raw = take_owned_string(result).ok_or(CoercionError::NativeUnavailable)?;
-        decode_coercion_report(&raw)
+
+        return decode_coercion_report(&raw);
     }
 
     pub fn parse_structured(
         &self,
         argv: &[String],
         config_path: Option<&str>,
-    ) -> Result<StructuredParse, Box<dyn std::error::Error>> {
+    ) -> Result<StructuredParse, Flags2EnvError> {
         let raw = call_json_argv(
             argv,
             config_path,
@@ -124,7 +128,8 @@ impl BundledFlags2Env {
         )?
         .ok_or("flags2env could not parse argv; check the config path")?;
         let report: serde_json::Value = serde_json::from_str(&raw)?;
-        Ok(StructuredParse {
+
+        return Ok(StructuredParse {
             flags: json_string_map(report.get("flags")),
             provided_flags: required_json_string_map(
                 report.get("providedFlags"),
@@ -142,14 +147,14 @@ impl BundledFlags2Env {
             extras: json_string_vec(report.get("extras")),
             unknown_options: json_string_vec(report.get("unknownOptions")),
             errors: json_string_vec(report.get("errors")),
-        })
+        });
     }
 
     pub fn resolve_commands(
         &self,
         argv: &[String],
         config_path: Option<&str>,
-    ) -> Result<ResolvedCommands, Box<dyn std::error::Error>> {
+    ) -> Result<ResolvedCommands, Flags2EnvError> {
         let raw = call_json_argv(
             argv,
             config_path,
@@ -158,20 +163,18 @@ impl BundledFlags2Env {
         )?
         .ok_or("flags2env could not resolve commands; check the config path")?;
         let report: serde_json::Value = serde_json::from_str(&raw)?;
-        Ok(ResolvedCommands {
+
+        return Ok(ResolvedCommands {
             path: json_string_vec(report.get("path")),
             label: report
                 .get("label")
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or_default()
                 .to_string(),
-        })
+        });
     }
 
-    pub fn audit_config(
-        &self,
-        config_path: Option<&str>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn audit_config(&self, config_path: Option<&str>) -> Result<(), Flags2EnvError> {
         let status = if let Some(config_path) = config_path {
             let config_path = CString::new(config_path)?;
             // SAFETY: the CString is valid for the duration of the call.
@@ -180,11 +183,13 @@ impl BundledFlags2Env {
             // SAFETY: the C API takes no arguments.
             unsafe { f2e_audit_config_status() }
         };
-        if status == 0 {
-            Ok(())
-        } else {
-            Err(format!("flags2env config audit failed with status {status}").into())
+        if status != 0 {
+            return Err(Flags2EnvError::from(format!(
+                "flags2env config audit failed with status {status}"
+            )));
         }
+
+        return Ok(());
     }
 
     /// Diagnoses the `.env` files `config_path` reads: every file in
@@ -195,45 +200,52 @@ impl BundledFlags2Env {
     /// [`Self::audit_config`] produces — so a caller can print it, or parse it
     /// to render findings its own way. Values from the `.env` are never
     /// included, only key names and positions.
-    pub fn doctor(&self, config_path: &str) -> Result<String, Box<dyn std::error::Error>> {
+    pub fn doctor(&self, config_path: &str) -> Result<String, Flags2EnvError> {
         let config_path = CString::new(config_path)?;
         // SAFETY: the CString is valid for the duration of the call; the
         // returned pointer is owned by the caller and released by
         // `take_owned_string`.
         let result = unsafe { f2e_doctor_from_file(config_path.as_ptr()) };
-        take_owned_string(result)
-            .ok_or_else(|| "flags2env could not run doctor; check the config path".into())
+        let report = take_owned_string(result).ok_or_else(|| {
+            Flags2EnvError::from("flags2env could not run doctor; check the config path")
+        })?;
+
+        return Ok(report);
     }
 
     /// `Ok(())` when `doctor` found no error-level problem. Warnings —
     /// ambiguity, permissions — do not fail, matching the CLI's exit code, so
     /// this is usable as a build-script or test gate.
-    pub fn doctor_status(&self, config_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn doctor_status(&self, config_path: &str) -> Result<(), Flags2EnvError> {
         let config_path = CString::new(config_path)?;
         // SAFETY: the CString is valid for the duration of the call.
         let status = unsafe { f2e_doctor_status_from_file(config_path.as_ptr()) };
-        if status == 0 {
-            Ok(())
-        } else {
-            Err(format!("flags2env doctor reported {status} error-level finding(s)").into())
+        if status != 0 {
+            return Err(Flags2EnvError::from(format!(
+                "flags2env doctor reported {status} error-level finding(s)"
+            )));
         }
+
+        return Ok(());
     }
 
     pub fn apply(
         &self,
         env_map: &mut HashMap<String, String>,
         argv: &[String],
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Flags2EnvError> {
         env_map.extend(self.parse(argv, None)?);
-        Ok(())
+
+        return Ok(());
     }
 
     pub fn apply_process(
         &self,
         env_map: &mut HashMap<String, String>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Flags2EnvError> {
         env_map.extend(self.parse_process(None)?);
-        Ok(())
+
+        return Ok(());
     }
 }
 
@@ -242,7 +254,7 @@ fn call_json_argv(
     config_path: Option<&str>,
     call: unsafe extern "C" fn(*const c_char) -> *mut c_char,
     call_from_file: unsafe extern "C" fn(*const c_char, *const c_char) -> *mut c_char,
-) -> Result<Option<String>, Box<dyn std::error::Error>> {
+) -> Result<Option<String>, Flags2EnvError> {
     let argv_json = CString::new(serde_json::to_string(argv)?)?;
     let result = if let Some(config_path) = config_path {
         let config_path = CString::new(config_path)?;
@@ -252,7 +264,8 @@ fn call_json_argv(
         // SAFETY: argv_json is a valid NUL-terminated JSON string.
         unsafe { call(argv_json.as_ptr()) }
     };
-    Ok(take_owned_string(result))
+
+    return Ok(take_owned_string(result));
 }
 
 fn take_owned_string(value: *mut c_char) -> Option<String> {
@@ -265,11 +278,12 @@ fn take_owned_string(value: *mut c_char) -> Option<String> {
         .to_string_lossy()
         .into_owned();
     unsafe { f2e_free(value) };
-    Some(text)
+
+    return Some(text);
 }
 
 fn json_string_vec(value: Option<&serde_json::Value>) -> Vec<String> {
-    value
+    return value
         .and_then(serde_json::Value::as_array)
         .map(|items| {
             items
@@ -277,11 +291,11 @@ fn json_string_vec(value: Option<&serde_json::Value>) -> Vec<String> {
                 .filter_map(|item| item.as_str().map(String::from))
                 .collect()
         })
-        .unwrap_or_default()
+        .unwrap_or_default();
 }
 
 fn json_string_map(value: Option<&serde_json::Value>) -> HashMap<String, String> {
-    value
+    return value
         .and_then(serde_json::Value::as_object)
         .map(|object| {
             object
@@ -289,11 +303,11 @@ fn json_string_map(value: Option<&serde_json::Value>) -> HashMap<String, String>
                 .filter_map(|(key, item)| item.as_str().map(|text| (key.clone(), text.to_string())))
                 .collect()
         })
-        .unwrap_or_default()
+        .unwrap_or_default();
 }
 
 fn json_string_vec_map(value: Option<&serde_json::Value>) -> HashMap<String, Vec<String>> {
-    value
+    return value
         .and_then(|value| value.as_object())
         .map(|object| {
             object
@@ -301,14 +315,14 @@ fn json_string_vec_map(value: Option<&serde_json::Value>) -> HashMap<String, Vec
                 .map(|(key, item)| (key.clone(), json_string_vec(Some(item))))
                 .collect()
         })
-        .unwrap_or_default()
+        .unwrap_or_default();
 }
 
 fn required_json_string_map(
     value: Option<&serde_json::Value>,
     error: &'static str,
 ) -> Result<HashMap<String, String>, &'static str> {
-    value
+    return value
         .and_then(serde_json::Value::as_object)
         .ok_or(error)?
         .iter()
@@ -317,7 +331,7 @@ fn required_json_string_map(
                 .map(|text| (key.clone(), text.to_string()))
                 .ok_or(error)
         })
-        .collect()
+        .collect();
 }
 
 #[cfg(test)]
@@ -375,7 +389,8 @@ default = "127.0.0.1:8080"
 "#,
         )
         .expect("write config");
-        dir
+
+        return dir;
     }
 
     #[allow(non_snake_case)]
