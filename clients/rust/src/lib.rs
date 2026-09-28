@@ -1,3 +1,5 @@
+#![allow(clippy::needless_return)]
+
 pub mod bundled;
 pub mod env_map;
 
