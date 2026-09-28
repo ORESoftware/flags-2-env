@@ -1,4 +1,5 @@
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), flags2env_build::BuildError> {
     flags2env_build::generate_cargo(".cli-flags.toml", "CliConfig")?;
-    Ok(())
+
+    return Ok(());
 }

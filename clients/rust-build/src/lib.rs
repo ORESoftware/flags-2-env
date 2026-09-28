@@ -4,11 +4,20 @@
 //! It does not maintain a second TOML parser, type mapping, or default table.
 //! Use it as a build dependency; keep `flags2env` at the runtime argv boundary.
 
+#![allow(clippy::needless_return)]
+
 use std::error::Error;
 use std::ffi::{CStr, CString};
 use std::fs;
 use std::os::raw::c_char;
 use std::path::{Path, PathBuf};
+
+/// Thread-safe build failure returned by the Rust code-generation helpers.
+///
+/// Build scripts frequently feed these errors into `anyhow`, worker threads,
+/// and other task-safe error stacks. Keep the trait-object bounds explicit so
+/// callers do not need adapter shims at this boundary.
+pub type BuildError = Box<dyn Error + Send + Sync + 'static>;
 
 unsafe extern "C" {
     fn f2e_generate_types_from_file(
@@ -48,7 +57,7 @@ pub fn generate_types(
     config: &Path,
     language: Language,
     type_name: &str,
-) -> Result<String, Box<dyn Error>> {
+) -> Result<String, BuildError> {
     let mut name_chars = type_name.chars();
     if !name_chars
         .next()
@@ -82,7 +91,8 @@ pub fn generate_types(
     if output.trim().is_empty() {
         return Err("flags2env generated an empty type definition".into());
     }
-    Ok(output)
+
+    return Ok(output);
 }
 
 /// Generate build products into a caller-owned output directory.
@@ -93,7 +103,7 @@ pub fn generate_into(
     config: &Path,
     output_dir: &Path,
     type_name: &str,
-) -> Result<GeneratedFiles, Box<dyn Error>> {
+) -> Result<GeneratedFiles, BuildError> {
     let rust = generate_types(config, Language::Rust, type_name)?;
     let schema = generate_types(config, Language::JsonSchema, type_name)?;
     let contract = fs::read(config)?;
@@ -106,23 +116,37 @@ pub fn generate_into(
     fs::write(&files.rust, rust)?;
     fs::write(&files.schema, schema)?;
     fs::write(&files.contract, contract)?;
-    Ok(files)
+
+    return Ok(files);
 }
 
 /// Cargo build-script entry point. Prints only Cargo build instructions.
 ///
 /// ```no_run
-/// fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// fn main() -> Result<(), flags2env_build::BuildError> {
 ///     flags2env_build::generate_cargo(".cli-flags.toml", "CliConfig")?;
-///     Ok(())
+///     return Ok(());
 /// }
 /// ```
 pub fn generate_cargo(
     config: impl AsRef<Path>,
     type_name: &str,
-) -> Result<GeneratedFiles, Box<dyn Error>> {
+) -> Result<GeneratedFiles, BuildError> {
     let config = config.as_ref();
     println!("cargo:rerun-if-changed={}", config.display());
     let output = std::env::var_os("OUT_DIR").ok_or("Cargo did not set OUT_DIR")?;
-    generate_into(config, Path::new(&output), type_name)
+
+    return generate_into(config, Path::new(&output), type_name);
+}
+
+#[cfg(test)]
+mod error_contract_tests {
+    use super::BuildError;
+
+    fn assert_task_safe<T: Send + Sync + 'static>() {}
+
+    #[test]
+    fn build_error_is_task_safe() {
+        assert_task_safe::<BuildError>();
+    }
 }
