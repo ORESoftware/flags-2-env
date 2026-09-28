@@ -41,55 +41,58 @@ pub enum Flags2EnvError {
 
 impl fmt::Display for Flags2EnvError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        return match self {
             Self::Json(error) => write!(formatter, "flags2env JSON error: {error}"),
             Self::InputContainsNul(error) => {
-                write!(formatter, "flags2env input contains an interior NUL byte: {error}")
+                write!(
+                    formatter,
+                    "flags2env input contains an interior NUL byte: {error}"
+                )
             }
             Self::DynamicLibrary(error) => write!(formatter, "flags2env library error: {error}"),
             Self::Message(message) => formatter.write_str(message),
-        }
+        };
     }
 }
 
 impl std::error::Error for Flags2EnvError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
+        return match self {
             Self::Json(error) => Some(error),
             Self::InputContainsNul(error) => Some(error),
             Self::DynamicLibrary(error) => Some(error),
             Self::Message(_) => None,
-        }
+        };
     }
 }
 
 impl From<serde_json::Error> for Flags2EnvError {
     fn from(error: serde_json::Error) -> Self {
-        Self::Json(error)
+        return Self::Json(error);
     }
 }
 
 impl From<std::ffi::NulError> for Flags2EnvError {
     fn from(error: std::ffi::NulError) -> Self {
-        Self::InputContainsNul(error)
+        return Self::InputContainsNul(error);
     }
 }
 
 impl From<libloading::Error> for Flags2EnvError {
     fn from(error: libloading::Error) -> Self {
-        Self::DynamicLibrary(error)
+        return Self::DynamicLibrary(error);
     }
 }
 
 impl From<&'static str> for Flags2EnvError {
     fn from(message: &'static str) -> Self {
-        Self::Message(message.to_string())
+        return Self::Message(message.to_string());
     }
 }
 
 impl From<String> for Flags2EnvError {
     fn from(message: String) -> Self {
-        Self::Message(message)
+        return Self::Message(message);
     }
 }
 
