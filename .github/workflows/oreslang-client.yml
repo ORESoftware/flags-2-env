@@ -46,6 +46,15 @@ jobs:
         run: |
           set -euo pipefail
           "$RUNNER_TEMP/flags2env-oreslang-bridge-test"
+      - name: Build and execute Oreslang bridge fault-boundary tests
+        run: |
+          set -euo pipefail
+          cc -std=c99 -Wall -Wextra -Wpedantic -Werror -O2 \
+            -Iclients/oreslang/native \
+            clients/oreslang/native/flags2env_ores_bridge.c \
+            clients/oreslang/native/bridge_fault_test.c \
+            -o "$RUNNER_TEMP/flags2env-oreslang-bridge-fault-test"
+          "$RUNNER_TEMP/flags2env-oreslang-bridge-fault-test"
       - name: Verify Oreslang source contract
         run: |
           set -euo pipefail
