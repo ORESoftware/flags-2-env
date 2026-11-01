@@ -44,6 +44,7 @@ int main(void) {
   char *typed;
   f2e_ores_result result;
   char *oversized;
+  char *oversized_path;
 
   expect_empty(f2e_ores_parse(NULL, "[]"), F2E_ORES_INVALID_INPUT);
   expect_empty(f2e_ores_parse("relative.toml", "[]"), F2E_ORES_INVALID_INPUT);
@@ -53,6 +54,14 @@ int main(void) {
   expect_empty(f2e_ores_coerce("relative.toml", "{}"), F2E_ORES_INVALID_INPUT);
   expect_empty(f2e_ores_coerce("/tmp/config.toml", "[]"), F2E_ORES_INVALID_INPUT);
   expect_empty(f2e_ores_coerce("/tmp/config.toml", ""), F2E_ORES_INVALID_INPUT);
+
+  oversized_path = (char *)malloc(F2E_ORES_MAX_PATH_BYTES + 2u);
+  assert(oversized_path != NULL);
+  oversized_path[0] = '/';
+  memset(oversized_path + 1, 'a', F2E_ORES_MAX_PATH_BYTES);
+  oversized_path[F2E_ORES_MAX_PATH_BYTES + 1u] = '\0';
+  expect_empty(f2e_ores_parse(oversized_path, "[]"), F2E_ORES_INPUT_TOO_LARGE);
+  free(oversized_path);
 
   oversized = (char *)malloc(F2E_ORES_MAX_JSON_BYTES + 2u);
   assert(oversized != NULL);
@@ -92,6 +101,6 @@ int main(void) {
   free(typed);
 #endif
 
-  puts("ORES-FLAGS2ENV-BRIDGE-PASS|cases=19");
+  puts("ORES-FLAGS2ENV-BRIDGE-PASS|cases=20");
   return 0;
 }
