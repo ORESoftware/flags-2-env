@@ -27,12 +27,17 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - name: Verify vendored parser identity
+        run: |
+          set -euo pipefail
+          cmp -s src/parser.c clients/oreslang/native/parser.c
+          cmp -s src/parser.h clients/oreslang/native/parser.h
       - name: Build hardened Oreslang native bridge
         run: |
           set -euo pipefail
           cc -std=c99 -Wall -Wextra -Wpedantic -Werror -O2 \
             -Isrc -Iclients/oreslang/native \
-            src/parser.c \
+            clients/oreslang/native/parser.c \
             clients/oreslang/native/flags2env_ores_bridge.c \
             clients/oreslang/native/bridge_test.c \
             -o "$RUNNER_TEMP/flags2env-oreslang-bridge-test"
