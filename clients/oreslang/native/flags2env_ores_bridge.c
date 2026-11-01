@@ -10,18 +10,20 @@ static size_t f2e_ores_bounded_len(const char *value, size_t max) {
   return i;
 }
 
-static int f2e_ores_absolute_path(const char *path) {
-  if (!path || !path[0]) return 0;
+static int f2e_ores_absolute_path(const char *path, size_t len) {
+  if (!path || len == 0) return 0;
 #ifdef _WIN32
-  if (((path[0] >= 'A' && path[0] <= 'Z') ||
+  if (len >= 3 &&
+      ((path[0] >= 'A' && path[0] <= 'Z') ||
        (path[0] >= 'a' && path[0] <= 'z')) &&
       path[1] == ':' && (path[2] == '/' || path[2] == '\\')) {
     return 1;
   }
-  return (path[0] == '\\' && path[1] == '\\') ||
-         (path[0] == '/' && path[1] == '/');
+  return len >= 2 &&
+         ((path[0] == '\\' && path[1] == '\\') ||
+          (path[0] == '/' && path[1] == '/'));
 #else
-  return len >= 1 && path[0] == '/';
+  return path[0] == '/';
 #endif
 }
 
@@ -60,7 +62,7 @@ static int f2e_ores_validate_common(const char *config, const char *json,
   size_t config_len;
   size_t json_len;
 
-  if (!config || !json || !f2e_ores_absolute_path(config)) {
+  if (!config || !json) {
     return F2E_ORES_INVALID_INPUT;
   }
 
@@ -71,6 +73,7 @@ static int f2e_ores_validate_common(const char *config, const char *json,
     return F2E_ORES_INPUT_TOO_LARGE;
   }
   if (config_len == 0 || json_len == 0 ||
+      !f2e_ores_absolute_path(config, config_len) ||
       !f2e_ores_json_envelope(json, first, last)) {
     return F2E_ORES_INVALID_INPUT;
   }
