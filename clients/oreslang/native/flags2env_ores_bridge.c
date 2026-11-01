@@ -21,7 +21,7 @@ static int f2e_ores_absolute_path(const char *path) {
   return (path[0] == '\\' && path[1] == '\\') ||
          (path[0] == '/' && path[1] == '/');
 #else
-  return path[0] == '/';
+  return len >= 1 && path[0] == '/';
 #endif
 }
 
