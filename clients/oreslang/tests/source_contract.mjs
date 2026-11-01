@@ -8,11 +8,11 @@ const header = await readFile(new URL("../native/flags2env_ores_bridge.h", impor
 for (const token of ["status_ok", "status_name", "parse_with", "coerce_with", "HostReply"]) {
   assert.match(source, new RegExp("\\b" + token + "\\b"));
 }
-assert.doesNotMatch(source, /\\bnull\\b/);
-assert.doesNotMatch(source, /\\basync\\b/);
-assert.doesNotMatch(source, /(?:^|\\s)[*&][A-Za-z_]/m);
-assert.match(scalar, /pub fnc main\\(\\): int/);
-assert.match(scalar, /return[\\s\\S]*- 1192;/);
+assert.doesNotMatch(source, /\bnull\b/);
+assert.doesNotMatch(source, /\basync\b/);
+assert.doesNotMatch(source, /(?:^|\s)[*&][A-Za-z_]/m);
+assert.match(scalar, /pub fnc main\(\): int/);
+assert.match(scalar, /return[\s\S]*- 1192;/);
 
 for (const [name, value] of [
   ["F2E_ORES_OK", 0],
