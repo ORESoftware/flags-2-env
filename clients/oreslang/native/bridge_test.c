@@ -30,11 +30,18 @@ static char *absolute_fixture(const char *relative) {
   size_t need;
   char *out;
   assert(getcwd(cwd, sizeof(cwd)) != NULL);
-  need = strlen(cwd) + 1 + strlen(relative) + 1;
-  assert(need <= F2E_ORES_MAX_PATH_BYTES + 1u);
-  out = (char *)malloc(need);
-  assert(out != NULL);
-  snprintf(out, need, "%s/%s", cwd, relative);
+  {
+    const size_t cwd_len = strlen(cwd);
+    const size_t relative_len = strlen(relative);
+    need = cwd_len + 1u + relative_len + 1u;
+    assert(need <= F2E_ORES_MAX_PATH_BYTES + 1u);
+    out = (char *)malloc(need);
+    assert(out != NULL);
+    memcpy(out, cwd, cwd_len);
+    out[cwd_len] = '/';
+    memcpy(out + cwd_len + 1u, relative, relative_len);
+    out[cwd_len + 1u + relative_len] = '\0';
+  }
   return out;
 #endif
 }
