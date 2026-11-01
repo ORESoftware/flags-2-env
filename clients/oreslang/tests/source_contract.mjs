@@ -5,7 +5,7 @@ const source = await readFile(new URL("../src/flags2env.ores", import.meta.url),
 const scalar = await readFile(new URL("./abi-status-scalar.ores", import.meta.url), "utf8");
 const header = await readFile(new URL("../native/flags2env_ores_bridge.h", import.meta.url), "utf8");
 
-for (const token of ["status_ok", "status_name", "parse_with", "coerce_with", "HostReply"]) {
+for (const token of ["status_ok", "status_name", "host_parse_blocking_with", "host_coerce_blocking_with", "HostReply"]) {
   assert.match(source, new RegExp("\\b" + token + "\\b"));
 }
 assert.doesNotMatch(source, /\bnull\b/);
