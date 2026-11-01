@@ -1,8 +1,6 @@
 # flags2env — Oreslang client (native bridge, experimental)
 
-This directory adds an ABI-stable host adapter for an Oreslang client. It is
-**not yet a verified Oreslang-language SDK**: Oreslang bindings and
-compiler-backed tests are still required before listing it as supported.
+This directory contains the Oreslang client source contract and an ABI-stable host adapter. The client is implemented, but **release support remains evidence-gated** until the backend PRs execute the same pinned fixture and the full String/Fnc host path is demonstrated where each backend claims it.
 
 ## Contract
 
