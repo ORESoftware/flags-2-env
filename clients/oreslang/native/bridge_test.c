@@ -26,15 +26,15 @@ static char *absolute_fixture(const char *relative) {
   (void)relative;
   return NULL;
 #else
-  char *cwd = getcwd(NULL, 0);
+  char cwd[F2E_ORES_MAX_PATH_BYTES + 1u];
   size_t need;
   char *out;
-  assert(cwd != NULL);
+  assert(getcwd(cwd, sizeof(cwd)) != NULL);
   need = strlen(cwd) + 1 + strlen(relative) + 1;
+  assert(need <= F2E_ORES_MAX_PATH_BYTES + 1u);
   out = (char *)malloc(need);
   assert(out != NULL);
   snprintf(out, need, "%s/%s", cwd, relative);
-  free(cwd);
   return out;
 #endif
 }
