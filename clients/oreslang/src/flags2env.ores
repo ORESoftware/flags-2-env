@@ -1,8 +1,10 @@
 // Host-neutral Oreslang client contract.
 //
-// The host callback must execute the native/host adapter outside actor carrier
-// threads and must copy any foreign bytes into Oreslang-owned String storage
-// before returning this value. No raw pointer is part of this public API.
+// The synchronous helpers below are HOST-BLOCKING-ONLY embedding primitives.
+// The runtime must move the entire call onto an admitted blocking host worker;
+// actor carriers and ordinary guest code must not invoke them directly. The
+// runtime must copy foreign bytes into Oreslang-owned String storage before
+// returning. No raw pointer is part of this public API.
 define module flags2env as
   pub define class HostReply as
     pub val int status;
@@ -23,7 +25,7 @@ define module flags2env as
     return "unknown";
   }
 
-  pub fnc parse_with(
+  pub fnc host_parse_blocking_with(
     Fnc<HostReply(String, String)> host_parse,
     String absolute_config_path,
     String argv_json
@@ -31,7 +33,7 @@ define module flags2env as
     return host_parse(absolute_config_path, argv_json);
   }
 
-  pub fnc coerce_with(
+  pub fnc host_coerce_blocking_with(
     Fnc<HostReply(String, String)> host_coerce,
     String absolute_config_path,
     String values_json
