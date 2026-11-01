@@ -1,5 +1,5 @@
 #include "flags2env_ores_bridge.h"
-#include "../../../src/parser.h"
+#include "parser.h"
 
 #include <stddef.h>
 
