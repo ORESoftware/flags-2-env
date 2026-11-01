@@ -2,6 +2,7 @@
 #include "parser.h"
 
 #include <assert.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -70,5 +71,6 @@ int main(void) {
   f2e_ores_free(&r);
   assert(free_calls == 2u);
 
+  puts("ORES-FLAGS2ENV-BRIDGE-FAULT-PASS|cases=4");
   return 0;
 }
