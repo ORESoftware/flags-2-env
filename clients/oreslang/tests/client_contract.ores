@@ -1,5 +1,5 @@
 import class HostReply from "../src/flags2env";
-import fnc status_ok, status_name, parse_with, coerce_with from "../src/flags2env";
+import fnc status_ok, status_name, host_parse_blocking_with, host_coerce_blocking_with from "../src/flags2env";
 
 fnc fake_parse(String path, String argv_json): HostReply {
   if path == "/trusted/app/.cli-flags.toml" && argv_json == "[\"app\"]"; do
@@ -26,11 +26,11 @@ pub routine main(): int {
   if status_name(5) != "released"; do return 8; fi
   if status_name(99) != "unknown"; do return 9; fi
 
-  val HostReply parsed = parse_with(fake_parse, "/trusted/app/.cli-flags.toml", "[\"app\"]");
+  val HostReply parsed = host_parse_blocking_with(fake_parse, "/trusted/app/.cli-flags.toml", "[\"app\"]");
   if parsed.status != 0; do return 10; fi
   if parsed.json != "{\"PORT\":\"3000\"}"; do return 11; fi
 
-  val HostReply coerced = coerce_with(fake_coerce, "/trusted/app/.cli-flags.toml", "{\"PORT\":\"3000\"}");
+  val HostReply coerced = host_coerce_blocking_with(fake_coerce, "/trusted/app/.cli-flags.toml", "{\"PORT\":\"3000\"}");
   if coerced.status != 0; do return 12; fi
   if coerced.json != "{\"ok\":true,\"value\":{\"PORT\":3000}}"; do return 13; fi
   return 0;
